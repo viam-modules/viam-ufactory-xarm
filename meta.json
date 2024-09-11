@@ -2,7 +2,7 @@
   "$schema": "https://dl.viam.dev/module.schema.json",
   "module_id": "viam:ufactory",
   "visibility": "private",
-  "url": "https://github.com/viam-modules/viam-UFactory-xArm",
+  "url": "https://github.com/viam-modules/viam-ufactory-xarm",
   "description": "Viam Go Module for UFactory Arms and Grippers",
   "models": [
     {
@@ -18,5 +18,5 @@
       "model": "viam:ufactory:lite6"
     }
   ],
-  "entrypoint": ""
+  "entrypoint": "foo"
 }
