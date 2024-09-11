@@ -1,0 +1,37 @@
+
+name: Pull Request Update
+
+concurrency: 
+  group: pullrequest-${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request_target:
+    branches: [ 'main' ]
+    types: [ 'labeled' ]
+
+# To test workflow updates you need to work in a branch directly on viam-soleng/viam-universal-robotics
+# and tag your working branch instead of @main in any viam-soleng/viam-universal-robotics "uses" below.
+# Don't forget to tag back to @main before merge.
+
+jobs:
+  test:
+    if: github.event.label.name == 'testing' 
+    uses: viam-soleng/viam-universal-robotics/.github/workflows/test.yml@main
+
+  slack-workflow-status:
+    if: ${{ always() }} 
+    name: Post Workflow Status To Slack
+    needs:
+      - test
+    runs-on: ubuntu-latest
+    permissions:
+      actions: 'read'
+    steps:
+      - name: Slack Workflow Notification
+        uses: Gamesight/slack-workflow-status@master
+        with:
+          repo_token: ${{secrets.GITHUB_TOKEN}}
+          slack_webhook_url: ${{secrets.SLACK_WEBHOOK_URL}}
+          channel: '#team-soleng-module-support'
+          name: 'Workflow Status (viam-universal-robotics)'

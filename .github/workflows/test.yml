@@ -1,0 +1,88 @@
+name: Test
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build_and_test:
+    name: Build and Test
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: [ubuntu-latest]
+            image: ghcr.io/viamrobotics/rdk-devenv:amd64
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    env:
+      os: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'macos' || 'unknown'}}
+      GOOS: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'darwin' || 'unknown'}}
+      GOARCH: ${{ matrix.arch }}
+    timeout-minutes: 45
+    steps:
+    # Can't directly comment without token having full read/write access
+    # appimage-comment.yml will trigger separately and post the actual comments
+
+    - name: Set PR Number variable
+      run: |
+        echo "PR_NUMBER=${{ github.event.pull_request.number }}" >> pr.env
+
+    - name: Upload PR variables
+      uses: actions/upload-artifact@v3
+      with:
+        name: pr-variables
+        path: |
+         pr.env
+        retention-days: 1
+
+    - name: Check out main branch code
+      if: github.event_name != 'pull_request_target'
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 2
+
+    - name: Check out PR branch code
+      if: github.event_name == 'pull_request_target'
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 2
+
+    - name: Clean and Fix Permissions
+      run: |
+        chown testbot:testbot -R .
+        sudo -Hu testbot bash -lc 'make clean'
+
+    - name: make setup
+      run: |
+        sudo -u testbot bash -lc 'make setup'
+    
+    - name: make build
+      run: |
+        sudo -u testbot bash -lc 'make build'
+
+    - name: make test
+      run: |
+        sudo -u testbot bash -lc 'make test'
+
+    - name: Verify no uncommitted changes from make lint
+      run: |
+        git init
+        git add .
+        chown -R testbot:testbot .
+        sudo -u testbot bash -lc 'make lint'
+        GEN_DIFF=$(git status -s --ignore-submodules)
+
+        if [ -n "$GEN_DIFF" ]; then
+            echo '"make lint" resulted in changes not in git' 1>&2
+            git status
+            exit 1
+        fi
+
+    - name: Remove 'testing' label
+      if: ${{ always() }} && github.event.label.name == 'testing' 
+      uses: actions-ecosystem/action-remove-labels@v1
+      with:
+        labels: testing
