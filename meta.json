@@ -1,0 +1,22 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:ufactory",
+  "visibility": "private",
+  "url": "https://github.com/viam-modules/viam-UFactory-xArm",
+  "description": "Viam Go Module for UFactory Arms and Grippers",
+  "models": [
+    {
+      "api": "rdk:component:arm",
+      "model": "viam:ufactory:xArm6"
+    },
+    {
+      "api": "rdk:component:arm",
+      "model": "viam:ufactory:xArm7"
+    },
+    {
+      "api": "rdk:component:arm",
+      "model": "viam:ufactory:lite6"
+    }
+  ],
+  "entrypoint": ""
+}
