@@ -95,4 +95,4 @@ The below documents will be useful for developers looking to contribute to this 
 
 ## Note on xArm Studio
 
-The arm itself runs xArm Studio. A developer should be able to use their web browser to go to the arm's IP address, port 18333.
+The arm itself runs xArm Studio. A developer should be able to use it through their web browser by going to the arm's IP address, port 18333.
