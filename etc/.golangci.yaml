@@ -9,7 +9,7 @@ linters:
   enable-all: true
   disable:
     - asasalint
-    - mnd
+    # - mnd
     - containedctx
     - contextcheck
     - cyclop
