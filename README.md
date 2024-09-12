@@ -93,3 +93,6 @@ The below documents will be useful for developers looking to contribute to this 
 * [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
 * [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
 
+## Note on xArm Studio
+
+The arm itself runs xArm Studio. A developer should be able to use their web browser to go to the arm's IP address, port 18333.
