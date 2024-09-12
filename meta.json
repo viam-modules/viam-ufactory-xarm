@@ -18,5 +18,10 @@
       "model": "viam:ufactory:lite6"
     }
   ],
-  "entrypoint": "xarm-module.AppImage"
+  "build":{
+    "build": "make module",
+    "arch" : ["linux/amd64", "linux/arm64", "darwin/arm64"],
+    "path" : "bin/module.tar.gz"
+  },
+  "entrypoint": "bin/viam-xarm"
 }

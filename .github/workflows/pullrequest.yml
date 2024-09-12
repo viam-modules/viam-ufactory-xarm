@@ -1,0 +1,13 @@
+name: Pull Request Update
+
+concurrency: 
+  group: pullrequest-${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request_target:
+    branches: [ 'main' ]
+    
+jobs:
+  test:
+    uses: viam-modules/viam-ufactory-xarm/.github/workflows/test.yml@main
