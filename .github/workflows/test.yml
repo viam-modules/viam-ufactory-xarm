@@ -60,10 +60,6 @@ jobs:
         chown testbot:testbot -R .
         sudo -Hu testbot bash -lc 'make clean'
 
-    - name: make setup
-      run: |
-        sudo -u testbot bash -lc 'make setup'
-
     - name: make test
       run: |
         sudo -u testbot bash -lc 'make test'
