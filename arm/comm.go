@@ -9,12 +9,11 @@ import (
 
 	"go.uber.org/multierr"
 	pb "go.viam.com/api/component/arm/v1"
-	"go.viam.com/utils"
-
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	rutils "go.viam.com/rdk/utils"
+	"go.viam.com/utils"
 )
 
 var servoErrorMap = map[byte]string{

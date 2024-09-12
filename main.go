@@ -1,3 +1,4 @@
+// Package main implements an xarm module
 package main
 
 import (

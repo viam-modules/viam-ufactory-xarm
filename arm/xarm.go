@@ -1,3 +1,4 @@
+// Package arm defines the arm that a robot uses to manipulate objects.
 package arm
 
 import (
@@ -40,9 +41,14 @@ var xArm7modeljson []byte
 //go:embed lite6_kinematics.json
 var lite6modeljson []byte
 
-var XArm6Model = resource.NewModel("viam", "ufactory", modelName6DOF)
-var XArm7Model = resource.NewModel("viam", "ufactory", modelName7DOF)
-var XArmLite6Model = resource.NewModel("viam", "ufactory", modelNameLite)
+var (
+	// XArm6Model defines the resource.Model for the xArm6.
+	XArm6Model = resource.NewModel("viam", "ufactory", modelName6DOF)
+	// XArm7Model defines the resource.Model for the xArm7.
+	XArm7Model = resource.NewModel("viam", "ufactory", modelName7DOF)
+	// XArmLite6Model defines the resource.Model for the lite6.
+	XArmLite6Model = resource.NewModel("viam", "ufactory", modelNameLite)
+)
 
 type xArm struct {
 	resource.Named
