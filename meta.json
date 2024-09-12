@@ -18,5 +18,5 @@
       "model": "viam:ufactory:lite6"
     }
   ],
-  "entrypoint": "foo"
+  "entrypoint": "xarm-module.AppImage"
 }

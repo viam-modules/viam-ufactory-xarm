@@ -1,0 +1,19 @@
+name: Build and Publish RC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+'
+
+# To test workflow updates you need to work in a branch directly on viam-modules/viam-ufactory-xarm
+# and tag your working branch instead of @main in any viam-modules/viam-ufactory-xarm "uses" below.
+# Don't forget to tag back to @main before merge.
+
+jobs:
+  appimage:
+    uses: viam-modules/viam-ufactory-xarm/.github/workflows/appimage.yml@main
+    with:
+      release_type: 'rc'
