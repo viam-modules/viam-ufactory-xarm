@@ -1,0 +1,36 @@
+
+name: Pull Request Close
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: 
+  group: pullrequest-${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request_target:
+    branches: [ 'main' ]
+    types: [ 'closed' ]
+
+jobs:
+  appimage_clean:
+    name: Remove PR AppImages
+    runs-on: ubuntu-latest
+
+    steps:
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v1'
+      with:
+        create_credentials_file: true
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+
+    - name: Delete Files
+      run: |
+        gsutil rm "gs://packages.viam.com/apps/xarm-module/xarm-module-pr-${{ github.event.pull_request.number }}-*" || true
