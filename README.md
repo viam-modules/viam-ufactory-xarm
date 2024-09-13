@@ -91,6 +91,7 @@ Edit the frame information as applicable.
 ## UFactory xArm Resources
 The below documents will be useful for developers looking to contribute to this repository.
 * [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
+* [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
 * [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
 
 ## Note on xArm Studio
