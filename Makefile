@@ -31,3 +31,6 @@ lint: gofmt tool-install
 update-rdk:
 	go get go.viam.com/rdk@latest
 	go mod tidy
+
+test: tool-install
+	go test -v -race -failfast ./...
