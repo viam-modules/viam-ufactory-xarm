@@ -88,6 +88,53 @@ Then, for example, if you have a gripper attached to the arm's end effector you 
 
 Edit the frame information as applicable.
 
+## Using DoCommand
+Below we provide examples of how a user may use Golang to use the `DoCommand`.
+
+If you want to change the speed the arm operates:
+```
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_speed": 50})
+```
+
+If you want to change the acceleration the arm operates at: 
+```
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_acceleration": 100})
+```
+
+If you want to change both the speed and acceleration:
+```
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "set_speed":        50,
+    "set_acceleration": 100,
+})
+```
+
+If you want to get the current joint torques of the servo for each joint:
+```
+load, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"load": ""})
+```
+
+If you are using an UFactory gripper, you may use the `DoCommand` to manipulate it.
+To fully open the gripper:
+```
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "setup_gripper": true,
+    "move_gripper":  850,
+})
+```
+> [!NOTE]
+> `"setup_gripper": true` must be included in your request if you intend to manipulate the gripper
+
+To close the gripper:
+```
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "setup_gripper": true,
+    "move_gripper":  0,
+})
+```
+
+
+
 ## UFactory xArm Resources
 The below documents will be useful for developers looking to contribute to this repository.
 * [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
