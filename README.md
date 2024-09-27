@@ -92,17 +92,17 @@ Edit the frame information as applicable.
 Below we provide examples of how a user may use Golang to use the `DoCommand`.
 
 If you want to change the speed the arm operates:
-```
+```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_speed": 50})
 ```
 
 If you want to change the acceleration the arm operates at: 
-```
+```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_acceleration": 100})
 ```
 
 If you want to change both the speed and acceleration:
-```
+```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "set_speed":        50,
     "set_acceleration": 100,
@@ -110,13 +110,13 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 ```
 
 If you want to get the current joint torques of the servo for each joint:
-```
+```go
 load, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"load": ""})
 ```
 
 If you are using an UFactory gripper, you may use the `DoCommand` to manipulate it.
 To fully open the gripper:
-```
+```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "setup_gripper": true,
     "move_gripper":  850,
@@ -132,8 +132,6 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "move_gripper":  0,
 })
 ```
-
-
 
 ## UFactory xArm Resources
 The below documents will be useful for developers looking to contribute to this repository.
