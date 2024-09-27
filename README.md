@@ -126,7 +126,7 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 > `"setup_gripper": true` must be included in your request if you intend to manipulate the gripper
 
 To close the gripper:
-```
+```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "setup_gripper": true,
     "move_gripper":  0,
