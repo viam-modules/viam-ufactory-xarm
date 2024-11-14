@@ -13,7 +13,6 @@ const moduleName = "UFactory xArm Go Module"
 
 func main() {
 	module.ModularMain(
-		moduleName,
 		resource.APIModel{API: arm.API, Model: xarm.XArm6Model},
 		resource.APIModel{API: arm.API, Model: xarm.XArm7Model},
 		resource.APIModel{API: arm.API, Model: xarm.XArmLite6Model},
