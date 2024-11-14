@@ -2,14 +2,11 @@
 package main
 
 import (
-	xarm "viam-xarm/arm"
-
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/module"
 	"go.viam.com/rdk/resource"
+	xarm "viam-xarm/arm"
 )
-
-const moduleName = "UFactory xArm Go Module"
 
 func main() {
 	module.ModularMain(

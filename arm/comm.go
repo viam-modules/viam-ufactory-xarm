@@ -654,6 +654,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 
 func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {
 	c := x.newCmd(regMap["CurrentTorque"])
+	// ~ c.params = append(c.params, 0x01)
 	loadData, err := x.send(ctx, c, true)
 	var loads []float64
 	for i := 0; i < x.dof; i++ {
