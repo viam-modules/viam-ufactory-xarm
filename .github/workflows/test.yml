@@ -6,20 +6,9 @@ on:
 
 jobs:
   build_and_test:
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            runner: [ubuntu-latest]
-            # image: ghcr.io/viamrobotics/rdk-devenv:amd64
-    runs-on: ${{ matrix.runner }}
-    # env:
-    #   os: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'macos' || 'unknown'}}
-    #   GOOS: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'darwin' || 'unknown'}}
-    #   GOARCH: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-
     - name: Check out main branch code
       if: github.event_name != 'pull_request_target'
       uses: actions/checkout@v3
@@ -33,10 +22,6 @@ jobs:
     - uses: actions/setup-go@v5
       with:
         go-version-file: go.mod
-
-    # - name: apt update
-    #   run: |
-    #     apt-get update
 
     - name: Verify no uncommitted changes from make lint
       run: |
