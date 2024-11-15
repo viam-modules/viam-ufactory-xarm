@@ -11,12 +11,12 @@ jobs:
         include:
           - arch: amd64
             runner: [ubuntu-latest]
-            image: ghcr.io/viamrobotics/rdk-devenv:amd64
+            # image: ghcr.io/viamrobotics/rdk-devenv:amd64
     runs-on: ${{ matrix.runner }}
-    env:
-      os: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'macos' || 'unknown'}}
-      GOOS: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'darwin' || 'unknown'}}
-      GOARCH: ${{ matrix.arch }}
+    # env:
+    #   os: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'macos' || 'unknown'}}
+    #   GOOS: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'darwin' || 'unknown'}}
+    #   GOARCH: ${{ matrix.arch }}
     timeout-minutes: 45
     steps:
 
