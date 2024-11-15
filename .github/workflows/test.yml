@@ -34,9 +34,9 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: apt update
-      run: |
-        apt-get update
+    # - name: apt update
+    #   run: |
+    #     apt-get update
 
     - name: Verify no uncommitted changes from make lint
       run: |
