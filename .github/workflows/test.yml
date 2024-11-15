@@ -42,8 +42,7 @@ jobs:
       run: |
         git init
         git add .
-        chown -R testbot:testbot .
-        sudo -u testbot bash -lc 'make lint'
+        make lint
 
         if [ -n "$GEN_DIFF" ]; then
             echo '"make lint" resulted in changes not in git' 1>&2
@@ -53,8 +52,8 @@ jobs:
     
     - name: run tests
       run: |
-        sudo -u testbot bash -lc 'make test'
+        make test
 
     - name: make build
       run: |
-        sudo -u testbot bash -lc 'make build'
+        make build
