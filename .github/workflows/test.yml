@@ -13,8 +13,6 @@ jobs:
             runner: [ubuntu-latest]
             image: ghcr.io/viamrobotics/rdk-devenv:amd64
     runs-on: ${{ matrix.runner }}
-    container:
-      image: ${{ matrix.image }}
     env:
       os: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'macos' || 'unknown'}}
       GOOS: ${{contains(matrix.runner, 'ubuntu') && 'linux' || contains(matrix.runner, 'macos') && 'darwin' || 'unknown'}}
@@ -31,6 +29,10 @@ jobs:
       uses: actions/checkout@v3
       with:
         ref: ${{ github.event.pull_request.head.sha }}
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
 
     - name: apt update
       run: |
