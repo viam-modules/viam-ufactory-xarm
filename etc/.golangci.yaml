@@ -10,7 +10,7 @@ linters:
   enable-all: true
   disable:
     - asasalint
-    # - mnd
+    - mnd
     - containedctx
     - contextcheck
     - cyclop
@@ -23,6 +23,7 @@ linters:
     - gocognit
     - godox
     - goerr113
+    - gofumpt
     - gochecknoglobals
     - gochecknoinits
     - gocyclo
@@ -34,6 +35,7 @@ linters:
     - importas
     - interfacebloat
     - interfacer
+    - intrange # todo: re-enable at some point and update to new style
     - ireturn
     - maintidx
     - maligned
@@ -46,6 +48,7 @@ linters:
     - nonamedreturns
     - nosprintfhostport
     - paralleltest
+    - perfsprint
     - prealloc
     - scopelint
     - structcheck

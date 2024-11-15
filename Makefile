@@ -26,7 +26,7 @@ gofmt:
 lint: export PATH := $(PWD)/$(TOOL_BIN):$(PATH)
 lint: tool-install
 	go mod tidy
-	golangci-lint run
+	golangci-lint run -c etc/.golangci.yaml
 
 update-rdk:
 	go get go.viam.com/rdk@latest

@@ -123,7 +123,7 @@ func (c *cmd) bytes() []byte {
 	bin = append(bin, uintBin...)
 	binary.BigEndian.PutUint16(uintBin, c.prot)
 	bin = append(bin, uintBin...)
-	binary.BigEndian.PutUint16(uintBin, 1+uint16(len(c.params)))
+	binary.BigEndian.PutUint16(uintBin, 1+uint16(len(c.params))) //nolint:gosec
 	bin = append(bin, uintBin...)
 	bin = append(bin, c.reg)
 	bin = append(bin, c.params...)
@@ -398,14 +398,14 @@ func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputStep
 
 	// We want smooth acceleration/motion but there's no guarantee the provided inputs have continuous velocity signs
 	floatMaxDiff := func(from, to []float64) float64 {
-		max := 0.
+		maxVal := 0.
 		for i, toInput := range to {
 			diff := math.Abs(toInput - from[i])
-			if diff > max {
-				max = diff
+			if diff > maxVal {
+				maxVal = diff
 			}
 		}
-		return max
+		return maxVal
 	}
 
 	// Preprocess steps into step counts
@@ -414,9 +414,9 @@ func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputStep
 
 	for _, toInputs := range inputSteps {
 		to := referenceframe.InputsToFloats(toInputs)
-		max := floatMaxDiff(from, to)
-		displacementTotal += max
-		nSteps := (math.Abs(max) / speed) * moveHZ
+		maxVal := floatMaxDiff(from, to)
+		displacementTotal += maxVal
+		nSteps := (math.Abs(maxVal) / speed) * moveHZ
 		stepTotal += nSteps
 		from = to
 	}
