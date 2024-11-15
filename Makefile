@@ -23,7 +23,8 @@ tool-install:
 gofmt:
 	gofmt -w -s .
 
-lint:
+lint: export PATH := $(PWD)/$(TOOL_BIN):$(PATH)
+lint: tool-install
 	go mod tidy
 	golangci-lint run
 
