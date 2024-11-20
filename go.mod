@@ -1,5 +1,6 @@
 module github.com/viam-modules/viam-ufactory-xarm
 
+
 go 1.23
 
 toolchain go1.23.3
