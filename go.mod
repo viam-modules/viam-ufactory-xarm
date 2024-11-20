@@ -1,4 +1,5 @@
-module viam-ufactory-xarm
+module github.com/viam-modules/viam-ufactory-xarm
+
 
 go 1.23
 

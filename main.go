@@ -2,10 +2,10 @@
 package main
 
 import (
+	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/module"
 	"go.viam.com/rdk/resource"
-	xarm "viam-ufactory-xarm/arm"
 )
 
 func main() {
