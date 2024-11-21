@@ -20,10 +20,6 @@ import (
 )
 
 const (
-	modelName6DOF = "xArm6" // ModelName6DOF is the name of a UFactory xArm 6
-	modelName7DOF = "xArm7" // ModelName7DOF is the name of a UFactory xArm 7
-	modelNameLite = "lite6" // ModelNameLite is the name of a UFactory Lite 6
-
 	defaultSpeed  = 50.  // degrees per second
 	defaultAccel  = 100. // degrees per second per second
 	defaultPort   = "502"
@@ -41,13 +37,22 @@ var xArm7modeljson []byte
 //go:embed lite6_kinematics.json
 var lite6modeljson []byte
 
+const (
+	// ModelName6DOF is the name of a UFactory xArm 6.
+	ModelName6DOF = "xArm6"
+	// ModelName7DOF is the name of a UFactory xArm 7.
+	ModelName7DOF = "xArm7"
+	// ModelNameLite is the name of a UFactory Lite 6.
+	ModelNameLite = "lite6"
+)
+
 var (
 	// XArm6Model defines the resource.Model for the xArm6.
-	XArm6Model = resource.NewModel("viam", "ufactory", modelName6DOF)
+	XArm6Model = resource.NewModel("viam", "ufactory", ModelName6DOF)
 	// XArm7Model defines the resource.Model for the xArm7.
-	XArm7Model = resource.NewModel("viam", "ufactory", modelName7DOF)
+	XArm7Model = resource.NewModel("viam", "ufactory", ModelName7DOF)
 	// XArmLite6Model defines the resource.Model for the lite6.
-	XArmLite6Model = resource.NewModel("viam", "ufactory", modelNameLite)
+	XArmLite6Model = resource.NewModel("viam", "ufactory", ModelNameLite)
 )
 
 type xArm struct {
@@ -109,11 +114,11 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
 func MakeModelFrame(name, modelName string) (referenceframe.Model, error) {
 	switch modelName {
-	case modelName6DOF:
+	case ModelName6DOF:
 		return referenceframe.UnmarshalModelJSON(xArm6modeljson, name)
-	case modelNameLite:
+	case ModelNameLite:
 		return referenceframe.UnmarshalModelJSON(lite6modeljson, name)
-	case modelName7DOF:
+	case ModelName7DOF:
 		return referenceframe.UnmarshalModelJSON(xArm7modeljson, name)
 	default:
 		return nil, fmt.Errorf("no kinematics information for xarm of model %s", modelName)
