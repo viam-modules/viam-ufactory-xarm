@@ -236,16 +236,10 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 	resp := map[string]interface{}{}
 	validCommand := false
 
-	if _, ok := cmd["setup_gripper"]; ok {
-		if err := x.enableGripper(ctx); err != nil {
-			return nil, err
-		}
-		if err := x.setGripperMode(ctx, false); err != nil {
-			return nil, err
-		}
-		validCommand = true
-	}
 	if val, ok := cmd["move_gripper"]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
 		position, ok := val.(float64)
 		if !ok || position < -10 || position > 850 {
 			return nil, fmt.Errorf("must move gripper to an int between 0 and 840 %v", val)
@@ -256,6 +250,9 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		validCommand = true
 	}
 	if _, ok := cmd["load"]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
 		loadInformation, err := x.getLoad(ctx)
 		if err != nil {
 			return nil, err

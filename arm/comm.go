@@ -606,6 +606,16 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 	return x.opMgr.OpRunning(), nil
 }
 
+func (x *xArm) setupGripper(ctx context.Context) error {
+	if err := x.enableGripper(ctx); err != nil {
+		return err
+	}
+	if err := x.setGripperMode(ctx, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (x *xArm) enableGripper(ctx context.Context) error {
 	c := x.newCmd(regMap["GripperControl"])
 	c.params = append(c.params, 0x09)
