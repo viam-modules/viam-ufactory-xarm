@@ -19,7 +19,7 @@ On the new component panel, copy and paste the following attribute template into
 ```json
 {
   "host": "0.0.0.0",
-  "speed_degs_per_sec": 30,
+  "speed_degs_per_sec": 30
 }
 ```
 
@@ -32,14 +32,17 @@ Edit the attributes as applicable.
 
 The following attributes are available:
 
-| Name | Type | Inclusion | Description |
-| ---- | ---- | --------- | ----------- |
-| `host` | string | **Required** | The IP address of the xArm.  |
-| `speed_degs_per_sec` | float64 | **Optional** | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second.  |
+| Name                                | Type    | Inclusion    | Description                                                                                                      |
+| ----------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `host`                              | string  | **Required** | The IP address of the xArm.                                                                                      |
+| `port`                              | string  | **Optional** | The port at which the IP address accesses the xArm. The default is 502.                                          |
+| `speed_degs_per_sec`                | float32 | **Optional** | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
+| `acceleration_degs_per_sec_per_sec` | float32 | **Optional** | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
 
 ## Using within a Frame System
 
 If you are using your xArm in conjuction with other components it might be useful to add your arm to the frame system. You may do so by pasting the following in your config:
+
 ```json
 "frame": {
     "parent": "world",
@@ -50,58 +53,62 @@ Then, for example, if you have a gripper attached to the arm's end effector you 
 
 ```json
 {
-    "name": "gripper",
-    "namespace": "rdk",
-    "type": "gripper",
-    "model": "fake",
-    "attributes": {},
-    "frame": {
-        "parent": "name of your xArm",
-        "translation": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-        },
-        "geometry": {
-            "type": "box",
-            "x": 110,
-            "y": 160,
-            "z": 240,
-            "translation": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-            }
-        },
-        "orientation": {
-            "type": "ov_degrees",
-            "value": {
-                "x": 0,
-                "y": 0,
-                "z": 1,
-                "th": 0
-            }
-        }
+  "name": "gripper",
+  "namespace": "rdk",
+  "type": "gripper",
+  "model": "fake",
+  "attributes": {},
+  "frame": {
+    "parent": "name of your xArm",
+    "translation": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "geometry": {
+      "type": "box",
+      "x": 110,
+      "y": 160,
+      "z": 240,
+      "translation": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    },
+    "orientation": {
+      "type": "ov_degrees",
+      "value": {
+        "x": 0,
+        "y": 0,
+        "z": 1,
+        "th": 0
+      }
     }
+  }
 }
 ```
 
 Edit the frame information as applicable.
 
 ## Using DoCommand
+
 Below we provide examples of how a user may use Golang to use the `DoCommand`.
 
 If you want to change the speed the arm operates:
+
 ```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_speed": 50})
 ```
 
-If you want to change the acceleration the arm operates at: 
+If you want to change the acceleration the arm operates at:
+
 ```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_acceleration": 100})
 ```
 
 If you want to change both the speed and acceleration:
+
 ```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "set_speed":        50,
@@ -110,22 +117,25 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 ```
 
 If you want to get the current joint torques of the servo for each joint:
+
 ```go
 load, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"load": ""})
 ```
 
 If you are using an UFactory gripper, you may use the `DoCommand` to manipulate it.
 To fully open the gripper:
+
 ```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "setup_gripper": true,
     "move_gripper":  850,
 })
 ```
-> [!NOTE]
-> `"setup_gripper": true` must be included in your request if you intend to manipulate the gripper
+
+> [!NOTE] > `"setup_gripper": true` must be included in your request if you intend to manipulate the gripper
 
 To close the gripper:
+
 ```go
 xArmComponent.DoCommand(context.Background(), map[string]interface{}{
     "setup_gripper": true,
@@ -134,10 +144,12 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 ```
 
 ## UFactory xArm Resources
+
 The below documents will be useful for developers looking to contribute to this repository.
-* [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
-* [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
-* [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
+
+- [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
+- [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
+- [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
 
 ## Note on xArm Studio
 
