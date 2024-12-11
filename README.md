@@ -1,6 +1,6 @@
 # Viam UFactory xArm Module
 
-This is a [Viam module](https://docs.viam.com/how-tos/create-module/) for [UFactory's](https://www.ufactory.cc/) family of collaborative arms.
+This is a [Viam module](https://docs.viam.com/how-tos/create-module/) for [UFactory's](https://www.ufactory.cc/) X-ARM 6 and X-ARM 7 collaborative arms.
 
 This viam-xarm module is particularly useful in applications that require an xArm to be operated in conjunction with other resources (such as cameras, sensors, actuators, CV) offered by the [Viam Platform](https://www.viam.com/) and/or separate through your own code.
 
@@ -12,7 +12,7 @@ This viam-xarm module is particularly useful in applications that require an xAr
 > [!NOTE]
 > Before configuring your xArm, you must [add a machine](https://docs.viam.com/fleet/machines/#add-a-new-machine).
 
-Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](https://app.viam.com/). Click the **+** icon next to your machine part in the left-hand menu and select **Component**. Select the `arm` type, then search for and select the `arm / viam-UFactory-xarm` model. Click **Add module**, then enter a name or use the suggested name for your arm and click **Create**.
+Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](https://app.viam.com/). Click the **+** icon next to your machine part in the left-hand menu and select **Component**. Select the `arm` type, then search for and select the `arm / ufactory:xArm6` or `arm / ufactory:xArm7` model, depending on your hardware model. Click **Add module**, then enter a name or use the suggested name for your arm and click **Create**.
 
 On the new component panel, copy and paste the following attribute template into your arm’s attributes field:
 
@@ -35,9 +35,9 @@ The following attributes are available:
 | Name                                | Type    | Inclusion    | Description                                                                                                      |
 | ----------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
 | `host`                              | string  | **Required** | The IP address of the xArm.                                                                                      |
-| `port`                              | string  | **Optional** | The port at which the IP address accesses the xArm. The default is 502.                                          |
-| `speed_degs_per_sec`                | float32 | **Optional** | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
-| `acceleration_degs_per_sec_per_sec` | float32 | **Optional** | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
+| `port`                              | string  | Optional     | The port at which the IP address accesses the xArm. The default is 502.                                          |
+| `speed_degs_per_sec`                | float32 | Optional     | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
+| `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
 
 ## Using within a Frame System
 
@@ -45,7 +45,7 @@ If you are using your xArm in conjuction with other components it might be usefu
 
 ```json
 "frame": {
-    "parent": "world",
+    "parent": "world"
 }
 ```
 
