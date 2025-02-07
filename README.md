@@ -25,9 +25,6 @@ On the new component panel, copy and paste the following attribute template into
 
 Edit the attributes as applicable.
 
-> [!NOTE]
-> For more information, see [Configure a Machine](https://docs.viam.com/build/configure/).
-
 ### Attributes
 
 The following attributes are available:
