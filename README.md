@@ -14,7 +14,7 @@ Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](htt
 
 ## Configure your xArm
 
-On the new component panel, copy and paste the following attribute template into your arm’s attributes field:
+Copy and paste the following attributes into your JSON configuration:
 
 ```json
 {

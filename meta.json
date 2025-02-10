@@ -9,19 +9,19 @@
       "api": "rdk:component:arm",
       "model": "viam:ufactory:xArm6",
       "markdown_link": "README.md#configure-your-xarm",
-      "short_description": "Component driver for the ufactory xArm6"
+      "short_description": "arm component driver for the ufactory xArm6"
     },
     {
       "api": "rdk:component:arm",
       "model": "viam:ufactory:xArm7",
       "markdown_link": "README.md#configure-your-xarm",
-      "short_description": "Component driver for the ufactory xArm7"
+      "short_description": "arm component driver for the ufactory xArm7"
     },
     {
       "api": "rdk:component:arm",
       "model": "viam:ufactory:lite6",
       "markdown_link": "README.md#configure-your-xarm",
-      "short_description": "Component driver for the ufactory lite6"
+      "short_description": "arm component driver for the ufactory lite6"
     }
   ],
   "build":{
