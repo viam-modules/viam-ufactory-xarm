@@ -1,13 +1,14 @@
+// Package main for testing xarm stuff
 package main
 
 import (
 	"context"
 	"flag"
 
+	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
-
-	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
+	"go.viam.com/utils"
 )
 
 func main() {
@@ -54,7 +55,9 @@ func realMain() error {
 	if err != nil {
 		return err
 	}
-	defer a.Close(ctx)
+	defer utils.UncheckedErrorFunc(func() error {
+		return a.Close(ctx)
+	})
 
 	pos, err := a.JointPositions(ctx, nil)
 	if err != nil {

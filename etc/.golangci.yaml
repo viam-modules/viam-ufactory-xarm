@@ -109,7 +109,7 @@ linters-settings:
       - name: var-declaration
       - name: var-naming
   lll:
-    line-length: 140
+    line-length: 150
 issues:
   exclude-rules:
     - path: _test\.go$

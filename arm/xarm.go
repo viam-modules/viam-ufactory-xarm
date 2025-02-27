@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -144,13 +145,13 @@ func (cfg *Config) host() string {
 }
 
 func (cfg *Config) maxBadJoint() int {
-	max := -1
+	maxJoint := -1
 	for _, j := range cfg.BadJoints {
-		if j > max {
-			max = j
+		if j > maxJoint {
+			maxJoint = j
 		}
 	}
-	return max
+	return maxJoint
 }
 
 func getModelJSON(modelName string) ([]byte, error) {
@@ -204,6 +205,7 @@ func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, m
 	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName)
 }
 
+// NewXArm creates a new x arm connection.
 func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger logging.Logger, modelName string) (arm.Arm, error) {
 	var d net.Dialer
 	newConn, err := d.DialContext(ctx, "tcp", newConf.host())
@@ -234,8 +236,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		x.dof = newConf.maxBadJoint() + 1
 		current, err = x.CurrentInputs(ctx)
 		if err != nil {
-			x.Close(ctx)
-			return nil, err
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 
