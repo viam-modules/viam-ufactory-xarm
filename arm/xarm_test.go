@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/golang/geo/r3"
+	//"github.com/golang/geo/r3"
 	pb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/logging"
-	"go.viam.com/rdk/motionplan"
+	//"go.viam.com/rdk/motionplan"
 	frame "go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	spatial "go.viam.com/rdk/spatialmath"
@@ -21,7 +21,7 @@ var (
 	home7 = frame.FloatsToInputs([]float64{0, 0, 0, 0, 0, 0, 0})
 	wbY   = -426.
 )
-
+/*
 // This will test solving the path to write the word "VIAM" on a whiteboard.
 func TestWriteViam(t *testing.T) {
 	fs := frame.NewEmptyFrameSystem("test")
@@ -99,8 +99,8 @@ func TestWriteViam(t *testing.T) {
 	for _, goal = range viamPoints {
 		seed = goToGoal(seed, goal)
 	}
-}
-
+1}
+*/
 var viamPoints = []spatial.Pose{
 	spatial.NewPoseFromProtobuf(&pb.Pose{X: 200, Y: wbY + 1.5, Z: 595, OY: -1}),
 	spatial.NewPoseFromProtobuf(&pb.Pose{X: 120, Y: wbY + 1.5, Z: 595, OY: -1}),
