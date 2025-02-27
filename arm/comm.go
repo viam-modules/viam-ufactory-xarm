@@ -340,8 +340,6 @@ func (x *xArm) Close(ctx context.Context) error {
 	if err := x.setMotionState(ctx, 4); err != nil {
 		return err
 	}
-	x.mu.Lock()
-	defer x.mu.Unlock()
 
 	if x.conn == nil {
 		return nil
@@ -384,15 +382,10 @@ func (x *xArm) MoveThroughJointPositions(
 // Using the configured moveHz, joint speed, and joint acceleration, create the series of joint positions for the arm to follow,
 // using a trapezoidal velocity profile to blend between waypoints to the extent possible.
 func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputSteps [][]referenceframe.Input) ([][]float64, error) {
-	x.mu.RLock()
-	speed := x.speed
-	acceleration := x.acceleration
-	moveHZ := x.moveHZ
-	x.mu.RUnlock()
 	// Generate list of joint positions to pass through
 	// This is almost-calculus but not quite because it's explicitly discretized
-	accelStep := acceleration / moveHZ
-	interwaypointAccelStep := interwaypointAccel / moveHZ
+	accelStep := x.acceleration / x.moveHZ
+	interwaypointAccelStep := interwaypointAccel / x.moveHZ
 
 	from := referenceframe.InputsToFloats(startInputs)
 
@@ -416,16 +409,16 @@ func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputStep
 		to := referenceframe.InputsToFloats(toInputs)
 		maxVal := floatMaxDiff(from, to)
 		displacementTotal += maxVal
-		nSteps := (math.Abs(maxVal) / speed) * moveHZ
+		nSteps := (math.Abs(maxVal) / x.speed) * x.moveHZ
 		stepTotal += nSteps
 		from = to
 	}
 
-	nominalAccelSteps := int((speed / acceleration) * moveHZ) // This many steps to accelerate, and the same to decelerate
+	nominalAccelSteps := int((x.speed / x.acceleration) * x.moveHZ) // This many steps to accelerate, and the same to decelerate
 	if float64(nominalAccelSteps) > stepTotal*0.95 {
-		nominalAccelSteps = int(0.95 * math.Sqrt(displacementTotal/acceleration) * moveHZ)
+		nominalAccelSteps = int(0.95 * math.Sqrt(displacementTotal/x.acceleration) * x.moveHZ)
 	}
-	maxVel := (float64(nominalAccelSteps) / moveHZ) * acceleration
+	maxVel := (float64(nominalAccelSteps) / x.moveHZ) * x.acceleration
 
 	inputStepsReversed := [][]referenceframe.Input{}
 	for i := len(inputSteps) - 1; i >= 0; i-- {
@@ -450,7 +443,7 @@ func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputStep
 				if currSpeed <= 0 {
 					break
 				}
-				nSteps := (currDiff / currSpeed) * moveHZ
+				nSteps := (currDiff / currSpeed) * x.moveHZ
 				stepSize := 1.
 				if nSteps <= 1 {
 					if currDiff == 0 {
@@ -465,10 +458,10 @@ func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputStep
 				runningFrom = referenceframe.InputsToFloats(nextInputs)
 				steps = append(steps, referenceframe.InputsToFloats(nextInputs))
 
-				if currSpeed < speed {
+				if currSpeed < x.speed {
 					currSpeed += accelStep * stepSize
-					if currSpeed > speed {
-						currSpeed = speed
+					if currSpeed > x.speed {
+						currSpeed = x.speed
 					}
 				} else {
 					// If we reach max speed, accelerate at max for the remainder of the move

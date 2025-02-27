@@ -30,11 +30,12 @@ Edit the attributes as applicable.
 The following attributes are available:
 
 | Name                                | Type    | Inclusion    | Description                                                                                                      |
-| ----------------------------------- | ------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+|-------------------------------------|---------|--------------|------------------------------------------------------------------------------------------------------------------|
 | `host`                              | string  | **Required** | The IP address of the xArm.                                                                                      |
 | `port`                              | string  | Optional     | The port at which the IP address accesses the xArm. The default is 502.                                          |
 | `speed_degs_per_sec`                | float32 | Optional     | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
+| `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
 
 ### Using within a Frame System
 

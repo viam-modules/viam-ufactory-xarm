@@ -3,8 +3,8 @@ package arm
 
 import (
 	"context"
-	// for embedding model file.
-	_ "embed"
+	_ "embed" // for embedding model file.
+	"encoding/json"
 	"fmt"
 	"net"
 	"sync"
@@ -22,7 +22,7 @@ import (
 const (
 	defaultSpeed  = 50.  // degrees per second
 	defaultAccel  = 100. // degrees per second per second
-	defaultPort   = "502"
+	defaultPort   = 502
 	defaultMoveHz = 100. // Don't change this
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
@@ -56,28 +56,25 @@ var (
 )
 
 type xArm struct {
-	resource.Named
-	dof      int
-	tid      uint16
-	moveHZ   float64 // Number of joint positions to send per second
-	moveLock sync.Mutex
-	model    referenceframe.Model
-	started  bool
-	opMgr    *operation.SingleOperationManager
-	logger   logging.Logger
+	resource.AlwaysRebuild
 
-	mu           sync.RWMutex
-	conn         net.Conn
+	moveLock sync.Mutex
+
+	// state of movement things
+	started bool
+	tid     uint16
+
+	name   resource.Name
+	conn   net.Conn
+	opMgr  *operation.SingleOperationManager
+	logger logging.Logger
+
+	// below is all configuration things
+	dof          int
+	model        referenceframe.Model
 	speed        float64 // speed=max joint radians per second
 	acceleration float64 // acceleration= joint radians per second increase per second
-}
-
-// Config is used for converting config attributes.
-type Config struct {
-	Host         string  `json:"host"`
-	Port         int     `json:"port,omitempty"`
-	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	moveHZ       float64 // Number of joint positions to send per second
 }
 
 func init() {
@@ -103,108 +100,152 @@ func register(model resource.Model) {
 	)
 }
 
+// Config is used for converting config attributes.
+type Config struct {
+	Host         string  `json:"host"`
+	Port         int     `json:"port,omitempty"`
+	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
+	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	BadJoints    []int   `json:"bad-joints"`
+}
+
 // Validate validates the config.
 func (cfg *Config) Validate(path string) ([]string, error) {
 	if cfg.Host == "" {
 		return nil, resource.NewConfigValidationFieldRequiredError(path, "host")
 	}
+	if cfg.Acceleration < 0 {
+		return nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
+	}
+
 	return []string{}, nil
 }
 
-// MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
-func MakeModelFrame(name, modelName string) (referenceframe.Model, error) {
+func (cfg *Config) speed() float32 {
+	if cfg.Speed == 0 {
+		return defaultSpeed
+	}
+	return cfg.Speed
+}
+
+func (cfg *Config) acceleration() float32 {
+	if cfg.Acceleration == 0 {
+		return defaultAccel
+	}
+	return cfg.Acceleration
+}
+
+func (cfg *Config) host() string {
+	port := defaultPort
+	if cfg.Port > 0 {
+		port = cfg.Port
+	}
+	return fmt.Sprintf("%s:%d", cfg.Host, port)
+}
+
+func (cfg *Config) maxBadJoint() int {
+	max := -1
+	for _, j := range cfg.BadJoints {
+		if j > max {
+			max = j
+		}
+	}
+	return max
+}
+
+func getModelJSON(modelName string) ([]byte, error) {
 	switch modelName {
 	case ModelName6DOF:
-		return referenceframe.UnmarshalModelJSON(xArm6modeljson, name)
+		return xArm6modeljson, nil
 	case ModelNameLite:
-		return referenceframe.UnmarshalModelJSON(lite6modeljson, name)
+		return lite6modeljson, nil
 	case ModelName7DOF:
-		return referenceframe.UnmarshalModelJSON(xArm7modeljson, name)
+		return xArm7modeljson, nil
 	default:
 		return nil, fmt.Errorf("no kinematics information for xarm of model %s", modelName)
 	}
 }
 
-// newxArm returns a new xArm of the specified modelName.
-func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, modelName string) (arm.Arm, error) {
-	model, err := MakeModelFrame(conf.Name, modelName)
+// MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
+func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.Input, logger logging.Logger) (referenceframe.Model, error) {
+	jsonData, err := getModelJSON(modelName)
 	if err != nil {
 		return nil, err
 	}
 
-	xA := xArm{
-		Named:   conf.ResourceName().AsNamed(),
-		dof:     len(model.DoF()),
+	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
+
+	// empty data probably means that the robot component has no model information
+	if len(jsonData) == 0 {
+		return nil, referenceframe.ErrNoModelInformation
+	}
+
+	err = json.Unmarshal(jsonData, m)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal json file")
+	}
+
+	for _, j := range badJoints {
+		logger.Infof("locking joint %d to %v", j, current[j].Value)
+		m.Joints[j].Min = current[j].Value
+		m.Joints[j].Max = m.Joints[j].Min
+	}
+
+	return m.ParseConfig(modelName)
+}
+
+// newxArm returns a new xArm of the specified modelName.
+func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, modelName string) (arm.Arm, error) {
+	newConf, err := resource.NativeConfig[*Config](conf)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName)
+}
+
+func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger logging.Logger, modelName string) (arm.Arm, error) {
+	var d net.Dialer
+	newConn, err := d.DialContext(ctx, "tcp", newConf.host())
+	if err != nil {
+		return nil, err
+	}
+
+	x := xArm{
+		conn:    newConn,
+		name:    name,
 		tid:     0,
 		moveHZ:  defaultMoveHz,
-		model:   model,
 		started: false,
 		opMgr:   operation.NewSingleOperationManager(),
 		logger:  logger,
+
+		acceleration: utils.DegToRad(float64(newConf.acceleration())),
+		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
 
-	if err := xA.Reconfigure(ctx, nil, conf); err != nil {
+	err = x.start(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to start xarm")
+	}
+
+	current := []referenceframe.Input{}
+	if len(newConf.BadJoints) > 0 {
+		x.dof = newConf.maxBadJoint() + 1
+		current, err = x.CurrentInputs(ctx)
+		if err != nil {
+			x.Close(ctx)
+			return nil, err
+		}
+	}
+
+	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, logger)
+	if err != nil {
 		return nil, err
 	}
+	x.dof = len(x.model.DoF())
 
-	return &xA, nil
-}
-
-// Reconfigure atomically reconfigures this arm in place based on the new config.
-func (x *xArm) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
-	newConf, err := resource.NativeConfig[*Config](conf)
-	if err != nil {
-		return err
-	}
-
-	if newConf.Host == "" {
-		return errors.New("xArm host not set")
-	}
-
-	speed := newConf.Speed
-	if speed == 0 {
-		speed = defaultSpeed
-	}
-
-	acceleration := newConf.Acceleration
-	if acceleration == 0 {
-		acceleration = defaultAccel
-	}
-	if acceleration < 0 {
-		return fmt.Errorf("given acceleration %f cannot be negative", acceleration)
-	}
-
-	port := fmt.Sprintf("%d", newConf.Port)
-	if newConf.Port == 0 {
-		port = defaultPort
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	newAddr := net.JoinHostPort(newConf.Host, port)
-	if x.conn == nil || x.conn.RemoteAddr().String() != newAddr {
-		// Need a new or replacement connection
-		var d net.Dialer
-		newConn, err := d.DialContext(ctx, "tcp", newAddr)
-		if err != nil {
-			return err
-		}
-		if x.conn != nil {
-			if err := x.conn.Close(); err != nil {
-				x.logger.CWarnw(ctx, "error closing old connection but will continue with reconfiguration", "error", err)
-			}
-		}
-		x.conn = newConn
-
-		if err := x.start(ctx); err != nil {
-			return errors.Wrap(err, "failed to start on reconfigure")
-		}
-	}
-
-	x.acceleration = utils.DegToRad(float64(acceleration))
-	x.speed = utils.DegToRad(float64(speed))
-	return nil
+	return &x, nil
 }
 
 func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
@@ -291,4 +332,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		return nil, errors.New("command not found")
 	}
 	return resp, nil
+}
+
+func (x *xArm) Name() resource.Name {
+	return x.name
 }
