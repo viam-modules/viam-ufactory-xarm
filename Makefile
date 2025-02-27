@@ -1,5 +1,6 @@
 BIN_OUTPUT_PATH = bin
 TOOL_BIN = bin/gotools/$(shell uname -s)-$(shell uname -m)
+PATH_WITH_TOOLS="`pwd`/$(TOOL_BIN):${PATH}"
 UNAME_S ?= $(shell uname -s)
 UNAME_M ?= $(shell uname -m)
 
@@ -23,10 +24,9 @@ tool-install:
 gofmt:
 	gofmt -w -s .
 
-lint: export PATH := $(PWD)/$(TOOL_BIN):$(PATH)
-lint: tool-install
+lint: gofmt tool-install
 	go mod tidy
-	golangci-lint run -c etc/.golangci.yaml
+	PATH=$(PATH_WITH_TOOLS) golangci-lint run -c etc/.golangci.yaml
 
 update-rdk:
 	go get go.viam.com/rdk@latest
