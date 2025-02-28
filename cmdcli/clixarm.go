@@ -8,6 +8,7 @@ import (
 	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
+	rutils "go.viam.com/rdk/utils"
 	"go.viam.com/utils"
 )
 
@@ -30,10 +31,14 @@ func realMain() error {
 
 	bj := -1
 	debug := false
+	moveJoint := -1
+	moveAmount := 5.0
 
 	flag.StringVar(&c.Host, "host", c.Host, "host")
 	flag.IntVar(&c.Port, "port", c.Port, "port")
 	flag.IntVar(&bj, "bad-joint", bj, "bad joint")
+	flag.IntVar(&moveJoint, "move-joint", moveJoint, "joint to move")
+	flag.Float64Var(&moveAmount, "move-amount", moveAmount, "amount to move in degrees")
 	flag.BoolVar(&debug, "debug", debug, "debug")
 
 	flag.Parse()
@@ -65,6 +70,15 @@ func realMain() error {
 	}
 
 	logger.Infof("positions: %v", pos)
+
+	if moveJoint >= 0 {
+		pos[moveJoint].Value += rutils.DegToRad(moveAmount)
+		logger.Infof("moving to: %v", pos)
+		err = a.MoveToJointPositions(ctx, pos, nil)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

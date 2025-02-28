@@ -187,9 +187,9 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 	}
 
 	for _, j := range badJoints {
-		logger.Infof("locking joint %d to %v", j, current[j].Value)
-		m.Joints[j].Min = current[j].Value
+		m.Joints[j].Min = utils.RadToDeg(current[j].Value)
 		m.Joints[j].Max = m.Joints[j].Min
+		logger.Infof("locking joint %d to %v", j, m.Joints[j].Min)
 	}
 
 	return m.ParseConfig(modelName)
@@ -245,6 +245,13 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		return nil, err
 	}
 	x.dof = len(x.model.DoF())
+
+	if len(current) > 0 {
+		logger.Infof("model that was loaded config")
+		for j, jc := range x.model.ModelConfig().Joints {
+			logger.Infof("\t j: %d c: %v", j, jc)
+		}
+	}
 
 	return &x, nil
 }
