@@ -48,12 +48,14 @@ const (
 )
 
 var (
+	family = resource.ModelNamespace("viam").WithFamily("ufactory")
+
 	// XArm6Model defines the resource.Model for the xArm6.
-	XArm6Model = resource.NewModel("viam", "ufactory", ModelName6DOF)
+	XArm6Model = family.WithModel(ModelName6DOF)
 	// XArm7Model defines the resource.Model for the xArm7.
-	XArm7Model = resource.NewModel("viam", "ufactory", ModelName7DOF)
+	XArm7Model = family.WithModel(ModelName7DOF)
 	// XArmLite6Model defines the resource.Model for the lite6.
-	XArmLite6Model = resource.NewModel("viam", "ufactory", ModelNameLite)
+	XArmLite6Model = family.WithModel(ModelNameLite)
 )
 
 type xArm struct {

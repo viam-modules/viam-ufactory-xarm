@@ -22,7 +22,14 @@
       "model": "viam:ufactory:lite6",
       "markdown_link": "README.md#configure-your-xarm",
       "short_description": "arm component driver for the ufactory lite6"
+    },
+      {
+      "api": "rdk:component:gripper",
+      "model": "viam:ufactory:gripper",
+      "markdown_link": "README.md#gripper",
+      "short_description": "gripper component driver for the ufactory gripper"
     }
+
   ],
   "build":{
     "build": "make module",
