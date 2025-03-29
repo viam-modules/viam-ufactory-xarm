@@ -146,7 +146,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	_, err := x.conn.Write(b)
 	if err != nil {
 		x.moveLock.Unlock()
-		return cmd{}, err
+		return cmd{}, multierr.Combine(err, x.connect(ctx)) // reconnect
 	}
 	c2, err := x.response(ctx)
 	x.moveLock.Unlock()

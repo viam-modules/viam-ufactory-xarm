@@ -68,6 +68,7 @@ type xArm struct {
 	tid     uint16
 
 	name   resource.Name
+	conf   *Config
 	conn   net.Conn
 	opMgr  *operation.SingleOperationManager
 	logger logging.Logger
@@ -210,15 +211,9 @@ func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, m
 
 // NewXArm creates a new x arm connection.
 func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger logging.Logger, modelName string) (arm.Arm, error) {
-	var d net.Dialer
-	newConn, err := d.DialContext(ctx, "tcp", newConf.host())
-	if err != nil {
-		return nil, err
-	}
-
 	x := xArm{
-		conn:    newConn,
 		name:    name,
+		conf:    newConf,
 		tid:     0,
 		moveHZ:  defaultMoveHz,
 		started: false,
@@ -229,9 +224,9 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
 
-	err = x.start(ctx)
+	err := x.connect(ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to start xarm")
+		return nil, err
 	}
 
 	current := []referenceframe.Input{}
@@ -257,6 +252,36 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 	}
 
 	return &x, nil
+}
+
+func (x *xArm) connect(ctx context.Context) error {
+	if x.conn != nil {
+		err := x.conn.Close()
+		if err != nil {
+			x.logger.Infof("error closing old socket: %v", err)
+		}
+		x.conn = nil
+	}
+
+	var d net.Dialer
+	var err error
+
+	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
+	if err != nil {
+		return err
+	}
+
+	err = x.start(ctx)
+	if err != nil {
+		err = x.conn.Close()
+		if err != nil {
+			x.logger.Infof("error closing bad socket: %v", err)
+		}
+		x.conn = nil
+		return errors.Wrap(err, "failed to start xarm")
+	}
+
+	return nil
 }
 
 func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
