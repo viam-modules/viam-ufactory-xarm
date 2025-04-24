@@ -3,6 +3,7 @@ package arm
 import (
 	"context"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/logging"
@@ -109,8 +110,13 @@ func (g *myGripper) Stop(context.Context, map[string]interface{}) error {
 }
 
 func (g *myGripper) Geometries(context.Context, map[string]interface{}) ([]spatialmath.Geometry, error) {
+	b, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -80}), r3.Vector{X: 50, Y: 170, Z: 160}, "case-gripper")
+	if err != nil {
+		return nil, err
+	}
+
 	return []spatialmath.Geometry{
-		spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -80}), r3.Vector{X: 50, Y: 170, Z: 160}, "case-gripper"),
+		b,
 	}, nil
 }
 
