@@ -177,12 +177,12 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 		return nil, err
 	}
 
-	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-
 	// empty data probably means that the robot component has no model information
 	if len(jsonData) == 0 {
 		return nil, referenceframe.ErrNoModelInformation
 	}
+
+	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
 
 	err = json.Unmarshal(jsonData, m)
 	if err != nil {
