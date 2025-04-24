@@ -109,8 +109,9 @@ func (g *myGripper) Stop(context.Context, map[string]interface{}) error {
 }
 
 func (g *myGripper) Geometries(context.Context, map[string]interface{}) ([]spatialmath.Geometry, error) {
-	// TODO(erh): fix me
-	return []spatialmath.Geometry{}, nil
+	return []spatialmath.Geometry{
+		spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -80}), r3.Vector{X: 50, Y: 170, Z: 160}, "case-gripper"),
+	}, nil
 }
 
 func (g *myGripper) ModelFrame() referenceframe.Model {
