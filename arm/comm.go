@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -609,11 +610,20 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
-func (x *xArm) enableGripper(ctx context.Context) error {
+func (x *xArm) gripperPreamble(write bool) cmd {
 	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c.params = append(c.params, 0x09) // host id
+	c.params = append(c.params, 0x08) // gripper id
+	if write {
+		c.params = append(c.params, 0x10)
+	} else {
+		c.params = append(c.params, 0x03)
+	}
+	return c
+}
+
+func (x *xArm) enableGripper(ctx context.Context) error {
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x00)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
@@ -623,10 +633,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 }
 
 func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
-	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x01)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
@@ -640,19 +647,35 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 }
 
 func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
-	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x07, 0x00)
 	c.params = append(c.params, 0x00, 0x02)
 	c.params = append(c.params, 0x04)
 	tmpBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(tmpBytes, position)
-	x.logger.Info("tmpBytes", tmpBytes)
+	x.logger.Debugf("setGripperPosition bytes", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
 	_, err := x.send(ctx, c, true)
 	return err
+}
+
+func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
+	c := x.gripperPreamble(false)
+	c.params = append(c.params, 0x07, 0x02)
+	c.params = append(c.params, 0x00, 0x02)
+	res, err := x.send(ctx, c, true)
+	if err != nil {
+		return 0, err
+	}
+
+	x.logger.Debugf("getGripperPosition: %v %v", res, res.params)
+
+	// open  : 0 9 8 3 4 0 0 3 73
+	// closed: 0 9 8 3 4 0 0 0 0
+	if len(res.params) != 9 {
+		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
+	}
+	return binary.BigEndian.Uint32(res.params[5:]), nil
 }
 
 func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {

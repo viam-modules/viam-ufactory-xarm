@@ -326,6 +326,15 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
+	if _, ok := cmd["get_gripper"]; ok {
+		pos, err := x.getGripperPosition(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp["gripper_position"] = float64(pos)
+		validCommand = true
+	}
+
 	if _, ok := cmd["load"]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
