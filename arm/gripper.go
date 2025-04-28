@@ -180,14 +180,35 @@ func (g *myGripper) Stop(context.Context, map[string]interface{}) error {
 	return nil
 }
 
-func (g *myGripper) Geometries(context.Context, map[string]interface{}) ([]spatialmath.Geometry, error) {
-	b, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -80}), r3.Vector{X: 50, Y: 170, Z: 160}, "case-gripper")
+func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	if err != nil {
+		return nil, err
+	}
+
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
+
+	if pos < 20 || true { // gripper is closed
+		clawSize.Y = 110
+		clawSize.Z = 130
+	}
+
+	g.logger.Debugf("clawSize: %v", clawSize)
+
+	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}), clawSize, "claws")
 	if err != nil {
 		return nil, err
 	}
 
 	return []spatialmath.Geometry{
-		b,
+		caseBox,
+		claws,
 	}, nil
 }
 
