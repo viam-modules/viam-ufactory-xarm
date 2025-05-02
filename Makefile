@@ -8,6 +8,9 @@ build:
 	rm -rf bin
 	go build -o $(BIN_OUTPUT_PATH)/viam-xarm
 
+static-build:
+	go build -ldflags "-extld=$(PWD)/etc/ld_wrapper.sh -s -extldflags=-lm" .
+
 module: build
 	rm -f $(BIN_OUTPUT_PATH)/module.tar.gz
 	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(BIN_OUTPUT_PATH)/viam-xarm meta.json
