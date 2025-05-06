@@ -17,7 +17,7 @@ import (
 // VacuumGripperModel model for the ufactory vacuum gripper.
 var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
-var CaseBoxSize = r3.Vector{X: 50, Y: 100, Z: 100}
+var caseBoxSize = r3.Vector{X: 50, Y: 100, Z: 100}
 
 // VacuumGripperConfig config for gripper.
 type VacuumGripperConfig struct {
@@ -132,7 +132,7 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]interface{}) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: CaseBoxSize.Z / -2}), CaseBoxSize, "case-gripper")
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
 	if err != nil {
 		return nil, err
 	}
