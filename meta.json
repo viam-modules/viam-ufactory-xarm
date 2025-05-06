@@ -23,13 +23,18 @@
       "markdown_link": "README.md#configure-your-xarm",
       "short_description": "arm component driver for the ufactory lite6"
     },
-      {
+    {
       "api": "rdk:component:gripper",
       "model": "viam:ufactory:gripper",
       "markdown_link": "README.md#gripper",
       "short_description": "gripper component driver for the ufactory gripper"
+    },
+    {
+      "api": "rdk:component:vacuum_gripper",
+      "model": "viam:ufactory:vacuum_gripper",
+      "markdown_link": "README.md#vacuum_gripper",
+      "short_description": "vacuum gripper component driver for the ufactory vacuum gripper"
     }
-
   ],
   "build":{
     "build": "make module",

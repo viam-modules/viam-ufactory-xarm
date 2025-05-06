@@ -159,3 +159,10 @@ The arm itself runs xArm Studio. A developer should be able to use it through th
    "arm" : "arm"
 }
 ```
+
+## vacuum_gripper
+```
+{
+  "arm": "arm"
+}
+```

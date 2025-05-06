@@ -107,6 +107,7 @@ var regMap = map[string]byte{
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
+	"VacuumControl":  0x7F,
 	"LoadID":         0xCC,
 }
 
@@ -676,6 +677,86 @@ func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
 		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
 	}
 	return binary.BigEndian.Uint32(res.params[5:]), nil
+}
+
+func (x *xArm) vacuumPreamble(write bool) cmd {
+	c := x.newCmd(regMap["VacuumControl"])
+
+	c.params = append(c.params, 0x09) // host ID
+	c.params = append(c.params, 0x0A) // vacuum ID
+	if write {
+		c.params = append(c.params, 0x15)
+	} else {
+		c.params = append(c.params, 0x05)
+	}
+
+	return c
+}
+
+func (x *xArm) grabVacuum(ctx context.Context) error {
+	c1 := x.vacuumPreamble(true)
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x80,
+		0x43,
+	)
+	x.logger.Infof("close 0: % x", c1.params)
+	resp1, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+	x.logger.Infof("close 0 response: % x", resp1.params)
+
+	c2 := x.vacuumPreamble(true)
+	c2.params = append(c2.params,
+		0x00,
+		0x80,
+		0x00,
+		0x44,
+	)
+	x.logger.Infof("close 1: % x", c2.params)
+	resp2, err := x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	x.logger.Infof("close 1 response: % x", resp2.params)
+
+	x.logger.Info("grab vacuum successful")
+	return nil
+}
+
+func (x *xArm) openVacuum(ctx context.Context) error {
+	c1 := x.vacuumPreamble(true)
+	c1.params = append(c1.params,
+		0x00,
+		0x80,
+		0x80,
+		0x43,
+	)
+	x.logger.Infof("open 0: % x", c1.params)
+	resp1, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+	x.logger.Infof("open 0 response: % x", resp1.params)
+
+	c2 := x.vacuumPreamble(true)
+	c2.params = append(c2.params,
+		0x00,
+		0x00,
+		0x00,
+		0x44,
+	)
+	x.logger.Infof("open 1: % x", c2.params)
+	resp2, err := x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	x.logger.Infof("open 1 response: % x", resp2.params)
+
+	x.logger.Info("release vacuum successful")
+	return nil
 }
 
 func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {
