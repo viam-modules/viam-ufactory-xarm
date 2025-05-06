@@ -692,7 +692,7 @@ func (x *xArm) vacuumPreamble(write bool) cmd {
 	return c
 }
 
-// Grab maps to open in ufactory
+// Grab maps to open in ufactory.
 func (x *xArm) grabVacuum(ctx context.Context) error {
 	// Ufactory requires opening channel 0 and channel 1
 	// to open the vacuum gripper
@@ -722,7 +722,7 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 	return nil
 }
 
-// Close maps to open in ufactory
+// Close maps to open in ufactory.
 func (x *xArm) openVacuum(ctx context.Context) error {
 	// Ufactory requires close channel 0 and channel 1
 	// to stop the vacuum gripper

@@ -17,6 +17,8 @@ import (
 // VacuumGripperModel model for the ufactory vacuum gripper.
 var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
+var CaseBoxSize = r3.Vector{X: 50, Y: 100, Z: 100}
+
 // VacuumGripperConfig config for gripper.
 type VacuumGripperConfig struct {
 	Arm    string
@@ -78,20 +80,6 @@ type myVacuumGripper struct {
 }
 
 func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
-	err := g.grabVacuum(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
-}
-
-func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}) error {
-	err := g.openVacuum(ctx)
-	return err
-}
-
-func (g *myVacuumGripper) grabVacuum(ctx context.Context) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
@@ -100,13 +88,14 @@ func (g *myVacuumGripper) grabVacuum(ctx context.Context) error {
 			"grab_vacuum": true,
 		})
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+
+	return true, nil
 }
 
-func (g *myVacuumGripper) openVacuum(ctx context.Context) error {
+func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
@@ -143,8 +132,7 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]interface{}) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: CaseBoxSize.Z / -2}), CaseBoxSize, "case-gripper")
 	if err != nil {
 		return nil, err
 	}
