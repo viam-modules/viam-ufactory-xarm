@@ -78,7 +78,7 @@ type myVacuumGripper struct {
 }
 
 func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
-	err := g.startVacuum(ctx)
+	err := g.grabVacuum(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -87,11 +87,11 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}
 }
 
 func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}) error {
-	err := g.closeVacuum(ctx)
+	err := g.openVacuum(ctx)
 	return err
 }
 
-func (g *myVacuumGripper) startVacuum(ctx context.Context) error {
+func (g *myVacuumGripper) grabVacuum(ctx context.Context) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
@@ -103,11 +103,10 @@ func (g *myVacuumGripper) startVacuum(ctx context.Context) error {
 			return err
 		}
 	}
-	g.logger.Info("start vacuum")
 	return nil
 }
 
-func (g *myVacuumGripper) closeVacuum(ctx context.Context) error {
+func (g *myVacuumGripper) openVacuum(ctx context.Context) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
@@ -121,25 +120,6 @@ func (g *myVacuumGripper) closeVacuum(ctx context.Context) error {
 	}
 	return nil
 }
-
-// func (g *myVacuumGripper) getVacuum(ctx context.Context) (bool, error) {
-// 	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
-// 		"get_gripper": true,
-// 	})
-// 	if err != nil {
-// 		return false, err
-// 	}
-// 	raw := res["gripper_vacuum"]
-// 	// raw is a bool value
-// 	vac, ok := raw.(bool)
-// 	if !ok {
-// 		return false, fmt.Errorf("bad gripper_vacuum (%v) %T", raw, raw)
-// 	}
-// 	if vac {
-// 		return true, nil
-// 	}
-// 	return false, nil
-// }
 
 func (g *myVacuumGripper) Name() resource.Name {
 	return g.name
