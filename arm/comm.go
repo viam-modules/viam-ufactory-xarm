@@ -689,11 +689,13 @@ func (x *xArm) vacuumPreamble(write bool) cmd {
 	} else {
 		c.params = append(c.params, 0x05)
 	}
-
 	return c
 }
 
+// Grab maps to open in ufactory
 func (x *xArm) grabVacuum(ctx context.Context) error {
+	// Ufactory requires opening channel 0 and channel 1
+	// to open the vacuum gripper
 	c1 := x.vacuumPreamble(true)
 	c1.params = append(c1.params,
 		0x00,
@@ -701,12 +703,10 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 		0x80,
 		0x43,
 	)
-	x.logger.Infof("close 0: % x", c1.params)
-	resp1, err := x.send(ctx, c1, true)
+	_, err := x.send(ctx, c1, true)
 	if err != nil {
 		return err
 	}
-	x.logger.Infof("close 0 response: % x", resp1.params)
 
 	c2 := x.vacuumPreamble(true)
 	c2.params = append(c2.params,
@@ -715,18 +715,17 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 		0x00,
 		0x44,
 	)
-	x.logger.Infof("close 1: % x", c2.params)
-	resp2, err := x.send(ctx, c2, true)
+	_, err = x.send(ctx, c2, true)
 	if err != nil {
 		return err
 	}
-	x.logger.Infof("close 1 response: % x", resp2.params)
-
-	x.logger.Info("grab vacuum successful")
 	return nil
 }
 
+// Close maps to open in ufactory
 func (x *xArm) openVacuum(ctx context.Context) error {
+	// Ufactory requires close channel 0 and channel 1
+	// to stop the vacuum gripper
 	c1 := x.vacuumPreamble(true)
 	c1.params = append(c1.params,
 		0x00,
