@@ -148,7 +148,7 @@ The below documents will be useful for developers looking to contribute to this 
 - [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
 - [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
 - [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
-- [UFactory xArm Vacuum Gripper User Manul](https://static.generation-robots.com/media/xArm-Vacuum-Gripper-User-Manual-V1.6.1.pdf)
+- [UFactory xArm Vacuum Gripper User Manual](https://static.generation-robots.com/media/xArm-Vacuum-Gripper-User-Manual-V1.6.1.pdf)
 
 
 ## Note on xArm Studio
