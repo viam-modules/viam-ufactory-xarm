@@ -107,6 +107,7 @@ var regMap = map[string]byte{
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
+	"VacuumControl":  0x7F,
 	"LoadID":         0xCC,
 }
 
@@ -676,6 +677,76 @@ func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
 		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
 	}
 	return binary.BigEndian.Uint32(res.params[5:]), nil
+}
+
+// This is the host ID and gripper address which should be appended to each command.
+func (x *xArm) vacuumPreamble() cmd {
+	c := x.newCmd(regMap["VacuumControl"])
+
+	c.params = append(c.params, 0x09) // host ID
+	c.params = append(c.params, 0x0A) // vacuum ID
+	c.params = append(c.params, 0x15)
+	return c
+}
+
+// Grab maps to open in ufactory.
+func (x *xArm) grabVacuum(ctx context.Context) error {
+	// Ufactory requires opening channel 0 and channel 1
+	// to open the vacuum gripper
+	c1 := x.vacuumPreamble()
+	c1.params = append(c1.params,
+		0x00,
+		0x80,
+		0x80,
+		0x43,
+	)
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+
+	c2 := x.vacuumPreamble()
+	c2.params = append(c2.params,
+		0x00,
+		0x00,
+		0x00,
+		0x44,
+	)
+	_, err = x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Close maps to open in ufactory.
+func (x *xArm) openVacuum(ctx context.Context) error {
+	// Ufactory requires close channel 0 and channel 1
+	// to stop the vacuum gripper
+	c1 := x.vacuumPreamble()
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x80,
+		0x43,
+	)
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+
+	c2 := x.vacuumPreamble()
+	c2.params = append(c2.params,
+		0x00,
+		0x80,
+		0x00,
+		0x44,
+	)
+	_, err = x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {

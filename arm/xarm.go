@@ -372,6 +372,26 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.acceleration = utils.DegToRad(acceleration)
 		validCommand = true
 	}
+	if _, ok := cmd["grab_vacuum"]; ok {
+		_, ok := cmd["grab_vacuum"].(bool)
+		if !ok {
+			return nil, errors.New("could not read grab_vacuum")
+		}
+		if err := x.grabVacuum(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if _, ok := cmd["open_vacuum"]; ok {
+		_, ok := cmd["open_vacuum"].(bool)
+		if !ok {
+			return nil, errors.New("could not read close_vacuum")
+		}
+		if err := x.openVacuum(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
 
 	if !validCommand {
 		return nil, errors.New("command not found")
