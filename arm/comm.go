@@ -679,6 +679,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
 	return binary.BigEndian.Uint32(res.params[5:]), nil
 }
 
+// This is the host ID and gripper address which should be appended to each command.
 func (x *xArm) vacuumPreamble() cmd {
 	c := x.newCmd(regMap["VacuumControl"])
 
