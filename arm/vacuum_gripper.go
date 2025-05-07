@@ -51,7 +51,6 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 
 	g := &myVacuumGripper{
 		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("foo"),
 		conf:   newConf,
 		logger: logger,
 	}
@@ -68,7 +67,6 @@ type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
-	mf   referenceframe.Model
 
 	conf *VacuumGripperConfig
 
@@ -143,5 +141,5 @@ func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface
 }
 
 func (g *myVacuumGripper) ModelFrame() referenceframe.Model {
-	return g.mf
+	return nil
 }
