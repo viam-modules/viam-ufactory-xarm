@@ -141,21 +141,31 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
 
-	if x.conn == nil {
+	if x.closed {
 		return cmd{}, errors.New("closed")
+	}
+
+	if x.conn == nil {
+		err := x.connect(ctx)
+		if err != nil {
+			x.resetConnection()
+			return cmd{}, err
+		}
 	}
 
 	b := c.bytes()
 
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		x.resetConnection()
 		return cmd{}, err
 	}
 	_, err := x.conn.Write(b)
 	if err != nil {
-		return cmd{}, multierr.Combine(err, x.connect(ctx)) // reconnect
+		x.resetConnection()
+		return cmd{}, err
 	}
-	c2, err := x.response_inlock(ctx)
+	c2, err := x.responseInLock(ctx)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -173,9 +183,10 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	return c2, err
 }
 
-func (x *xArm) response_inlock(ctx context.Context) (cmd, error) {
+func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
+		x.resetConnection()
 		return cmd{}, err
 	}
 	c := cmd{}
@@ -185,6 +196,7 @@ func (x *xArm) response_inlock(ctx context.Context) (cmd, error) {
 	length := binary.BigEndian.Uint16(buf[4:6])
 	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
 	if err != nil {
+		x.resetConnection()
 		return cmd{}, err
 	}
 	return c, err
@@ -335,6 +347,8 @@ func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
 func (x *xArm) Close(ctx context.Context) error {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
+
+	x.closed = true
 
 	if x.conn == nil {
 		return nil

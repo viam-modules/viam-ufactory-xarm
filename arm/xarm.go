@@ -70,6 +70,7 @@ type xArm struct {
 	name   resource.Name
 	conf   *Config
 	conn   net.Conn
+	closed bool
 	opMgr  *operation.SingleOperationManager
 	logger logging.Logger
 
@@ -254,14 +255,20 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 	return &x, nil
 }
 
-func (x *xArm) connect(ctx context.Context) error {
-	if x.conn != nil {
-		err := x.conn.Close()
-		if err != nil {
-			x.logger.Infof("error closing old socket: %v", err)
-		}
-		x.conn = nil
+func (x *xArm) resetConnection() {
+	if x.conn == nil {
+		return
 	}
+
+	err := x.conn.Close()
+	if err != nil {
+		x.logger.Infof("error closing old socket: %v", err)
+	}
+	x.conn = nil
+}
+
+func (x *xArm) connect(ctx context.Context) error {
+	x.resetConnection()
 
 	var d net.Dialer
 	var err error
