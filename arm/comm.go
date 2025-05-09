@@ -139,6 +139,12 @@ func (x *xArm) newCmd(reg byte) cmd {
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+
+	if x.conn == nil {
+		return cmd{}, errors.New("closed")
+	}
+
 	b := c.bytes()
 
 	// add deadline so we aren't waiting forever
@@ -147,11 +153,9 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	}
 	_, err := x.conn.Write(b)
 	if err != nil {
-		x.moveLock.Unlock()
 		return cmd{}, multierr.Combine(err, x.connect(ctx)) // reconnect
 	}
-	c2, err := x.response(ctx)
-	x.moveLock.Unlock()
+	c2, err := x.response_inlock(ctx)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -169,11 +173,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	return c2, err
 }
 
-func (x *xArm) response(ctx context.Context) (cmd, error) {
-	// Read response header
-	if x.conn == nil {
-		return cmd{}, errors.New("closed")
-	}
+func (x *xArm) response_inlock(ctx context.Context) (cmd, error) {
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
 		return cmd{}, err
@@ -333,6 +333,13 @@ func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
 
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+
+	if x.conn == nil {
+		return nil
+	}
+
 	if err := x.toggleBrake(ctx, false); err != nil {
 		return err
 	}
@@ -343,9 +350,6 @@ func (x *xArm) Close(ctx context.Context) error {
 		return err
 	}
 
-	if x.conn == nil {
-		return nil
-	}
 	err := x.conn.Close()
 	x.conn = nil
 	return err
