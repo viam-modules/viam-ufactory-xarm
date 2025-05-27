@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -106,6 +107,7 @@ var regMap = map[string]byte{
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
+	"VacuumControl":  0x7F,
 	"LoadID":         0xCC,
 }
 
@@ -137,20 +139,34 @@ func (x *xArm) newCmd(reg byte) cmd {
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+
+	if x.closed {
+		return cmd{}, errors.New("closed")
+	}
+
+	if x.conn == nil {
+		err := x.connect(ctx)
+		if err != nil {
+			x.resetConnection()
+			return cmd{}, err
+		}
+	}
+
 	b := c.bytes()
 
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		x.moveLock.Unlock()
+		x.resetConnection()
 		return cmd{}, err
 	}
 	_, err := x.conn.Write(b)
 	if err != nil {
-		x.moveLock.Unlock()
-		return cmd{}, multierr.Combine(err, x.connect(ctx)) // reconnect
+		x.resetConnection()
+		return cmd{}, err
 	}
-	c2, err := x.response(ctx)
-	x.moveLock.Unlock()
+	c2, err := x.responseInLock(ctx)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -168,13 +184,10 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	return c2, err
 }
 
-func (x *xArm) response(ctx context.Context) (cmd, error) {
-	// Read response header
-	if x.conn == nil {
-		return cmd{}, errors.New("closed")
-	}
+func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
+		x.resetConnection()
 		return cmd{}, err
 	}
 	c := cmd{}
@@ -184,6 +197,7 @@ func (x *xArm) response(ctx context.Context) (cmd, error) {
 	length := binary.BigEndian.Uint16(buf[4:6])
 	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
 	if err != nil {
+		x.resetConnection()
 		return cmd{}, err
 	}
 	return c, err
@@ -332,6 +346,15 @@ func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
 
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+
+	x.closed = true
+
+	if x.conn == nil {
+		return nil
+	}
+
 	if err := x.toggleBrake(ctx, false); err != nil {
 		return err
 	}
@@ -342,9 +365,6 @@ func (x *xArm) Close(ctx context.Context) error {
 		return err
 	}
 
-	if x.conn == nil {
-		return nil
-	}
 	err := x.conn.Close()
 	x.conn = nil
 	return err
@@ -615,11 +635,20 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
-func (x *xArm) enableGripper(ctx context.Context) error {
+func (x *xArm) gripperPreamble(write bool) cmd {
 	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c.params = append(c.params, 0x09) // host id
+	c.params = append(c.params, 0x08) // gripper id
+	if write {
+		c.params = append(c.params, 0x10)
+	} else {
+		c.params = append(c.params, 0x03)
+	}
+	return c
+}
+
+func (x *xArm) enableGripper(ctx context.Context) error {
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x00)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
@@ -629,10 +658,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 }
 
 func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
-	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x01)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
@@ -646,19 +672,105 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 }
 
 func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
-	c := x.newCmd(regMap["GripperControl"])
-	c.params = append(c.params, 0x09)
-	c.params = append(c.params, 0x08)
-	c.params = append(c.params, 0x10)
+	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x07, 0x00)
 	c.params = append(c.params, 0x00, 0x02)
 	c.params = append(c.params, 0x04)
 	tmpBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(tmpBytes, position)
-	x.logger.Info("tmpBytes", tmpBytes)
+	x.logger.Debugf("setGripperPosition bytes", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
 	_, err := x.send(ctx, c, true)
 	return err
+}
+
+func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
+	c := x.gripperPreamble(false)
+	c.params = append(c.params, 0x07, 0x02)
+	c.params = append(c.params, 0x00, 0x02)
+	res, err := x.send(ctx, c, true)
+	if err != nil {
+		return 0, err
+	}
+
+	x.logger.Debugf("getGripperPosition: %v %v", res, res.params)
+
+	// open  : 0 9 8 3 4 0 0 3 73
+	// closed: 0 9 8 3 4 0 0 0 0
+	if len(res.params) != 9 {
+		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
+	}
+	return binary.BigEndian.Uint32(res.params[5:]), nil
+}
+
+// This is the host ID and gripper address which should be appended to each command.
+func (x *xArm) vacuumPreamble() cmd {
+	c := x.newCmd(regMap["VacuumControl"])
+
+	c.params = append(c.params, 0x09) // host ID
+	c.params = append(c.params, 0x0A) // vacuum ID
+	c.params = append(c.params, 0x15)
+	return c
+}
+
+// Grab maps to open in ufactory.
+func (x *xArm) grabVacuum(ctx context.Context) error {
+	// Ufactory requires opening channel 0 and channel 1
+	// to open the vacuum gripper
+	c1 := x.vacuumPreamble()
+	c1.params = append(c1.params,
+		0x00,
+		0x80,
+		0x80,
+		0x43,
+	)
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+
+	c2 := x.vacuumPreamble()
+	c2.params = append(c2.params,
+		0x00,
+		0x00,
+		0x00,
+		0x44,
+	)
+	_, err = x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// Close maps to open in ufactory.
+func (x *xArm) openVacuum(ctx context.Context) error {
+	// Ufactory requires close channel 0 and channel 1
+	// to stop the vacuum gripper
+	c1 := x.vacuumPreamble()
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x80,
+		0x43,
+	)
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
+		return err
+	}
+
+	c2 := x.vacuumPreamble()
+	c2.params = append(c2.params,
+		0x00,
+		0x80,
+		0x00,
+		0x44,
+	)
+	_, err = x.send(ctx, c2, true)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {

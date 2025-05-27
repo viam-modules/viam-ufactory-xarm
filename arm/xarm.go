@@ -70,6 +70,7 @@ type xArm struct {
 	name   resource.Name
 	conf   *Config
 	conn   net.Conn
+	closed bool
 	opMgr  *operation.SingleOperationManager
 	logger logging.Logger
 
@@ -179,12 +180,12 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 		return nil, err
 	}
 
-	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-
 	// empty data probably means that the robot component has no model information
 	if len(jsonData) == 0 {
 		return nil, referenceframe.ErrNoModelInformation
 	}
+
+	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
 
 	err = json.Unmarshal(jsonData, m)
 	if err != nil {
@@ -256,14 +257,20 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 	return &x, nil
 }
 
-func (x *xArm) connect(ctx context.Context) error {
-	if x.conn != nil {
-		err := x.conn.Close()
-		if err != nil {
-			x.logger.Infof("error closing old socket: %v", err)
-		}
-		x.conn = nil
+func (x *xArm) resetConnection() {
+	if x.conn == nil {
+		return
 	}
+
+	err := x.conn.Close()
+	if err != nil {
+		x.logger.Infof("error closing old socket: %v", err)
+	}
+	x.conn = nil
+}
+
+func (x *xArm) connect(ctx context.Context) error {
+	x.resetConnection()
 
 	var d net.Dialer
 	var err error
@@ -328,6 +335,15 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
+	if _, ok := cmd["get_gripper"]; ok {
+		pos, err := x.getGripperPosition(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp["gripper_position"] = float64(pos)
+		validCommand = true
+	}
+
 	if _, ok := cmd["load"]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
@@ -367,6 +383,26 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.confLock.Lock()
 		x.acceleration = utils.DegToRad(acceleration)
 		x.confLock.Unlock()
+		validCommand = true
+	}
+	if _, ok := cmd["grab_vacuum"]; ok {
+		_, ok := cmd["grab_vacuum"].(bool)
+		if !ok {
+			return nil, errors.New("could not read grab_vacuum")
+		}
+		if err := x.grabVacuum(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if _, ok := cmd["open_vacuum"]; ok {
+		_, ok := cmd["open_vacuum"].(bool)
+		if !ok {
+			return nil, errors.New("could not read close_vacuum")
+		}
+		if err := x.openVacuum(ctx); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
