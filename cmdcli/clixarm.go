@@ -51,7 +51,7 @@ func realMain() error {
 		logger.SetLevel(logging.DEBUG)
 	}
 
-	_, err := c.Validate("")
+	_, _, err := c.Validate("")
 	if err != nil {
 		return err
 	}

@@ -27,12 +27,11 @@ type GripperConfig struct {
 }
 
 // Validate validates the config.
-func (cfg *GripperConfig) Validate(path string) ([]string, error) {
+func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
-		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
+		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "arm")
 	}
-
-	return []string{cfg.Arm}, nil
+	return []string{cfg.Arm}, nil, nil
 }
 
 func init() {
@@ -53,7 +52,6 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	g := &myGripper{
 		name:   config.ResourceName(),
 		mf:     referenceframe.NewSimpleModel("foo"),
-		conf:   newConf,
 		logger: logger,
 	}
 
@@ -70,8 +68,6 @@ type myGripper struct {
 
 	name resource.Name
 	mf   referenceframe.Model
-
-	conf *GripperConfig
 
 	arm arm.Arm
 
