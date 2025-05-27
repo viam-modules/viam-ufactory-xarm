@@ -74,11 +74,13 @@ type xArm struct {
 	logger logging.Logger
 
 	// below is all configuration things
-	dof          int
-	model        referenceframe.Model
-	speed        float64 // speed=max joint radians per second
-	acceleration float64 // acceleration= joint radians per second increase per second
-	moveHZ       float64 // Number of joint positions to send per second
+	dof    int
+	model  referenceframe.Model
+	moveHZ float64 // Number of joint positions to send per second
+
+	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
+	speed        float64    // speed=max joint radians per second
+	acceleration float64    // acceleration= joint radians per second increase per second
 }
 
 func init() {
@@ -349,7 +351,9 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if speed <= 0 {
 			return nil, errors.New("speed cannot be less than or equal to zero")
 		}
+		x.confLock.Lock()
 		x.speed = utils.DegToRad(speed)
+		x.confLock.Unlock()
 		validCommand = true
 	}
 	if val, ok := cmd["set_acceleration"]; ok {
@@ -360,7 +364,9 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if acceleration <= 0 {
 			return nil, errors.New("acceleration cannot be less than or equal to zero")
 		}
+		x.confLock.Lock()
 		x.acceleration = utils.DegToRad(acceleration)
+		x.confLock.Unlock()
 		validCommand = true
 	}
 
