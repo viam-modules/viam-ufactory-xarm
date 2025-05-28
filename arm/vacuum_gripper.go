@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 
 	"github.com/golang/geo/r3"
@@ -121,6 +122,14 @@ func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface
 	}, nil
 }
 
-func (g *myVacuumGripper) ModelFrame() referenceframe.Model {
-	return nil
+func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myVacuumGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
+	return errors.ErrUnsupported
 }

@@ -183,8 +183,7 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 		return nil, referenceframe.ErrNoModelInformation
 	}
 
-	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-
+	m := &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
 	err = json.Unmarshal(jsonData, m)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal json file")
@@ -311,9 +310,8 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]
 	return gif.Geometries(), nil
 }
 
-// ModelFrame returns all the information necessary for including the arm in a FrameSystem.
-func (x *xArm) ModelFrame() referenceframe.Model {
-	return x.model
+func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return x.model, nil
 }
 
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {

@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -208,6 +209,14 @@ func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([
 	}, nil
 }
 
-func (g *myGripper) ModelFrame() referenceframe.Model {
-	return g.mf
+func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return g.mf, nil
+}
+
+func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
+	return errors.ErrUnsupported
 }
