@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -70,7 +71,7 @@ type xArm struct {
 	name   resource.Name
 	conf   *Config
 	conn   net.Conn
-	closed bool
+	closed atomic.Bool
 	opMgr  *operation.SingleOperationManager
 	logger logging.Logger
 
