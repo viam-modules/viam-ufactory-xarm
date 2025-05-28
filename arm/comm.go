@@ -141,7 +141,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
 
-	if x.closed {
+	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
 
@@ -157,7 +157,6 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		x.moveLock.Unlock()
 		x.resetConnection()
 		return cmd{}, err
 	}
@@ -346,11 +345,7 @@ func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
 
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
-
-	x.closed = true
-
+	x.closed.Store(true)
 	if x.conn == nil {
 		return nil
 	}
