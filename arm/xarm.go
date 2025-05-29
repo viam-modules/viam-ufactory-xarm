@@ -118,15 +118,15 @@ type Config struct {
 }
 
 // Validate validates the config.
-func (cfg *Config) Validate(path string) ([]string, error) {
+func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Host == "" {
-		return nil, resource.NewConfigValidationFieldRequiredError(path, "host")
+		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "host")
 	}
 	if cfg.Acceleration < 0 {
-		return nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
+		return nil, nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
 	}
 
-	return []string{}, nil
+	return []string{}, []string{}, nil
 }
 
 func (cfg *Config) speed() float32 {
@@ -186,8 +186,7 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 		return nil, referenceframe.ErrNoModelInformation
 	}
 
-	m := &referenceframe.ModelConfig{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-
+	m := &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
 	err = json.Unmarshal(jsonData, m)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to unmarshal json file")
@@ -314,9 +313,8 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]
 	return gif.Geometries(), nil
 }
 
-// ModelFrame returns all the information necessary for including the arm in a FrameSystem.
-func (x *xArm) ModelFrame() referenceframe.Model {
-	return x.model
+func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return x.model, nil
 }
 
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
