@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/golang/geo/r3"
-
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/motionplan"
 	"go.viam.com/rdk/referenceframe"
