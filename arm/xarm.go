@@ -354,7 +354,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		resp["load"] = loadInformation
+		resp[loadKey] = loadInformation
 		validCommand = true
 	}
 	if val, ok := cmd["set_speed"]; ok {
