@@ -138,8 +138,8 @@ func (x *xArm) newCmd(reg byte) cmd {
 }
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
+	// x.moveLock.Lock()
+	// defer x.moveLock.Unlock()
 
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
@@ -170,13 +170,19 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		return cmd{}, err
 	}
 	if checkError {
+		x.logger.Debugf("here send params are: %v", c2.params)
 		state := c2.params[0]
 		if state&96 != 0 {
+			x.logger.Debugf("here reading error, status indicated warning or error")
 			// Error (64) and/or warning (32) bit is set
-			e2 := multierr.Combine(
-				x.readError(ctx),
-				x.clearErrorAndWarning(ctx))
-			return c2, e2
+			warnCode, errCode, err := x.readError(ctx)
+			//x.logger.Debugf("err: %v", err)
+			x.logger.Debugf("warn code: %x", warnCode)
+			x.logger.Errorf("err code: %x", errCode)
+			// e2 := multierr.Combine(
+			// 	err
+			// 	// x.clearErrorAndWarning(ctx))
+			return c2, err
 		}
 		// If bit 16 is set, that just means we have not yet activated motion- this happens at startup and shutdown
 	}
@@ -237,27 +243,36 @@ func (x *xArm) clearErrorAndWarning(ctx context.Context) error {
 	return multierr.Combine(err1, err2, err3, err4)
 }
 
-func (x *xArm) readError(ctx context.Context) error {
+// returns warning code, error code, error
+func (x *xArm) readError(ctx context.Context) (byte, byte, error) {
+	x.logger.Debug("here reading error")
 	c := x.newCmd(regMap["GetError"])
 	e, err := x.send(ctx, c, false)
+	x.logger.Debug("get error returned params: %v", e.params)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
 	if len(e.params) < 3 {
-		return errors.New("bad arm error query response")
+		return 0, 0, errors.New("bad arm error query response")
 	}
 
+	status := e.params[0]
+	if status == 0 {
+		return 0, 0, nil
+	}
 	errCode := e.params[1]
 	warnCode := e.params[2]
 	errMsg, isErr := armBoxErrorMap[errCode]
 	warnMsg, isWarn := armBoxWarnMap[warnCode]
 	if isErr || isWarn {
-		return multierr.Combine(errors.New(errMsg),
+		return warnCode, errCode, multierr.Combine(errors.New(errMsg),
 			errors.New(warnMsg))
 	}
+
+	x.logger.Debugf("returned e.params: %v", e.params)
 	// Commands are returning error codes that are not mentioned in the
 	// developer manual
-	return errors.New("xArm: UNKNOWN ERROR")
+	return 0, 0, errors.New("xArm: UNKNOWN ERROR")
 }
 
 // setMotionState sets the motion state of the arm.
@@ -369,6 +384,15 @@ func (x *xArm) Close(ctx context.Context) error {
 func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
+
+	// _, errCode, err := x.readError(ctx)
+	// x.logger.Debug("read error returned %v: ", err)
+	// if errCode == 0x1F {
+	// 	x.logger.Debug("got collision overcurrent error, continuing")
+	// } else if err != nil {
+	// 	return err
+	// }
+
 	return x.GoToInputs(ctx, newPositions)
 }
 
@@ -378,6 +402,14 @@ func (x *xArm) MoveThroughJointPositions(
 	_ *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
+	warnCode, errCode, err := x.readError(ctx)
+	x.logger.Debug("read error returned %w: ", err)
+	if warnCode == 0x1F || errCode == 0x1F {
+		x.logger.Debug("got collision overcurrent error, continuing")
+	} else if err != nil {
+		return err
+	}
+
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
 		if err := arm.CheckDesiredJointPositions(ctx, x, goal); err != nil {
@@ -768,15 +800,18 @@ func (x *xArm) openVacuum(ctx context.Context) error {
 	return nil
 }
 
-func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {
+func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	c := x.newCmd(regMap["CurrentTorque"])
 	// ~ c.params = append(c.params, 0x01)
 	loadData, err := x.send(ctx, c, true)
+	if err != nil {
+		return []float64{}, err
+	}
 	var loads []float64
 	for i := 0; i < x.dof; i++ {
 		idx := i*4 + 1
 		loads = append(loads, float64(rutils.Float32FromBytesLE((loadData.params[idx : idx+4]))))
 	}
 
-	return map[string]interface{}{"load": loads}, err
+	return loads, nil
 }
