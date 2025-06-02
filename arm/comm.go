@@ -137,9 +137,11 @@ func (x *xArm) newCmd(reg byte) cmd {
 	return cmd{tid: x.tid, prot: 2, reg: reg}
 }
 
-func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (c2 cmd, err error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
+	defer x.logger.Warnf("error: %v", err)
+	defer x.logger.Warnf("resp: %v", c2)
 
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
@@ -160,12 +162,12 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	_, err := x.conn.Write(b)
+	_, err = x.conn.Write(b)
 	if err != nil {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	c2, err := x.responseInLock(ctx)
+	c2, err = x.responseInLock(ctx)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -385,6 +387,11 @@ func (x *xArm) MoveThroughJointPositions(
 		}
 	}
 	curPos, err := x.JointPositions(ctx, nil)
+	if err != nil {
+		return err
+	}
+	x.logger.Warn(curPos)
+	err = x.readError(ctx)
 	if err != nil {
 		return err
 	}
