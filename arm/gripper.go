@@ -184,16 +184,19 @@ func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([
 		return nil, err
 	}
 
-	pos, err := g.getPosition(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
 
-	if pos < 20 || true { // gripper is closed
-		clawSize.Y = 110
-		clawSize.Z = 130
+	if false {
+		// until geometries aren't cacheed or model frame works differently can't do this
+		pos, err := g.getPosition(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if pos < 20 { // gripper is closed
+			clawSize.Y = 110
+			clawSize.Z = 130
+		}
 	}
 
 	g.logger.Debugf("clawSize: %v", clawSize)
