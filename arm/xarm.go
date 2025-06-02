@@ -30,7 +30,14 @@ const (
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
 	// DoCommand keys
-	loadKey = "load"
+	loadKey            = "load"
+	moveGripperKey     = "move_gripper"
+	getGripperKey      = "get_gripper"
+	gripperPositionKey = "gripper_position"
+	setAcckey          = "set_acceleration"
+	setSpeedKey        = "set_speed"
+	grabVacuumKey      = "grab_vacuum"
+	openVacuumKey      = "open_vacuum"
 )
 
 //go:embed xarm6_kinematics.json
@@ -324,7 +331,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 	resp := map[string]interface{}{}
 	validCommand := false
 
-	if val, ok := cmd["move_gripper"]; ok {
+	if val, ok := cmd[moveGripperKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
 		}
@@ -337,12 +344,12 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
-	if _, ok := cmd["get_gripper"]; ok {
+	if _, ok := cmd[getGripperKey]; ok {
 		pos, err := x.getGripperPosition(ctx)
 		if err != nil {
 			return nil, err
 		}
-		resp["gripper_position"] = float64(pos)
+		resp[gripperPositionKey] = float64(pos)
 		validCommand = true
 	}
 
@@ -357,7 +364,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		resp[loadKey] = loadInformation
 		validCommand = true
 	}
-	if val, ok := cmd["set_speed"]; ok {
+	if val, ok := cmd[setSpeedKey]; ok {
 		speed, err := utils.AssertType[float64](val)
 		if err != nil {
 			return nil, err
@@ -370,7 +377,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.confLock.Unlock()
 		validCommand = true
 	}
-	if val, ok := cmd["set_acceleration"]; ok {
+	if val, ok := cmd[setAcckey]; ok {
 		acceleration, err := utils.AssertType[float64](val)
 		if err != nil {
 			return nil, err
@@ -383,8 +390,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.confLock.Unlock()
 		validCommand = true
 	}
-	if _, ok := cmd["grab_vacuum"]; ok {
-		_, ok := cmd["grab_vacuum"].(bool)
+	if _, ok := cmd[grabVacuumKey]; ok {
+		_, ok := cmd[grabVacuumKey].(bool)
 		if !ok {
 			return nil, errors.New("could not read grab_vacuum")
 		}
@@ -393,8 +400,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
-	if _, ok := cmd["open_vacuum"]; ok {
-		_, ok := cmd["open_vacuum"].(bool)
+	if _, ok := cmd[openVacuumKey]; ok {
+		_, ok := cmd[openVacuumKey].(bool)
 		if !ok {
 			return nil, errors.New("could not read close_vacuum")
 		}
