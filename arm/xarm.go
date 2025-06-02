@@ -29,7 +29,7 @@ const (
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
-	// DoCommand keys
+	// DoCommand keys.
 	loadKey            = "load"
 	moveGripperKey     = "move_gripper"
 	getGripperKey      = "get_gripper"
