@@ -118,15 +118,15 @@ type Config struct {
 }
 
 // Validate validates the config.
-func (cfg *Config) Validate(path string) ([]string, error) {
+func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Host == "" {
-		return nil, resource.NewConfigValidationFieldRequiredError(path, "host")
+		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "host")
 	}
 	if cfg.Acceleration < 0 {
-		return nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
+		return nil, nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
 	}
 
-	return []string{}, nil
+	return []string{}, nil, nil
 }
 
 func (cfg *Config) speed() float32 {

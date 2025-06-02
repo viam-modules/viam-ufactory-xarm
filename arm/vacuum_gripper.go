@@ -26,12 +26,12 @@ type VacuumGripperConfig struct {
 }
 
 // Validate validates the config.
-func (cfg *VacuumGripperConfig) Validate(path string) ([]string, error) {
+func (cfg *VacuumGripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
-		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
+		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "board")
 	}
 
-	return []string{cfg.Arm}, nil
+	return []string{cfg.Arm}, nil, nil
 }
 
 func init() {
