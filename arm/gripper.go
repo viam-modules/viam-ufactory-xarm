@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -29,9 +30,8 @@ type GripperConfig struct {
 // Validate validates the config.
 func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
-		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "board")
+		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "arm")
 	}
-
 	return []string{cfg.Arm}, nil, nil
 }
 
@@ -53,7 +53,6 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	g := &myGripper{
 		name:   config.ResourceName(),
 		mf:     referenceframe.NewSimpleModel("foo"),
-		conf:   newConf,
 		logger: logger,
 	}
 
@@ -70,8 +69,6 @@ type myGripper struct {
 
 	name resource.Name
 	mf   referenceframe.Model
-
-	conf *GripperConfig
 
 	arm arm.Arm
 
@@ -215,6 +212,14 @@ func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([
 	}, nil
 }
 
-func (g *myGripper) ModelFrame() referenceframe.Model {
-	return g.mf
+func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return g.mf, nil
+}
+
+func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
+	return errors.ErrUnsupported
 }

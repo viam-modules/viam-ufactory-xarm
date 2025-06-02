@@ -9,13 +9,13 @@ require (
 	github.com/axw/gocov v1.1.0
 	github.com/edaniels/golinters v0.0.5-0.20220906153528-641155550742
 	github.com/fullstorydev/grpcurl v1.8.6
-	github.com/golang/geo v0.0.0-20210211234256-740aa86cb551
+	github.com/golang/geo v0.0.0-20230421003525-6adc56603217
 	github.com/golangci/golangci-lint v1.64.8
 	github.com/pkg/errors v0.9.1
 	github.com/rhysd/actionlint v1.6.24
 	go.uber.org/multierr v1.11.0
-	go.viam.com/api v0.1.435
-	go.viam.com/rdk v0.77.0
+	go.viam.com/api v0.1.438
+	go.viam.com/rdk v0.77.1-0.20250528183709-63bc09bd6731
 	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.1.143
 	gotest.tools/gotestsum v1.10.0
@@ -68,7 +68,7 @@ require (
 	github.com/bufbuild/protocompile v0.9.0 // indirect
 	github.com/butuzov/ireturn v0.3.1 // indirect
 	github.com/butuzov/mirror v1.3.0 // indirect
-	github.com/bytedance/sonic v1.12.2 // indirect
+	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/catenacyber/perfsprint v0.8.2 // indirect
 	github.com/ccojocar/zxcvbn-go v1.0.2 // indirect
@@ -79,6 +79,7 @@ require (
 	github.com/chavacava/garif v0.1.0 // indirect
 	github.com/chenzhekl/goply v0.0.0-20190930133256-258c2381defd // indirect
 	github.com/ckaznocha/intrange v0.3.0 // indirect
+	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/cncf/xds/go v0.0.0-20241223141626-cff3c89139a3 // indirect
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.5 // indirect
@@ -273,6 +274,7 @@ require (
 	github.com/timonwong/loggercheck v0.10.1 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.10.0 // indirect
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ultraware/funlen v0.2.0 // indirect
 	github.com/ultraware/whitespace v0.2.0 // indirect
 	github.com/uudashr/gocognit v1.2.0 // indirect
@@ -309,6 +311,7 @@ require (
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect

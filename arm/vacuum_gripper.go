@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 
 	"github.com/golang/geo/r3"
@@ -11,7 +12,6 @@ import (
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
-	"go.viam.com/utils"
 )
 
 // VacuumGripperModel model for the ufactory vacuum gripper.
@@ -19,39 +19,23 @@ var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
 var caseBoxSize = r3.Vector{X: 50, Y: 100, Z: 100}
 
-// VacuumGripperConfig config for gripper.
-type VacuumGripperConfig struct {
-	Arm    string
-	Vacuum bool
-}
-
-// Validate validates the config.
-func (cfg *VacuumGripperConfig) Validate(path string) ([]string, []string, error) {
-	if cfg.Arm == "" {
-		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "board")
-	}
-
-	return []string{cfg.Arm}, nil, nil
-}
-
 func init() {
 	resource.RegisterComponent(
 		gripper.API,
 		VacuumGripperModel,
-		resource.Registration[gripper.Gripper, *VacuumGripperConfig]{
+		resource.Registration[gripper.Gripper, *GripperConfig]{
 			Constructor: newVacuumGripper,
 		})
 }
 
 func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config resource.Config, logger logging.Logger) (gripper.Gripper, error) {
-	newConf, err := resource.NativeConfig[*VacuumGripperConfig](config)
+	newConf, err := resource.NativeConfig[*GripperConfig](config)
 	if err != nil {
 		return nil, err
 	}
 
 	g := &myVacuumGripper{
 		name:   config.ResourceName(),
-		conf:   newConf,
 		logger: logger,
 	}
 
@@ -67,8 +51,6 @@ type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
-
-	conf *VacuumGripperConfig
 
 	arm arm.Arm
 
@@ -140,6 +122,14 @@ func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface
 	}, nil
 }
 
-func (g *myVacuumGripper) ModelFrame() referenceframe.Model {
-	return nil
+func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myVacuumGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
+	return errors.ErrUnsupported
 }
