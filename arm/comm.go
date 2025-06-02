@@ -768,15 +768,18 @@ func (x *xArm) openVacuum(ctx context.Context) error {
 	return nil
 }
 
-func (x *xArm) getLoad(ctx context.Context) (map[string]interface{}, error) {
+func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	c := x.newCmd(regMap["CurrentTorque"])
 	// ~ c.params = append(c.params, 0x01)
 	loadData, err := x.send(ctx, c, true)
+	if err != nil {
+		return []float64{}, err
+	}
 	var loads []float64
 	for i := 0; i < x.dof; i++ {
 		idx := i*4 + 1
 		loads = append(loads, float64(rutils.Float32FromBytesLE((loadData.params[idx : idx+4]))))
 	}
 
-	return map[string]interface{}{"load": loads}, err
+	return loads, nil
 }
