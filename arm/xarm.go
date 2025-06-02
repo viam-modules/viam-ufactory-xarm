@@ -28,6 +28,9 @@ const (
 	defaultMoveHz = 100. // Don't change this
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
+
+	// DoCommand keys
+	loadKey = "load"
 )
 
 //go:embed xarm6_kinematics.json
@@ -343,7 +346,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		validCommand = true
 	}
 
-	if _, ok := cmd["load"]; ok {
+	if _, ok := cmd[loadKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
 		}
@@ -351,11 +354,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		loadInformationInterface, ok := loadInformation["loads"]
-		if !ok {
-			return nil, errors.New("could not read loadInformation")
-		}
-		resp["load"] = loadInformationInterface
+		resp["load"] = loadInformation
 		validCommand = true
 	}
 	if val, ok := cmd["set_speed"]; ok {
