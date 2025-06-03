@@ -138,9 +138,6 @@ func (x *xArm) newCmd(reg byte) cmd {
 }
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	// x.moveLock.Lock()
-	// defer x.moveLock.Unlock()
-
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
@@ -169,6 +166,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	if err != nil {
 		return cmd{}, err
 	}
+
 	if checkError {
 		x.logger.Debugf("here send params are: %v", c2.params)
 		state := c2.params[0]
@@ -179,12 +177,19 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 			//x.logger.Debugf("err: %v", err)
 			x.logger.Debugf("warn code: %x", warnCode)
 			x.logger.Errorf("err code: %x", errCode)
-			// e2 := multierr.Combine(
-			// 	err
-			// 	// x.clearErrorAndWarning(ctx))
-			return c2, err
+			// overcurrent estop has occured
+			var e2 error
+			if errCode == 0x1f {
+				e2 = fmt.Errorf("%w: make sure robot is clear of obstacles and send clear_error docommand to recover", err)
+			} else {
+				// clear any other error
+				e2 = multierr.Combine(
+					err,
+					x.clearErrorAndWarning(ctx))
+			}
+			return c2, e2
+			// If bit 16 is set, that just means we have not yet activated motion- this happens at startup and shutdown
 		}
-		// If bit 16 is set, that just means we have not yet activated motion- this happens at startup and shutdown
 	}
 	return c2, err
 }
@@ -192,6 +197,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
+		x.logger.Debugf("error reading, resetting connection")
 		x.resetConnection()
 		return cmd{}, err
 	}
@@ -202,6 +208,7 @@ func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	length := binary.BigEndian.Uint16(buf[4:6])
 	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
 	if err != nil {
+		x.logger.Debugf("error reading, resetting connection")
 		x.resetConnection()
 		return cmd{}, err
 	}
@@ -327,6 +334,11 @@ func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
 }
 
 func (x *xArm) start(ctx context.Context) error {
+	// _, _, err := x.readError(ctx)
+	// if err != nil {
+	// 	return err
+	// }
+
 	err := x.toggleServos(ctx, true)
 	if err != nil {
 		return err
@@ -376,22 +388,17 @@ func (x *xArm) Close(ctx context.Context) error {
 	}
 
 	err := x.conn.Close()
+	if err != nil {
+		return err
+	}
 	x.conn = nil
-	return err
+	return nil
 }
 
 // MoveToJointPositions moves the arm to the requested joint positions.
 func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-
-	// _, errCode, err := x.readError(ctx)
-	// x.logger.Debug("read error returned %v: ", err)
-	// if errCode == 0x1F {
-	// 	x.logger.Debug("got collision overcurrent error, continuing")
-	// } else if err != nil {
-	// 	return err
-	// }
 
 	return x.GoToInputs(ctx, newPositions)
 }
@@ -402,14 +409,8 @@ func (x *xArm) MoveThroughJointPositions(
 	_ *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
-	warnCode, errCode, err := x.readError(ctx)
-	x.logger.Debug("read error returned %w: ", err)
-	if warnCode == 0x1F || errCode == 0x1F {
-		x.logger.Debug("got collision overcurrent error, continuing")
-	} else if err != nil {
-		return err
-	}
-
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
 		if err := arm.CheckDesiredJointPositions(ctx, x, goal); err != nil {
@@ -594,6 +595,8 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 
 // EndPosition computes and returns the current cartesian position.
 func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (spatialmath.Pose, error) {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
 	joints, err := x.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
@@ -603,6 +606,8 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 
 // MoveToPosition moves the arm to the specified cartesian position.
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 	if !x.started {
@@ -622,6 +627,8 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 
 // JointPositions returns the current positions of all joints.
 func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{}) ([]referenceframe.Input, error) {
+	// x.moveLock.Lock()
+	// defer x.moveLock.Unlock()
 	c := x.newCmd(regMap["JointPos"])
 
 	jData, err := x.send(ctx, c, true)
@@ -629,6 +636,14 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 		return nil, err
 	}
 	var radians []float64
+
+	if jData.params == nil {
+		return nil, errors.New("couldn't get joint positions")
+	}
+	// didn't return expected bytes
+	if len(jData.params) < x.dof*4 {
+		return nil, errors.New("unexpected return getting joint positions")
+	}
 	for i := 0; i < x.dof; i++ {
 		idx := i*4 + 1
 		radians = append(radians, float64(rutils.Float32FromBytesLE((jData.params[idx : idx+4]))))
@@ -638,6 +653,8 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 
 // Stop stops the xArm but also reinitializes the arm so it can take commands again.
 func (x *xArm) Stop(ctx context.Context, extra map[string]interface{}) error {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 	x.started = false

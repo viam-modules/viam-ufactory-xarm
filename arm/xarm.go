@@ -30,7 +30,17 @@ const (
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
 	// DoCommand keys
-	loadKey = "load"
+	loadKey            = "load"
+	moveGripperKey     = "move_gripper"
+	getGripperKey      = "get_gripper"
+	gripperPositionKey = "gripper_position"
+	setAcckey          = "set_acceleration"
+	setSpeedKey        = "set_speed"
+	grabVacuumKey      = "grab_vacuum"
+	openVacuumKey      = "open_vacuum"
+	clearErrorKey      = "clear_error"
+	getStateKey        = "get_state"
+	getErrorKey        = "get_error"
 )
 
 //go:embed xarm6_kinematics.json
@@ -229,8 +239,19 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+	// x.clearErrorAndWarning(ctx)
 
-	err := x.connect(ctx)
+	var d net.Dialer
+	var err error
+
+	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
+	if err != nil {
+		return nil, err
+	}
+
+	err = x.start(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -269,10 +290,12 @@ func (x *xArm) resetConnection() {
 	if err != nil {
 		x.logger.Infof("error closing old socket: %v", err)
 	}
+	x.logger.Infof("here x.conn setting to nil")
 	x.conn = nil
 }
 
 func (x *xArm) connect(ctx context.Context) error {
+	x.logger.Debug("here in connect resetting connection")
 	x.resetConnection()
 
 	var d net.Dialer
@@ -285,10 +308,12 @@ func (x *xArm) connect(ctx context.Context) error {
 
 	err = x.start(ctx)
 	if err != nil {
+		x.logger.Infof("failed to start xarm:  %s", err.Error())
 		err = x.conn.Close()
 		if err != nil {
 			x.logger.Infof("error closing bad socket: %v", err)
 		}
+		x.logger.Infof("here x.conn setting to nil")
 		x.conn = nil
 		return errors.Wrap(err, "failed to start xarm")
 	}
@@ -324,7 +349,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 	resp := map[string]interface{}{}
 	validCommand := false
 
-	if val, ok := cmd["move_gripper"]; ok {
+	if val, ok := cmd[moveGripperKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
 		}
@@ -337,12 +362,12 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
-	if _, ok := cmd["get_gripper"]; ok {
+	if _, ok := cmd[getGripperKey]; ok {
 		pos, err := x.getGripperPosition(ctx)
 		if err != nil {
 			return nil, err
 		}
-		resp["gripper_position"] = float64(pos)
+		resp[gripperPositionKey] = float64(pos)
 		validCommand = true
 	}
 
@@ -354,10 +379,10 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		resp["load"] = loadInformation
+		resp[loadKey] = loadInformation
 		validCommand = true
 	}
-	if val, ok := cmd["set_speed"]; ok {
+	if val, ok := cmd[setSpeedKey]; ok {
 		speed, err := utils.AssertType[float64](val)
 		if err != nil {
 			return nil, err
@@ -370,7 +395,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.confLock.Unlock()
 		validCommand = true
 	}
-	if val, ok := cmd["set_acceleration"]; ok {
+	if val, ok := cmd[setAcckey]; ok {
 		acceleration, err := utils.AssertType[float64](val)
 		if err != nil {
 			return nil, err
@@ -383,8 +408,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		x.confLock.Unlock()
 		validCommand = true
 	}
-	if _, ok := cmd["grab_vacuum"]; ok {
-		_, ok := cmd["grab_vacuum"].(bool)
+	if _, ok := cmd[grabVacuumKey]; ok {
+		_, ok := cmd[grabVacuumKey].(bool)
 		if !ok {
 			return nil, errors.New("could not read grab_vacuum")
 		}
@@ -393,8 +418,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 		validCommand = true
 	}
-	if _, ok := cmd["open_vacuum"]; ok {
-		_, ok := cmd["open_vacuum"].(bool)
+	if _, ok := cmd[openVacuumKey]; ok {
+		_, ok := cmd[openVacuumKey].(bool)
 		if !ok {
 			return nil, errors.New("could not read close_vacuum")
 		}
@@ -402,6 +427,29 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 		validCommand = true
+	}
+	if _, ok := cmd[clearErrorKey]; ok {
+		if err := x.clearErrorAndWarning(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if _, ok := cmd[getStateKey]; ok {
+		c := x.newCmd(regMap["GetState"])
+		sData, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"get_state": sData.params}, nil
+	}
+	if _, ok := cmd[getErrorKey]; ok {
+		c := x.newCmd(regMap["GetError"])
+		sData, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{"error info": sData.params}, nil
 	}
 
 	if !validCommand {

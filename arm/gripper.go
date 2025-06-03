@@ -135,13 +135,13 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 
 func (g *myGripper) getPosition(ctx context.Context) (int, error) {
 	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
-		"get_gripper": true,
+		getGripperKey: true,
 	})
 	if err != nil {
 		return 0, err
 	}
 
-	raw := res["gripper_position"]
+	raw := res[gripperPositionKey]
 	pos, ok := raw.(float64)
 	if !ok {
 		return 0, fmt.Errorf("bad gripper_position (%v) %T", raw, raw)

@@ -65,7 +65,7 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}
 
 	{
 		_, err := g.arm.DoCommand(ctx, map[string]interface{}{
-			"grab_vacuum": true,
+			grabVacuumKey: true,
 		})
 		if err != nil {
 			return false, err
@@ -81,7 +81,7 @@ func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}
 
 	{
 		_, err := g.arm.DoCommand(ctx, map[string]interface{}{
-			"open_vacuum": true,
+			openVacuumKey: true,
 		})
 		if err != nil {
 			return err
