@@ -238,17 +238,8 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	// x.clearErrorAndWarning(ctx)
 
-	var d net.Dialer
-	var err error
-
-	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
-	if err != nil {
-		return nil, err
-	}
-
-	err = x.start(ctx)
+	err := x.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +249,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		x.dof = newConf.maxBadJoint() + 1
 		current, err = x.CurrentInputs(ctx)
 		if err != nil {
-			return nil, err
+			return nil, , multierr.Combine(err, x.Close(ctx))
 		}
 	}
 
@@ -292,7 +283,6 @@ func (x *xArm) resetConnection() {
 }
 
 func (x *xArm) connect(ctx context.Context) error {
-	x.logger.Debug("here in connect resetting connection")
 	x.resetConnection()
 
 	var d net.Dialer
@@ -305,12 +295,10 @@ func (x *xArm) connect(ctx context.Context) error {
 
 	err = x.start(ctx)
 	if err != nil {
-		x.logger.Infof("failed to start xarm:  %s", err.Error())
 		err = x.conn.Close()
 		if err != nil {
 			x.logger.Infof("error closing bad socket: %v", err)
 		}
-		x.logger.Infof("here x.conn setting to nil")
 		x.conn = nil
 		return errors.Wrap(err, "failed to start xarm")
 	}

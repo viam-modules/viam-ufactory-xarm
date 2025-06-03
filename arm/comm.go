@@ -170,10 +170,12 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 
 			_, errCode, err := parseError(errors)
 			var e2 error
-			// overcurrent estop has occurred, must be manually cleared by user
-			if errCode == errCodeCollision {
-				e2 = fmt.Errorf("%w ensure robot is clear of obstacles and clear error through UFACTORY Studio or clear_error do command", err)
-			} else {
+			switch errCode {
+			case errCodeCollision:
+				// overcurrent estop has occurred, must be manually cleared by user
+				e2 = fmt.Errorf("%w ensure robot is clear of obstacles and clear error"+
+					"through UFACTORY Studio or clear_error do command", err)
+			default:
 				// reset any other error
 				e2 = multierr.Combine(
 					err,
@@ -209,7 +211,6 @@ func (x *xArm) sendCommand(ctx context.Context, c cmd) (cmd, error) {
 func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
-		x.logger.Debugf("error reading, resetting connection")
 		x.resetConnection()
 		return cmd{}, err
 	}
@@ -220,7 +221,6 @@ func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	length := binary.BigEndian.Uint16(buf[4:6])
 	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
 	if err != nil {
-		x.logger.Debugf("error reading, resetting connection")
 		x.resetConnection()
 		return cmd{}, err
 	}
@@ -401,6 +401,7 @@ func (x *xArm) Close(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	x.conn = nil
 
 	return nil
 }
@@ -409,7 +410,6 @@ func (x *xArm) Close(ctx context.Context) error {
 func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-
 	return x.GoToInputs(ctx, newPositions)
 }
 
@@ -427,7 +427,7 @@ func (x *xArm) MoveThroughJointPositions(
 	state := b[0]
 
 	// xarm is not in movement state: was just restarted or estopped
-	// must set back to motion mode
+	// must set mode and state back to motion
 	if state == 0x10 {
 		if err = x.setMotionMode(ctx, 1); err != nil {
 			return err
@@ -436,8 +436,6 @@ func (x *xArm) MoveThroughJointPositions(
 			return err
 		}
 	}
-
-	x.logger.Infof("HERE MOVE THROUGH POSITIONS")
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
 		if err := arm.CheckDesiredJointPositions(ctx, x, goal); err != nil {
@@ -591,7 +589,6 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 			return err
 		}
 	}
-	x.logger.Infof("CALLING MOVE JOINTS")
 	// convenience for structuring and sending individual joint steps
 	for _, step := range rawSteps {
 		c := x.newCmd(regMap["MoveJoints"])
