@@ -280,7 +280,7 @@ func (x *xArm) getErrors(ctx context.Context) ([]byte, error) {
 func parseError(params []byte) (byte, error) {
 	status := params[0]
 	if status == 0 {
-		return byte(math.NaN()), nil
+		return 0, nil
 	}
 
 	errCode := params[1]
@@ -294,7 +294,7 @@ func parseError(params []byte) (byte, error) {
 
 	// Commands are returning error codes that are not mentioned in the
 	// developer manual
-	return byte(math.NaN()), errors.New("xArm: UNKNOWN ERROR")
+	return 0, errors.New("xArm: UNKNOWN ERROR")
 }
 
 // setMotionState sets the motion state of the arm.
