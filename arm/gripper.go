@@ -213,7 +213,7 @@ func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, nil
+	return g.mf, fmt.Errorf("temp hack because of issues")
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
