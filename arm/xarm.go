@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
-	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -29,7 +28,7 @@ const (
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
-	// DoCommand keys
+	// DoCommand keys.
 	loadKey            = "load"
 	moveGripperKey     = "move_gripper"
 	getGripperKey      = "get_gripper"
@@ -239,8 +238,6 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
 	// x.clearErrorAndWarning(ctx)
 
 	var d net.Dialer
@@ -261,7 +258,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		x.dof = newConf.maxBadJoint() + 1
 		current, err = x.CurrentInputs(ctx)
 		if err != nil {
-			return nil, multierr.Combine(err, x.Close(ctx))
+			return nil, err
 		}
 	}
 
@@ -429,7 +426,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		validCommand = true
 	}
 	if _, ok := cmd[clearErrorKey]; ok {
-		if err := x.clearErrorAndWarning(ctx); err != nil {
+		if err := x.resetErrorState(ctx); err != nil {
 			return nil, err
 		}
 		validCommand = true
