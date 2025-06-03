@@ -168,7 +168,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 				return cmd{}, err
 			}
 
-			_, errCode, err := parseError(errors)
+			errCode, err := parseError(errors)
 			var e2 error
 			switch errCode {
 			case errCodeCollision:
@@ -276,11 +276,11 @@ func (x *xArm) getErrors(ctx context.Context) ([]byte, error) {
 	return resp.params, nil
 }
 
-// returns warning code, error code, error.
-func parseError(params []byte) (byte, byte, error) {
+// returns error code and error.
+func parseError(params []byte) (byte, error) {
 	status := params[0]
 	if status == 0 {
-		return 0, 0, nil
+		return byte(math.NaN()), nil
 	}
 
 	errCode := params[1]
@@ -288,13 +288,13 @@ func parseError(params []byte) (byte, byte, error) {
 	errMsg, isErr := armBoxErrorMap[errCode]
 	warnMsg, isWarn := armBoxWarnMap[warnCode]
 	if isErr || isWarn {
-		return warnCode, errCode, multierr.Combine(errors.New(errMsg),
+		return errCode, multierr.Combine(errors.New(errMsg),
 			errors.New(warnMsg))
 	}
 
 	// Commands are returning error codes that are not mentioned in the
 	// developer manual
-	return 0, 0, errors.New("xArm: UNKNOWN ERROR")
+	return byte(math.NaN()), errors.New("xArm: UNKNOWN ERROR")
 }
 
 // setMotionState sets the motion state of the arm.

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -249,7 +250,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		x.dof = newConf.maxBadJoint() + 1
 		current, err = x.CurrentInputs(ctx)
 		if err != nil {
-			return nil, , multierr.Combine(err, x.Close(ctx))
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 
@@ -278,7 +279,6 @@ func (x *xArm) resetConnection() {
 	if err != nil {
 		x.logger.Infof("error closing old socket: %v", err)
 	}
-	x.logger.Infof("here x.conn setting to nil")
 	x.conn = nil
 }
 
