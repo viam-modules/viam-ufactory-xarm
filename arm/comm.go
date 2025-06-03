@@ -17,7 +17,7 @@ import (
 	"go.viam.com/utils"
 )
 
-const errCodeCollision = 0x01F
+const errCodeCollision = 0x1F
 
 var servoErrorMap = map[byte]string{
 	0x00: "xArm Servo: Joint Communication Error",
@@ -167,6 +167,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 			if err != nil {
 				return cmd{}, err
 			}
+
 			_, errCode, err := parseError(errors)
 			var e2 error
 			// overcurrent estop has occurred, must be manually cleared by user
