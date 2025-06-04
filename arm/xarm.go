@@ -425,7 +425,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"get_state": sData.params}, nil
+		return map[string]interface{}{"state": sData.params}, nil
 	}
 	if _, ok := cmd[getErrorKey]; ok {
 		c := x.newCmd(regMap["GetError"])

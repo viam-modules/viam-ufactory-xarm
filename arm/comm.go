@@ -169,11 +169,11 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 			}
 			errCode := params[1]
 			if errCode == errCodeCollision {
-				// overcurrent estop has occurred, must be manually cleared by user
+				// overcurrent estop has occurred, must be manually cleared by user.
 				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
 					"through UFACTORY Studio or clear_error do command")
 			}
-			// clear any other error
+			// Any other errors are cleared automatically by the driver.
 			return cmd{}, multierr.Combine(
 				decodeError(params),
 				x.resetErrorState(ctx))
