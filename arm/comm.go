@@ -152,7 +152,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		}
 	}
 
-	resp, err := x.sendCommand(ctx, c)
+	resp, err := x.writeBytes(ctx, c)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -160,34 +160,29 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	// check the error returned by the response
 	if checkError {
 		state := resp.params[0]
-		// Error (64) and/or warning (32) bit is set
-		if state&96 != 0 {
-			x.logger.Debugf("status indicated a warning or error")
-			errors, err := x.getErrors(ctx)
+		// the 2nd and 3rd MSB in state byte indicate if there
+		// is an error or warning respectively.
+		if state&(1<<6|1<<5) != 0 {
+			params, err := x.getErrorParams(ctx)
 			if err != nil {
 				return cmd{}, err
 			}
-
-			errCode, err := parseError(errors)
-			var e2 error
-			switch errCode {
-			case errCodeCollision:
+			errCode := params[1]
+			if errCode == errCodeCollision {
 				// overcurrent estop has occurred, must be manually cleared by user
-				e2 = fmt.Errorf("%w ensure robot is clear of obstacles and clear error"+
-					"through UFACTORY Studio or clear_error do command", err)
-			default:
-				// reset any other error
-				e2 = multierr.Combine(
-					err,
-					x.resetErrorState(ctx))
+				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
+					"through UFACTORY Studio or clear_error do command")
 			}
-			return resp, e2
+			// clear any other error
+			return cmd{}, multierr.Combine(
+				decodeError(params),
+				x.resetErrorState(ctx))
 		}
 	}
 	return resp, err
 }
 
-func (x *xArm) sendCommand(ctx context.Context, c cmd) (cmd, error) {
+func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
 	b := c.bytes()
@@ -201,11 +196,7 @@ func (x *xArm) sendCommand(ctx context.Context, c cmd) (cmd, error) {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	resp, err := x.responseInLock(ctx)
-	if err != nil {
-		return cmd{}, err
-	}
-	return resp, nil
+	return x.responseInLock(ctx)
 }
 
 func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
@@ -262,9 +253,9 @@ func (x *xArm) resetErrorState(ctx context.Context) error {
 	return multierr.Combine(err1, err2, err3, err4)
 }
 
-func (x *xArm) getErrors(ctx context.Context) ([]byte, error) {
+func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
 	c := x.newCmd(regMap["GetError"])
-	resp, err := x.sendCommand(ctx, c)
+	resp, err := x.writeBytes(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -276,25 +267,19 @@ func (x *xArm) getErrors(ctx context.Context) ([]byte, error) {
 	return resp.params, nil
 }
 
-// returns error code and error.
-func parseError(params []byte) (byte, error) {
-	status := params[0]
-	if status == 0 {
-		return 0, nil
-	}
-
+func decodeError(params []byte) error {
 	errCode := params[1]
 	warnCode := params[2]
 	errMsg, isErr := armBoxErrorMap[errCode]
 	warnMsg, isWarn := armBoxWarnMap[warnCode]
 	if isErr || isWarn {
-		return errCode, multierr.Combine(errors.New(errMsg),
+		return multierr.Combine(errors.New(errMsg),
 			errors.New(warnMsg))
 	}
 
 	// Commands are returning error codes that are not mentioned in the
 	// developer manual
-	return 0, errors.New("xArm: UNKNOWN ERROR")
+	return errors.New("xArm: UNKNOWN ERROR")
 }
 
 // setMotionState sets the motion state of the arm.
@@ -420,7 +405,7 @@ func (x *xArm) MoveThroughJointPositions(
 	_ map[string]interface{},
 ) error {
 	// Ensure the robot is in correct mode to move
-	b, err := x.getErrors(ctx)
+	b, err := x.getErrorParams(ctx)
 	if err != nil {
 		return err
 	}
@@ -660,7 +645,7 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 	}
 	// didn't return expected bytes
 	if len(jData.params) < x.dof*4 {
-		return nil, errors.New("unexpected return getting joint positions")
+		return nil, fmt.Errorf("unexpected return getting joint positions, got %d want %d", len(jData.params), x.dof)
 	}
 	for i := 0; i < x.dof; i++ {
 		idx := i*4 + 1
