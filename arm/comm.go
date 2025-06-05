@@ -17,6 +17,8 @@ import (
 	"go.viam.com/utils"
 )
 
+const errCodeCollision = 0x1F
+
 var servoErrorMap = map[byte]string{
 	0x00: "xArm Servo: Joint Communication Error",
 	0x0A: "xArm Servo: Current Detection Error",
@@ -46,36 +48,36 @@ var servoErrorMap = map[byte]string{
 }
 
 var armBoxErrorMap = map[byte]string{
-	0x01: "xArm: Emergency Stop Button Pushed In",
-	0x02: "xArm: Emergency IO Triggered",
-	0x03: "xArm: Emergency Stop 3-State Switch Pressed",
-	0x0B: "xArm: Power Cycle Required",
-	0x0C: "xArm: Power Cycle Required",
-	0x0D: "xArm: Power Cycle Required",
-	0x0E: "xArm: Power Cycle Required",
-	0x0F: "xArm: Power Cycle Required",
-	0x10: "xArm: Power Cycle Required",
-	0x11: "xArm: Power Cycle Required",
-	0x13: "xArm: Gripper Communication Error",
-	0x15: "xArm: Kinematic Error",
-	0x16: "xArm: Self Collision Error",
-	0x17: "xArm: Joint Angle Exceeds Limit",
-	0x18: "xArm: Speed Exceeds Limit",
-	0x19: "xArm: Planning Error",
-	0x1A: "xArm: Linux RT Error",
-	0x1B: "xArm: Command Reply Error",
-	0x1C: "xArm: End Module Communication Error",
-	0x1D: "xArm: Other Errors",
-	0x1E: "xArm: Feedback Speed Exceeds Limit",
-	0x1F: "xArm: Collision Caused Abnormal Current",
-	0x20: "xArm: Three-point Drawing Circle Calculation Error",
-	0x21: "xArm: Abnormal Arm Current",
-	0x22: "xArm: Recording Timeout",
-	0x23: "xArm: Safety Boundary Limit",
-	0x24: "xArm: Delay Command Limit Exceeded",
-	0x25: "xArm: Abnormal Motion in Manual Mode",
-	0x26: "xArm: Abnormal Joint Angle",
-	0x27: "xArm: Abnormal Communication Between Power Boards",
+	0x01:             "xArm: Emergency Stop Button Pushed In",
+	0x02:             "xArm: Emergency IO Triggered",
+	0x03:             "xArm: Emergency Stop 3-State Switch Pressed",
+	0x0B:             "xArm: Power Cycle Required",
+	0x0C:             "xArm: Power Cycle Required",
+	0x0D:             "xArm: Power Cycle Required",
+	0x0E:             "xArm: Power Cycle Required",
+	0x0F:             "xArm: Power Cycle Required",
+	0x10:             "xArm: Power Cycle Required",
+	0x11:             "xArm: Power Cycle Required",
+	0x13:             "xArm: Gripper Communication Error",
+	0x15:             "xArm: Kinematic Error",
+	0x16:             "xArm: Self Collision Error",
+	0x17:             "xArm: Joint Angle Exceeds Limit",
+	0x18:             "xArm: Speed Exceeds Limit",
+	0x19:             "xArm: Planning Error",
+	0x1A:             "xArm: Linux RT Error",
+	0x1B:             "xArm: Command Reply Error",
+	0x1C:             "xArm: End Module Communication Error",
+	0x1D:             "xArm: Other Errors",
+	0x1E:             "xArm: Feedback Speed Exceeds Limit",
+	errCodeCollision: "xArm: Collision Caused Abnormal Current",
+	0x20:             "xArm: Three-point Drawing Circle Calculation Error",
+	0x21:             "xArm: Abnormal Arm Current",
+	0x22:             "xArm: Recording Timeout",
+	0x23:             "xArm: Safety Boundary Limit",
+	0x24:             "xArm: Delay Command Limit Exceeded",
+	0x25:             "xArm: Abnormal Motion in Manual Mode",
+	0x26:             "xArm: Abnormal Joint Angle",
+	0x27:             "xArm: Abnormal Communication Between Power Boards",
 }
 
 var armBoxWarnMap = map[byte]string{
@@ -138,9 +140,6 @@ func (x *xArm) newCmd(reg byte) cmd {
 }
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
-
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
@@ -153,8 +152,40 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		}
 	}
 
-	b := c.bytes()
+	resp, err := x.writeBytes(ctx, c)
+	if err != nil {
+		return cmd{}, err
+	}
 
+	// check the error returned by the response
+	if checkError {
+		state := resp.params[0]
+		// the 2nd and 3rd MSB in state byte indicate if there
+		// is an error or warning respectively.
+		if state&(1<<6|1<<5) != 0 {
+			params, err := x.getErrorParams(ctx)
+			if err != nil {
+				return cmd{}, err
+			}
+			errCode := params[1]
+			if errCode == errCodeCollision {
+				// overcurrent estop has occurred, must be manually cleared by user.
+				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
+					"through UFACTORY Studio or clear_error do command")
+			}
+			// Any other errors are cleared automatically by the driver.
+			return cmd{}, multierr.Combine(
+				decodeError(params),
+				x.resetErrorState(ctx))
+		}
+	}
+	return resp, err
+}
+
+func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
+	b := c.bytes()
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		x.resetConnection()
@@ -165,22 +196,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	c2, err := x.responseInLock(ctx)
-	if err != nil {
-		return cmd{}, err
-	}
-	if checkError {
-		state := c2.params[0]
-		if state&96 != 0 {
-			// Error (64) and/or warning (32) bit is set
-			e2 := multierr.Combine(
-				x.readError(ctx),
-				x.clearErrorAndWarning(ctx))
-			return c2, e2
-		}
-		// If bit 16 is set, that just means we have not yet activated motion- this happens at startup and shutdown
-	}
-	return c2, err
+	return x.responseInLock(ctx)
 }
 
 func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
@@ -227,7 +243,7 @@ func (x *xArm) CheckServoErrors(ctx context.Context) error {
 	return err
 }
 
-func (x *xArm) clearErrorAndWarning(ctx context.Context) error {
+func (x *xArm) resetErrorState(ctx context.Context) error {
 	c1 := x.newCmd(regMap["ClearError"])
 	c2 := x.newCmd(regMap["ClearWarn"])
 	_, err1 := x.send(ctx, c1, false)
@@ -237,24 +253,30 @@ func (x *xArm) clearErrorAndWarning(ctx context.Context) error {
 	return multierr.Combine(err1, err2, err3, err4)
 }
 
-func (x *xArm) readError(ctx context.Context) error {
+func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
 	c := x.newCmd(regMap["GetError"])
-	e, err := x.send(ctx, c, false)
+	resp, err := x.writeBytes(ctx, c)
 	if err != nil {
-		return err
-	}
-	if len(e.params) < 3 {
-		return errors.New("bad arm error query response")
+		return nil, err
 	}
 
-	errCode := e.params[1]
-	warnCode := e.params[2]
+	if len(resp.params) < 3 {
+		return nil, errors.New("bad arm error query response")
+	}
+
+	return resp.params, nil
+}
+
+func decodeError(params []byte) error {
+	errCode := params[1]
+	warnCode := params[2]
 	errMsg, isErr := armBoxErrorMap[errCode]
 	warnMsg, isWarn := armBoxWarnMap[warnCode]
 	if isErr || isWarn {
 		return multierr.Combine(errors.New(errMsg),
 			errors.New(warnMsg))
 	}
+
 	// Commands are returning error codes that are not mentioned in the
 	// developer manual
 	return errors.New("xArm: UNKNOWN ERROR")
@@ -361,8 +383,12 @@ func (x *xArm) Close(ctx context.Context) error {
 	}
 
 	err := x.conn.Close()
+	if err != nil {
+		return err
+	}
 	x.conn = nil
-	return err
+
+	return nil
 }
 
 // MoveToJointPositions moves the arm to the requested joint positions.
@@ -378,6 +404,23 @@ func (x *xArm) MoveThroughJointPositions(
 	_ *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
+	// Ensure the robot is in correct mode to move
+	b, err := x.getErrorParams(ctx)
+	if err != nil {
+		return err
+	}
+	state := b[0]
+
+	// xarm is not in movement state: was just restarted or estopped
+	// must set mode and state back to motion
+	if state == 0x10 {
+		if err = x.setMotionMode(ctx, 1); err != nil {
+			return err
+		}
+		if err = x.setMotionState(ctx, 0); err != nil {
+			return err
+		}
+	}
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
 		if err := arm.CheckDesiredJointPositions(ctx, x, goal); err != nil {
@@ -531,7 +574,6 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 			return err
 		}
 	}
-
 	// convenience for structuring and sending individual joint steps
 	for _, step := range rawSteps {
 		c := x.newCmd(regMap["MoveJoints"])
@@ -597,6 +639,14 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 		return nil, err
 	}
 	var radians []float64
+
+	if jData.params == nil {
+		return nil, errors.New("couldn't get joint positions")
+	}
+	// didn't return expected bytes
+	if len(jData.params) < x.dof*4 {
+		return nil, fmt.Errorf("unexpected return getting joint positions, got %d want %d", len(jData.params), x.dof)
+	}
 	for i := 0; i < x.dof; i++ {
 		idx := i*4 + 1
 		radians = append(radians, float64(rutils.Float32FromBytesLE((jData.params[idx : idx+4]))))

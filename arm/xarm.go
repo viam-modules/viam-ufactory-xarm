@@ -38,6 +38,9 @@ const (
 	setSpeedKey        = "set_speed"
 	grabVacuumKey      = "grab_vacuum"
 	openVacuumKey      = "open_vacuum"
+	clearErrorKey      = "clear_error"
+	getStateKey        = "get_state"
+	getErrorKey        = "get_error"
 )
 
 //go:embed xarm6_kinematics.json
@@ -409,6 +412,29 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 		validCommand = true
+	}
+	if _, ok := cmd[clearErrorKey]; ok {
+		if err := x.resetErrorState(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if _, ok := cmd[getStateKey]; ok {
+		c := x.newCmd(regMap["GetState"])
+		sData, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"state": sData.params}, nil
+	}
+	if _, ok := cmd[getErrorKey]; ok {
+		c := x.newCmd(regMap["GetError"])
+		sData, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+
+		return map[string]interface{}{"error info": sData.params}, nil
 	}
 
 	if !validCommand {
