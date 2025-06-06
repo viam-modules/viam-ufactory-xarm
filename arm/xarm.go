@@ -6,6 +6,7 @@ import (
 	_ "embed" // for embedding model file.
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -22,8 +23,10 @@ import (
 )
 
 const (
-	defaultSpeed  = 50.  // degrees per second
-	defaultAccel  = 100. // degrees per second per second
+	defaultSpeed  = 50.      // degrees per second
+	defaultAccel  = 100.     // degrees per second per second
+	maxSpeedRad   = math.Pi  // rads per second
+	MaxAccelRad   = 19.98402 // rads per second per second (1145 degrees)
 	defaultPort   = 502
 	defaultMoveHz = 100. // Don't change this
 
