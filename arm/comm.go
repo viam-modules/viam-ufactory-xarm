@@ -406,7 +406,10 @@ func (x *xArm) MoveThroughJointPositions(
 ) error {
 	if opts != nil {
 		if opts.MaxVelRads < rutils.DegToRad(minSpeed) || opts.MaxVelRads > rutils.DegToRad(maxSpeed) {
-			return fmt.Errorf("invalid max velocity option: valid range is %f-%f, got %f", rutils.DegToRad(minSpeed), rutils.DegToRad(maxSpeed), opts.MaxVelRads)
+			return fmt.Errorf("invalid max velocity option: valid range is %f-%f, got %f",
+				rutils.DegToRad(minSpeed),
+				rutils.DegToRad(maxSpeed),
+				opts.MaxVelRads)
 		}
 		if opts.MaxAccRads < 0 || opts.MaxAccRads > rutils.DegToRad(maxAccel) {
 			return fmt.Errorf("invalid max acceleration option: valid range is 0-%f, got %f", rutils.DegToRad(maxAccel), opts.MaxAccRads)
