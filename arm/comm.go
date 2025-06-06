@@ -405,11 +405,11 @@ func (x *xArm) MoveThroughJointPositions(
 	_ map[string]interface{},
 ) error {
 	if opts != nil {
-		if opts.MaxVelRads < 0 || opts.MaxVelRads > maxSpeedRad {
-			return fmt.Errorf("invalid max velocity option: valid range is 0-%d", maxSpeedRad)
+		if opts.MaxVelRads < rutils.DegToRad(minSpeed) || opts.MaxVelRads > rutils.DegToRad(maxSpeed) {
+			return fmt.Errorf("invalid max velocity option: valid range is %f-%f", rutils.DegToRad(minSpeed), rutils.DegToRad(maxSpeed))
 		}
-		if opts.MaxAccRads < 0 || opts.MaxAccRads > MaxAccelRad {
-			return fmt.Errorf("invalid max acceleration option: valid range is 0-%d", MaxAccelRad)
+		if opts.MaxAccRads < 0 || opts.MaxAccRads > rutils.DegToRad(maxAccel) {
+			return fmt.Errorf("invalid max acceleration option: valid range is 0-%f", rutils.DegToRad(maxAccel))
 		}
 	}
 	// Ensure the robot is in correct mode to move
