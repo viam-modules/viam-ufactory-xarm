@@ -22,10 +22,11 @@ import (
 )
 
 const (
-	defaultSpeed  = 50.  // degrees per second
-	defaultAccel  = 100. // degrees per second per second
-	defaultPort   = 502
-	defaultMoveHz = 100. // Don't change this
+	defaultSpeed       = 50.  // degrees per second
+	defaultAccel       = 100. // degrees per second per second
+	defaultPort        = 502
+	defaultMoveHz      = 100. // Don't change this
+	defaultSensitivity = 3
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
@@ -141,6 +142,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
 	}
 
+	if cfg.Sensitivity < 0 || cfg.Sensitivity > 5 {
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5")
+	}
+
 	return []string{}, []string{}, nil
 }
 
@@ -156,6 +161,13 @@ func (cfg *Config) acceleration() float32 {
 		return defaultAccel
 	}
 	return cfg.Acceleration
+}
+
+func (cfg *Config) sensitivity() int {
+	if cfg.Sensitivity == 0 {
+		return defaultSensitivity
+	}
+	return cfg.Sensitivity
 }
 
 func (cfg *Config) host() string {
@@ -240,6 +252,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
+		sensitivity:  newConf.sensitivity(),
 	}
 
 	err := x.connect(ctx)
