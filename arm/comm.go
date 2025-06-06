@@ -401,9 +401,20 @@ func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenc
 func (x *xArm) MoveThroughJointPositions(
 	ctx context.Context,
 	positions [][]referenceframe.Input,
-	_ *arm.MoveOptions,
+	opts *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
+	if opts != nil {
+		if opts.MaxVelRads < rutils.DegToRad(minSpeed) || opts.MaxVelRads > rutils.DegToRad(maxSpeed) {
+			return fmt.Errorf("invalid max velocity option: valid range is %f-%f, got %f",
+				rutils.DegToRad(minSpeed),
+				rutils.DegToRad(maxSpeed),
+				opts.MaxVelRads)
+		}
+		if opts.MaxAccRads < 0 || opts.MaxAccRads > rutils.DegToRad(maxAccel) {
+			return fmt.Errorf("invalid max acceleration option: valid range is 0-%f, got %f", rutils.DegToRad(maxAccel), opts.MaxAccRads)
+		}
+	}
 	// Ensure the robot is in correct mode to move
 	b, err := x.getErrorParams(ctx)
 	if err != nil {
@@ -431,7 +442,7 @@ func (x *xArm) MoveThroughJointPositions(
 	if err != nil {
 		return err
 	}
-	armRawSteps, err := x.createRawJointSteps(curPos, positions)
+	armRawSteps, err := x.createRawJointSteps(curPos, positions, opts)
 	if err != nil {
 		return err
 	}
@@ -440,11 +451,26 @@ func (x *xArm) MoveThroughJointPositions(
 
 // Using the configured moveHz, joint speed, and joint acceleration, create the series of joint positions for the arm to follow,
 // using a trapezoidal velocity profile to blend between waypoints to the extent possible.
-func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputSteps [][]referenceframe.Input) ([][]float64, error) {
+func (x *xArm) createRawJointSteps(
+	startInputs []referenceframe.Input,
+	inputSteps [][]referenceframe.Input,
+	opts *arm.MoveOptions,
+) (
+	[][]float64, error) {
 	x.confLock.Lock()
 	speed := x.speed
 	acceleration := x.acceleration
 	x.confLock.Unlock()
+
+	// If move options were given, use those instead.
+	if opts != nil {
+		if opts.MaxVelRads != 0 {
+			speed = opts.MaxVelRads
+		}
+		if opts.MaxAccRads != 0 {
+			acceleration = opts.MaxAccRads
+		}
+	}
 
 	// Generate list of joint positions to pass through
 	// This is almost-calculus but not quite because it's explicitly discretized
