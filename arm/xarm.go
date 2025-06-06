@@ -96,6 +96,7 @@ type xArm struct {
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
+	sensitivity  int        // sensitivity to estop during collisions
 }
 
 func init() {
@@ -127,6 +128,7 @@ type Config struct {
 	Port         int     `json:"port,omitempty"`
 	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
 	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	Sensitivity  int     `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 }
 

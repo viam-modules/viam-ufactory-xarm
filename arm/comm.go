@@ -103,6 +103,7 @@ var regMap = map[string]byte{
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
+	"Sensitivity":    0x25,
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
@@ -832,4 +833,14 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	}
 
 	return loads, nil
+}
+
+func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
+	c := x.newCmd(regMap["sensitivity"])
+	c.params = append(c.params, byte(sensitivity))
+	_, err := x.send(ctx, c, true)
+	if err != nil {
+		return err
+	}
+	return nil
 }
