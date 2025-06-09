@@ -848,16 +848,11 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
-	x.logger.Infof("here setting")
-	c := x.newCmd(regMap["sensitivity"])
-	x.logger.Infof("reg: %x", c.reg)
-	x.logger.Infof("params: %v", c.params)
+	c := x.newCmd(regMap["Sensitivity"])
 	c.params = append(c.params, byte(sensitivity))
-	x.logger.Infof("params: %v", c.params)
 	_, err := x.send(ctx, c, true)
 	if err != nil {
 		return err
 	}
-	x.logger.Infof("done sending")
 	return nil
 }

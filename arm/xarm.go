@@ -253,18 +253,10 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.logger.Infof("here connecting")
 	err := x.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	x.logger.Infof("here setting collision")
-	err = x.setCollisionDetectionSensitivity(ctx, newConf.sensitivity())
-	if err != nil {
-		return nil, err
-	}
-	x.logger.Infof("here done setting colllison")
 
 	current := []referenceframe.Input{}
 	if len(newConf.BadJoints) > 0 {
@@ -286,6 +278,11 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		for j, jc := range x.model.ModelConfig().Joints {
 			logger.Infof("\t j: %d c: %v", j, jc)
 		}
+	}
+
+	err = x.setCollisionDetectionSensitivity(ctx, newConf.sensitivity())
+	if err != nil {
+		return nil, err
 	}
 
 	return &x, nil
