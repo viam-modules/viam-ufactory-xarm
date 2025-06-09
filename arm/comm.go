@@ -456,11 +456,11 @@ func (x *xArm) MoveThroughJointPositions(
 
 func (x *xArm) clampMoveOptions(val, minVal, maxVal float64, name string) float64 {
 	if val < minVal {
-		x.logger.Warnf("invalid %s option %f: setting to minimum %f", name, val, minVal)
+		x.logger.Warnf("invalid %s option %.2f: setting to minimum %.2f", name, val, minVal)
 		return minVal
 	}
 	if val > maxVal {
-		x.logger.Warnf("invalid %s option %f: setting to maximum %f", name, val, maxVal)
+		x.logger.Warnf("invalid %s option %.2f: setting to maximum %.2f", name, val, maxVal)
 		return maxVal
 	}
 	return val
