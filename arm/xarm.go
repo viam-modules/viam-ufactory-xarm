@@ -153,7 +153,7 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 
 	if cfg.Sensitivity < 1 || cfg.Sensitivity > 5 {
-		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5")
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5", cfg.Sensitivity)
 	}
 
 	return []string{}, []string{}, nil
