@@ -141,8 +141,6 @@ func (x *xArm) newCmd(reg byte) cmd {
 }
 
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
@@ -185,8 +183,8 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 }
 
 func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
-	// x.moveLock.Lock()
-	// defer x.moveLock.Unlock()
+	x.moveLock.Lock()
+	defer x.moveLock.Unlock()
 	b := c.bytes()
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {

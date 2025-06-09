@@ -263,6 +263,7 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
+
 	err := x.connect(ctx)
 	if err != nil {
 		return nil, err
