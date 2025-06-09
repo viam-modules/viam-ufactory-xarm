@@ -22,8 +22,11 @@ import (
 )
 
 const (
-	defaultSpeed       = 50.  // degrees per second
-	defaultAccel       = 100. // degrees per second per second
+	defaultSpeed       = 50.   // degrees per second
+	defaultAccel       = 100.  // degrees per second per second
+	maxSpeed           = 180.  // degrees per second
+	minSpeed           = 3.    // degrees per second
+	maxAccel           = 1145. // degrees per second per second
 	defaultPort        = 502
 	defaultMoveHz      = 100. // Don't change this
 	defaultSensitivity = 3
@@ -139,6 +142,14 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.Acceleration < 0 {
 		return nil, nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
+	}
+
+	if cfg.Acceleration > maxAccel {
+		return nil, nil, fmt.Errorf("given acceleration %f cannot be more than %f", cfg.Acceleration, maxAccel)
+	}
+
+	if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
+		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
 	}
 
 	if cfg.Sensitivity < 1 || cfg.Sensitivity > 5 {
