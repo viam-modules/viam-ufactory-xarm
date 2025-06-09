@@ -881,8 +881,5 @@ func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity
 	c := x.newCmd(regMap["Sensitivity"])
 	c.params = append(c.params, byte(sensitivity))
 	_, err := x.send(ctx, c, true)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
