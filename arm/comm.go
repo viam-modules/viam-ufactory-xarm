@@ -405,15 +405,20 @@ func (x *xArm) MoveThroughJointPositions(
 	_ map[string]interface{},
 ) error {
 	if opts != nil {
-		if opts.MaxVelRads < rutils.DegToRad(minSpeed) || opts.MaxVelRads > rutils.DegToRad(maxSpeed) {
-			return fmt.Errorf("invalid max velocity option: valid range is %f-%f, got %f",
-				rutils.DegToRad(minSpeed),
-				rutils.DegToRad(maxSpeed),
-				opts.MaxVelRads)
-		}
-		if opts.MaxAccRads < 0 || opts.MaxAccRads > rutils.DegToRad(maxAccel) {
-			return fmt.Errorf("invalid max acceleration option: valid range is 0-%f, got %f", rutils.DegToRad(maxAccel), opts.MaxAccRads)
-		}
+		// Ensure move options are within the valid range
+		opts.MaxVelRads = x.clampMoveOptions(
+			opts.MaxVelRads,
+			rutils.DegToRad(minSpeed),
+			rutils.DegToRad(maxSpeed),
+			"max velocity",
+		)
+
+		opts.MaxAccRads = x.clampMoveOptions(
+			opts.MaxAccRads,
+			0,
+			rutils.DegToRad(maxAccel),
+			"max acceleration",
+		)
 	}
 	// Ensure the robot is in correct mode to move
 	b, err := x.getErrorParams(ctx)
@@ -447,6 +452,18 @@ func (x *xArm) MoveThroughJointPositions(
 		return err
 	}
 	return x.executeInputs(ctx, armRawSteps)
+}
+
+func (x *xArm) clampMoveOptions(val, minVal, maxVal float64, name string) float64 {
+	if val < minVal {
+		x.logger.Warnf("invalid %s option %f: setting to minimum %f", name, val, minVal)
+		return minVal
+	}
+	if val > maxVal {
+		x.logger.Warnf("invalid %s option %f: setting to maximum %f", name, val, maxVal)
+		return maxVal
+	}
+	return val
 }
 
 // Using the configured moveHz, joint speed, and joint acceleration, create the series of joint positions for the arm to follow,
