@@ -35,6 +35,7 @@ The following attributes are available:
 | `port`                              | string  | Optional     | The port at which the IP address accesses the xArm. The default is 502.                                          |
 | `speed_degs_per_sec`                | float32 | Optional     | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
+| `collision_sensitivity`| int | Optional | Collision sensitivity range from 1-5. The larger the value, the smaller the force required to trigger the collision protection emergency stop. The default is 3.
 | `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
 
 ### Using within a Frame System

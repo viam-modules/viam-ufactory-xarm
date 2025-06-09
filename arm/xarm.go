@@ -97,7 +97,6 @@ type xArm struct {
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
-	sensitivity  int        // sensitivity to estop during collisions
 }
 
 func init() {
@@ -142,8 +141,8 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given acceleration %f cannot be negative", cfg.Acceleration)
 	}
 
-	if cfg.Sensitivity < 0 || cfg.Sensitivity > 5 {
-		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5")
+	if cfg.Sensitivity < 1 || cfg.Sensitivity > 5 {
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5")
 	}
 
 	return []string{}, []string{}, nil

@@ -143,50 +143,44 @@ func (x *xArm) newCmd(reg byte) cmd {
 func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
-	x.logger.Infof("here sending")
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
 
 	if x.conn == nil {
-		x.logger.Infof("here x.conn is nil")
 		err := x.connect(ctx)
 		if err != nil {
-			x.logger.Infof("here couldnt reconnect")
 			x.resetConnection()
 			return cmd{}, err
 		}
 	}
-	x.logger.Infof("here writing bytes")
 	resp, err := x.writeBytes(ctx, c)
 	if err != nil {
 		return cmd{}, err
 	}
 
-	x.logger.Infof("here done writing bytes")
-
-	// // check the error returned by the response
-	// if checkError {
-	// 	state := resp.params[0]
-	// 	// the 2nd and 3rd MSB in state byte indicate if there
-	// 	// is an error or warning respectively.
-	// 	if state&(1<<6|1<<5) != 0 {
-	// 		params, err := x.getErrorParams(ctx)
-	// 		if err != nil {
-	// 			return cmd{}, err
-	// 		}
-	// 		errCode := params[1]
-	// 		if errCode == errCodeCollision {
-	// 			// overcurrent estop has occurred, must be manually cleared by user.
-	// 			return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
-	// 				"through UFACTORY Studio or clear_error do command")
-	// 		}
-	// 		// Any other errors are cleared automatically by the driver.
-	// 		return cmd{}, multierr.Combine(
-	// 			decodeError(params),
-	// 			x.resetErrorState(ctx))
-	// 	}
-	// }
+	// check the error returned by the response
+	if checkError {
+		state := resp.params[0]
+		// the 2nd and 3rd MSB in state byte indicate if there
+		// is an error or warning respectively.
+		if state&(1<<6|1<<5) != 0 {
+			params, err := x.getErrorParams(ctx)
+			if err != nil {
+				return cmd{}, err
+			}
+			errCode := params[1]
+			if errCode == errCodeCollision {
+				// overcurrent estop has occurred, must be manually cleared by user.
+				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
+					"through UFACTORY Studio or clear_error do command")
+			}
+			// Any other errors are cleared automatically by the driver.
+			return cmd{}, multierr.Combine(
+				decodeError(params),
+				x.resetErrorState(ctx))
+		}
+	}
 	return resp, err
 }
 
@@ -204,26 +198,21 @@ func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	x.logger.Infof("here doing response in lock")
 	return x.responseInLock(ctx)
 }
 
 func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
-	x.logger.Infof("here reading bytes")
 	buf, err := utils.ReadBytes(ctx, x.conn, 7)
 	if err != nil {
 		x.resetConnection()
 		return cmd{}, err
 	}
-	x.logger.Infof("here done reading bytes")
 	c := cmd{}
 	c.tid = binary.BigEndian.Uint16(buf[0:2])
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	x.logger.Infof("here reading params")
 	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
-	x.logger.Info("here done reading params")
 	if err != nil {
 		x.resetConnection()
 		return cmd{}, err
