@@ -252,13 +252,19 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
-		sensitivity:  newConf.sensitivity(),
 	}
-
+	x.logger.Infof("here connecting")
 	err := x.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	x.logger.Infof("here setting collision")
+	err = x.setCollisionDetectionSensitivity(ctx, newConf.sensitivity())
+	if err != nil {
+		return nil, err
+	}
+	x.logger.Infof("here done setting colllison")
 
 	current := []referenceframe.Input{}
 	if len(newConf.BadJoints) > 0 {
