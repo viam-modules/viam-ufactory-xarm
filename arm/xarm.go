@@ -22,13 +22,14 @@ import (
 )
 
 const (
-	defaultSpeed  = 50.   // degrees per second
-	defaultAccel  = 100.  // degrees per second per second
-	maxSpeed      = 180.  // degrees per second
-	minSpeed      = 3.    // degrees per second
-	maxAccel      = 1145. // degrees per second per second
-	defaultPort   = 502
-	defaultMoveHz = 100. // Don't change this
+	defaultSpeed       = 50.   // degrees per second
+	defaultAccel       = 100.  // degrees per second per second
+	maxSpeed           = 180.  // degrees per second
+	minSpeed           = 3.    // degrees per second
+	maxAccel           = 1145. // degrees per second per second
+	defaultPort        = 502
+	defaultMoveHz      = 100. // Don't change this
+	defaultSensitivity = 3
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
@@ -130,6 +131,7 @@ type Config struct {
 	Port         int     `json:"port,omitempty"`
 	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
 	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	Sensitivity  int     `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 }
 
@@ -150,6 +152,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
 	}
 
+	if cfg.Sensitivity < 1 || cfg.Sensitivity > 5 {
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5", cfg.Sensitivity)
+	}
+
 	return []string{}, []string{}, nil
 }
 
@@ -165,6 +171,13 @@ func (cfg *Config) acceleration() float32 {
 		return defaultAccel
 	}
 	return cfg.Acceleration
+}
+
+func (cfg *Config) sensitivity() int {
+	if cfg.Sensitivity == 0 {
+		return defaultSensitivity
+	}
+	return cfg.Sensitivity
 }
 
 func (cfg *Config) host() string {
@@ -276,6 +289,11 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		for j, jc := range x.model.ModelConfig().Joints {
 			logger.Infof("\t j: %d c: %v", j, jc)
 		}
+	}
+
+	err = x.setCollisionDetectionSensitivity(ctx, newConf.sensitivity())
+	if err != nil {
+		return nil, err
 	}
 
 	return &x, nil
