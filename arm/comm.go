@@ -18,6 +18,7 @@ import (
 )
 
 const errCodeCollision = 0x1F
+const servoMotionMode = 1
 
 var servoErrorMap = map[byte]string{
 	0x00: "xArm Servo: Joint Communication Error",
@@ -248,7 +249,7 @@ func (x *xArm) resetErrorState(ctx context.Context) error {
 	c2 := x.newCmd(regMap["ClearWarn"])
 	_, err1 := x.send(ctx, c1, false)
 	_, err2 := x.send(ctx, c2, false)
-	err3 := x.setMotionMode(ctx, 1)
+	err3 := x.setMotionMode(ctx, servoMotionMode)
 	err4 := x.setMotionState(ctx, 0)
 	return multierr.Combine(err1, err2, err3, err4)
 }
@@ -338,7 +339,7 @@ func (x *xArm) start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = x.setMotionMode(ctx, 1)
+	err = x.setMotionMode(ctx, servoMotionMode)
 	if err != nil {
 		return err
 	}
@@ -404,7 +405,12 @@ func (x *xArm) MoveThroughJointPositions(
 	_ *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
-	// Ensure the robot is in correct mode to move
+	// set to servo motion mode
+	if err := x.setMotionMode(ctx, servoMotionMode); err != nil {
+		return err
+	}
+
+	// Ensure the robot is in correct state to move
 	b, err := x.getErrorParams(ctx)
 	if err != nil {
 		return err
@@ -412,11 +418,8 @@ func (x *xArm) MoveThroughJointPositions(
 	state := b[0]
 
 	// xarm is not in movement state: was just restarted or estopped
-	// must set mode and state back to motion
+	// must set state back to motion
 	if state == 0x10 {
-		if err = x.setMotionMode(ctx, 1); err != nil {
-			return err
-		}
 		if err = x.setMotionState(ctx, 0); err != nil {
 			return err
 		}
