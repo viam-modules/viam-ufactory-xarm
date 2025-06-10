@@ -402,9 +402,25 @@ func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenc
 func (x *xArm) MoveThroughJointPositions(
 	ctx context.Context,
 	positions [][]referenceframe.Input,
-	_ *arm.MoveOptions,
+	opts *arm.MoveOptions,
 	_ map[string]interface{},
 ) error {
+	if opts != nil {
+		// Ensure move options are within the valid range
+		opts.MaxVelRads = x.clampMoveOptions(
+			opts.MaxVelRads,
+			rutils.DegToRad(minSpeed),
+			rutils.DegToRad(maxSpeed),
+			"max velocity",
+		)
+
+		opts.MaxAccRads = x.clampMoveOptions(
+			opts.MaxAccRads,
+			0,
+			rutils.DegToRad(maxAccel),
+			"max acceleration",
+		)
+	}
 	// set to servo motion mode
 	if err := x.setMotionMode(ctx, servoMotionMode); err != nil {
 		return err
@@ -434,20 +450,47 @@ func (x *xArm) MoveThroughJointPositions(
 	if err != nil {
 		return err
 	}
-	armRawSteps, err := x.createRawJointSteps(curPos, positions)
+	armRawSteps, err := x.createRawJointSteps(curPos, positions, opts)
 	if err != nil {
 		return err
 	}
 	return x.executeInputs(ctx, armRawSteps)
 }
 
+func (x *xArm) clampMoveOptions(val, minVal, maxVal float64, name string) float64 {
+	if val < minVal {
+		x.logger.Warnf("invalid %s option %.2f: setting to minimum %.2f", name, val, minVal)
+		return minVal
+	}
+	if val > maxVal {
+		x.logger.Warnf("invalid %s option %.2f: setting to maximum %.2f", name, val, maxVal)
+		return maxVal
+	}
+	return val
+}
+
 // Using the configured moveHz, joint speed, and joint acceleration, create the series of joint positions for the arm to follow,
 // using a trapezoidal velocity profile to blend between waypoints to the extent possible.
-func (x *xArm) createRawJointSteps(startInputs []referenceframe.Input, inputSteps [][]referenceframe.Input) ([][]float64, error) {
+func (x *xArm) createRawJointSteps(
+	startInputs []referenceframe.Input,
+	inputSteps [][]referenceframe.Input,
+	opts *arm.MoveOptions,
+) (
+	[][]float64, error) {
 	x.confLock.Lock()
 	speed := x.speed
 	acceleration := x.acceleration
 	x.confLock.Unlock()
+
+	// If move options were given, use those instead.
+	if opts != nil {
+		if opts.MaxVelRads != 0 {
+			speed = opts.MaxVelRads
+		}
+		if opts.MaxAccRads != 0 {
+			acceleration = opts.MaxAccRads
+		}
+	}
 
 	// Generate list of joint positions to pass through
 	// This is almost-calculus but not quite because it's explicitly discretized
