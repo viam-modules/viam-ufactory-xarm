@@ -22,11 +22,12 @@ import (
 )
 
 const (
-	defaultSpeed       = 50.   // degrees per second
-	defaultAccel       = 100.  // degrees per second per second
-	maxSpeed           = 180.  // degrees per second
-	minSpeed           = 3.    // degrees per second
-	maxAccel           = 1145. // degrees per second per second
+	maxSpeed = 180.  // degrees per second
+	minSpeed = 3.    // degrees per second
+	maxAccel = 1145. // degrees per second per second
+
+	defaultSpeed       = maxSpeed / 2 // degrees per second
+	defaultAccel       = maxAccel / 2 // degrees per second per second
 	defaultPort        = 502
 	defaultMoveHz      = 100. // Don't change this
 	defaultSensitivity = 3
