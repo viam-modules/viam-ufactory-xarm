@@ -325,11 +325,13 @@ func (x *xArm) connect(ctx context.Context) error {
 
 	err = x.start(ctx)
 	if err != nil {
-		err = x.conn.Close()
-		if err != nil {
-			x.logger.Infof("error closing bad socket: %v", err)
+		if x.conn != nil {
+			err = x.conn.Close()
+			if err != nil {
+				x.logger.Infof("error closing bad socket: %v", err)
+			}
+			x.conn = nil
 		}
-		x.conn = nil
 		return errors.Wrap(err, "failed to start xarm")
 	}
 
