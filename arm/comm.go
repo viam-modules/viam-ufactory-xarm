@@ -337,6 +337,10 @@ func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
 }
 
 func (x *xArm) start(ctx context.Context) error {
+	if x.started.Load() {
+		return nil
+	}
+
 	err := x.toggleServos(ctx, true)
 	if err != nil {
 		return err
@@ -348,7 +352,7 @@ func (x *xArm) start(ctx context.Context) error {
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return err
 	}
-	x.started = true
+	x.started.Store(true)
 	return nil
 }
 
@@ -620,10 +624,8 @@ func (x *xArm) createRawJointSteps(
 }
 
 func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
-	if !x.started {
-		if err := x.start(ctx); err != nil {
-			return err
-		}
+	if err := x.start(ctx); err != nil {
+		return err
 	}
 	// convenience for structuring and sending individual joint steps
 	for _, step := range rawSteps {
@@ -666,10 +668,8 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-	if !x.started {
-		if err := x.start(ctx); err != nil {
-			return err
-		}
+	if err := x.start(ctx); err != nil {
+		return err
 	}
 	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
 		return err
@@ -709,10 +709,13 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 func (x *xArm) Stop(ctx context.Context, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-	x.started = false
+
+	x.started.Store(false)
+
 	if err := x.setMotionState(ctx, 3); err != nil {
 		return err
 	}
+
 	return x.start(ctx)
 }
 

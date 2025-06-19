@@ -83,7 +83,7 @@ type xArm struct {
 	moveLock sync.Mutex
 
 	// state of movement things
-	started bool
+	started atomic.Bool
 	tid     uint16
 
 	name   resource.Name
@@ -253,13 +253,12 @@ func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, m
 // NewXArm creates a new x arm connection.
 func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger logging.Logger, modelName string) (arm.Arm, error) {
 	x := xArm{
-		name:    name,
-		conf:    newConf,
-		tid:     0,
-		moveHZ:  defaultMoveHz,
-		started: false,
-		opMgr:   operation.NewSingleOperationManager(),
-		logger:  logger,
+		name:   name,
+		conf:   newConf,
+		tid:    0,
+		moveHZ: defaultMoveHz,
+		opMgr:  operation.NewSingleOperationManager(),
+		logger: logger,
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
@@ -268,6 +267,11 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 	err := x.connect(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	err = x.start(ctx)
+	if err != nil {
+		return nil, multierr.Combine(errors.Wrap(err, "failed to start xarm"), err, x.Close(ctx))
 	}
 
 	current := []referenceframe.Input{}
@@ -310,6 +314,7 @@ func (x *xArm) resetConnection() {
 		x.logger.Infof("error closing old socket: %v", err)
 	}
 	x.conn = nil
+	x.started.Store(false)
 }
 
 func (x *xArm) connect(ctx context.Context) error {
@@ -318,21 +323,11 @@ func (x *xArm) connect(ctx context.Context) error {
 	var d net.Dialer
 	var err error
 
+	x.started.Store(false)
+
 	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
 	if err != nil {
 		return err
-	}
-
-	err = x.start(ctx)
-	if err != nil {
-		if x.conn != nil {
-			err = x.conn.Close()
-			if err != nil {
-				x.logger.Infof("error closing bad socket: %v", err)
-			}
-			x.conn = nil
-		}
-		return errors.Wrap(err, "failed to start xarm")
 	}
 
 	return nil
