@@ -148,11 +148,11 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given acceleration %f cannot be more than %f", cfg.Acceleration, maxAccel)
 	}
 
-	if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
+	if cfg.Speed != 0 && (cfg.Speed < minSpeed || cfg.Speed > maxSpeed) {
 		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
 	}
 
-	if cfg.Sensitivity < 1 || cfg.Sensitivity > 5 {
+	if cfg.Sensitivity != 0 && (cfg.Sensitivity < 1 || cfg.Sensitivity > 5) {
 		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5", cfg.Sensitivity)
 	}
 
