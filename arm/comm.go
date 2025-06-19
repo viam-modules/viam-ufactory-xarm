@@ -146,13 +146,6 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		return cmd{}, errors.New("closed")
 	}
 
-	if x.conn == nil {
-		err := x.connect(ctx)
-		if err != nil {
-			x.resetConnection()
-			return cmd{}, err
-		}
-	}
 	resp, err := x.writeBytes(ctx, c)
 	if err != nil {
 		return cmd{}, err
@@ -186,6 +179,15 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 	x.moveLock.Lock()
 	defer x.moveLock.Unlock()
+
+	if x.conn == nil { // THIS HAS TO BE DONE INSIDE THE LOCK
+		err := x.connect(ctx)
+		if err != nil {
+			x.resetConnection()
+			return cmd{}, err
+		}
+	}
+
 	b := c.bytes()
 	// add deadline so we aren't waiting forever
 	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
