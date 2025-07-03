@@ -90,6 +90,14 @@ func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}
 	return nil
 }
 
+// TODO (RSDK-11207): Actually implement this method.
+func (g *myVacuumGripper) IsHoldingSomething(
+	ctx context.Context,
+	extra map[string]interface{},
+) (gripper.HoldingStatus, error) {
+	return gripper.HoldingStatus{}, errors.ErrUnsupported
+}
+
 func (g *myVacuumGripper) Name() resource.Name {
 	return g.name
 }
