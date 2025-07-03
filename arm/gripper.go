@@ -92,6 +92,14 @@ func (g *myGripper) Open(ctx context.Context, extra map[string]interface{}) erro
 	return err
 }
 
+// TODO (RSDK-11207): Actually implement this method.
+func (g *myGripper) IsHoldingSomething(
+	ctx context.Context,
+	extra map[string]interface{},
+) (gripper.HoldingStatus, error) {
+	return gripper.HoldingStatus{}, errors.ErrUnsupported
+}
+
 func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	g.goToPositionLock.Lock()
 	defer g.goToPositionLock.Unlock()
