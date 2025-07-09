@@ -100,22 +100,9 @@ func (g *myGripper) IsHoldingSomething(
 	ctx context.Context,
 	extra map[string]interface{},
 ) (gripper.HoldingStatus, error) {
-	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
-		"get": true,
-	})
+	pos, err := g.getPosition(ctx)
 	if err != nil {
 		return gripper.HoldingStatus{}, err
-	}
-	var pos int
-	switch x := res["pos"].(type) {
-	case int:
-		pos = x
-	case int64:
-		pos = int(x)
-	case float64:
-		pos = int(x)
-	default:
-		return gripper.HoldingStatus{}, errors.New("value returned for position was invalid type")
 	}
 
 	isHoldingSomething := true
