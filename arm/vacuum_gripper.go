@@ -95,7 +95,13 @@ func (g *myVacuumGripper) IsHoldingSomething(
 	ctx context.Context,
 	extra map[string]interface{},
 ) (gripper.HoldingStatus, error) {
-	return gripper.HoldingStatus{}, errors.ErrUnsupported
+	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		getVacuumGripperStateKey: true,
+	})
+	if err != nil {
+		return gripper.HoldingStatus{}, err
+	}
+	return gripper.HoldingStatus{IsHoldingSomething: res[vacuumGripperStateKey].(bool)}, nil
 }
 
 func (g *myVacuumGripper) Name() resource.Name {
