@@ -87,7 +87,7 @@ func (g *myGripper) Grab(ctx context.Context, extra map[string]interface{}) (boo
 		return false, err
 	}
 
-	return pos > 10, nil
+	return pos > fullyClosedThreshold, nil
 }
 
 func (g *myGripper) Open(ctx context.Context, extra map[string]interface{}) error {
@@ -109,6 +109,7 @@ func (g *myGripper) IsHoldingSomething(
 	if (pos <= fullyClosedThreshold) || (pos >= fullyOpenThreshold) {
 		isHoldingSomething = false
 	}
+
 	return gripper.HoldingStatus{
 		IsHoldingSomething: isHoldingSomething,
 	}, nil
