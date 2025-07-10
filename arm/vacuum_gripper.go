@@ -130,7 +130,7 @@ func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface
 	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
 		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
 		caseBoxSize,
-		"case-gripper")
+		"vacuum-gripper-box")
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface
 	vacuum, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
 		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM / 2)}),
 		r3.Vector{5, 5, max(5, g.conf.VacuumLengthMM)},
-		"case-gripper")
+		"vacuum-gripper-tube")
 	if err != nil {
 		return nil, err
 	}
