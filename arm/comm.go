@@ -113,6 +113,7 @@ var regMap = map[string]byte{
 	"GripperControl": 0x7C,
 	"VacuumControl":  0x7F,
 	"LoadID":         0xCC,
+	"VacuumState":    0x80,
 }
 
 type cmd struct {
@@ -800,6 +801,25 @@ func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
 		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
 	}
 	return binary.BigEndian.Uint32(res.params[5:]), nil
+}
+
+func (x *xArm) getVacuumStatus(ctx context.Context) (bool, error) {
+	c := x.newCmd(regMap["VacuumState"])
+	additionalParams := []byte{
+		0x09,
+		0x0A,
+		0x14,
+	}
+	c.params = append(c.params, additionalParams...)
+	res, err := x.send(ctx, c, true)
+	if err != nil {
+		return false, err
+	}
+
+	if len(res.params) != 5 {
+		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(res.params), res.params)
+	}
+	return (res.params[4] == 0x01), nil
 }
 
 // This is the host ID and gripper address which should be appended to each command.

@@ -35,17 +35,19 @@ const (
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
 	// DoCommand keys.
-	loadKey            = "load"
-	moveGripperKey     = "move_gripper"
-	getGripperKey      = "get_gripper"
-	gripperPositionKey = "gripper_position"
-	setAcckey          = "set_acceleration"
-	setSpeedKey        = "set_speed"
-	grabVacuumKey      = "grab_vacuum"
-	openVacuumKey      = "open_vacuum"
-	clearErrorKey      = "clear_error"
-	getStateKey        = "get_state"
-	getErrorKey        = "get_error"
+	loadKey                  = "load"
+	moveGripperKey           = "move_gripper"
+	getGripperKey            = "get_gripper"
+	gripperPositionKey       = "gripper_position"
+	setAcckey                = "set_acceleration"
+	setSpeedKey              = "set_speed"
+	grabVacuumKey            = "grab_vacuum"
+	openVacuumKey            = "open_vacuum"
+	clearErrorKey            = "clear_error"
+	getStateKey              = "get_state"
+	getErrorKey              = "get_error"
+	getVacuumGripperStateKey = "get_vacuum_state"
+	vacuumGripperStateKey    = "vacuum_state"
 )
 
 //go:embed xarm6_kinematics.json
@@ -462,6 +464,14 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		}
 
 		return map[string]interface{}{"error info": sData.params}, nil
+	}
+	if _, ok := cmd[getVacuumGripperStateKey]; ok {
+		res, err := x.getVacuumStatus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[vacuumGripperStateKey] = res
+		validCommand = true
 	}
 
 	if !validCommand {

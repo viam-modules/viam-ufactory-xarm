@@ -22,6 +22,9 @@ import (
 // GripperModel model for the ufactory gripper.
 var GripperModel = family.WithModel("gripper")
 
+const fullyClosedThreshold = 10
+const fullyOpenThreshold = 830
+
 // GripperConfig config for gripper.
 type GripperConfig struct {
 	Arm string
@@ -84,12 +87,34 @@ func (g *myGripper) Grab(ctx context.Context, extra map[string]interface{}) (boo
 		return false, err
 	}
 
-	return pos > 10, nil
+	return pos > fullyClosedThreshold, nil
 }
 
 func (g *myGripper) Open(ctx context.Context, extra map[string]interface{}) error {
 	_, err := g.goToPosition(ctx, 840)
 	return err
+}
+
+func (g *myGripper) IsHoldingSomething(
+	ctx context.Context,
+	extra map[string]interface{},
+) (gripper.HoldingStatus, error) {
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return gripper.HoldingStatus{}, err
+	}
+
+	isHoldingSomething := true
+	if (pos <= fullyClosedThreshold) || (pos >= fullyOpenThreshold) {
+		isHoldingSomething = false
+	}
+
+	return gripper.HoldingStatus{
+		IsHoldingSomething: isHoldingSomething,
+		Meta: map[string]interface{}{
+			"position": pos,
+		},
+	}, nil
 }
 
 func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
