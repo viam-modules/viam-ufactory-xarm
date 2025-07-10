@@ -27,7 +27,8 @@ const fullyOpenThreshold = 830
 
 // GripperConfig config for gripper.
 type GripperConfig struct {
-	Arm string
+	Arm            string
+	VacuumLengthMM float64 `json:"vacuum_length_mm"`
 }
 
 // Validate validates the config.

@@ -17,7 +17,7 @@ import (
 // VacuumGripperModel model for the ufactory vacuum gripper.
 var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
-var caseBoxSize = r3.Vector{X: 50, Y: 100, Z: 100}
+var caseBoxSize = r3.Vector{X: 70, Y: 93, Z: 117}
 
 func init() {
 	resource.RegisterComponent(
@@ -36,6 +36,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 
 	g := &myVacuumGripper{
 		name:   config.ResourceName(),
+		conf:   newConf,
 		logger: logger,
 	}
 
@@ -51,6 +52,7 @@ type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
+	conf *GripperConfig
 
 	arm arm.Arm
 
@@ -125,13 +127,24 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]interface{}) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
+		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
+		caseBoxSize,
+		"case-gripper")
+	if err != nil {
+		return nil, err
+	}
+
+	vacuum, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
+		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM / 2)}),
+		r3.Vector{5, 5, max(5, g.conf.VacuumLengthMM)},
+		"case-gripper")
 	if err != nil {
 		return nil, err
 	}
 
 	return []spatialmath.Geometry{
-		caseBox,
+		caseBox, vacuum,
 	}, nil
 }
 

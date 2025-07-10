@@ -163,10 +163,12 @@ The arm itself runs xArm Studio. A developer should be able to use it through th
 }
 ```
 
-## vacuum_gripper
+## vacuum gripper
 The vacuum gripper only works if it has a wired connection to the not, not a contact connection
 ```
 {
-  "arm": "arm"
+  "arm": "arm",
+  "vacuum_length_mm" : 48
 }
 ```
+
