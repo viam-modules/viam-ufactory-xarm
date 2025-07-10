@@ -471,6 +471,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 		resp[vacuumGripperStateKey] = res
+		validCommand = true
 	}
 
 	if !validCommand {
