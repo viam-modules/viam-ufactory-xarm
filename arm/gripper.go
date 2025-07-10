@@ -95,7 +95,6 @@ func (g *myGripper) Open(ctx context.Context, extra map[string]interface{}) erro
 	return err
 }
 
-// TODO (RSDK-11207): Actually implement this method.
 func (g *myGripper) IsHoldingSomething(
 	ctx context.Context,
 	extra map[string]interface{},
@@ -112,6 +111,9 @@ func (g *myGripper) IsHoldingSomething(
 
 	return gripper.HoldingStatus{
 		IsHoldingSomething: isHoldingSomething,
+		Meta: map[string]interface{}{
+			"position": pos,
+		},
 	}, nil
 }
 
