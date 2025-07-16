@@ -703,19 +703,15 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	// parameter8, accel=2000mm/s
 	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(2000.0)))
 	c1.params = append(c1.params, floatBytes...)
+
 	// parameter 9, motion time=0
 	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(0)))
 	c1.params = append(c1.params, floatBytes...)
 
 	// parameter 10, motion coordinate system
 	c1.params = append(c1.params,
-		0x00, // 0x00 base, 0x01 tool
-	)
-
-	// parameter 11, absolute pose
-	c1.params = append(
-		c1.params,
-		0x00, // 0x00 absolute, 0x01 relative
+		0x00, // 0x00 base coordinate system
+		0x00, // absolute position
 	)
 
 	_, err := x.send(ctx, c1, true)
