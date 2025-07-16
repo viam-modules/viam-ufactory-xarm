@@ -100,7 +100,6 @@ var regMap = map[string]byte{
 	"ClearWarn":      0x11,
 	"ToggleBrake":    0x12,
 	"SetMode":        0x13,
-	"MoveToPos":      0x15,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
@@ -109,6 +108,7 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"SetEEModel":     0x4E,
+	"MoveToPos":      0x5C,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
 	"VacuumControl":  0x7F,
@@ -672,70 +672,61 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	if err := x.start(ctx); err != nil {
 		return err
 	}
+	point := pos.Point()
+	angles := pos.Orientation().AxisAngles()
 	c1 := x.newCmd(regMap["MoveToPos"])
 
-	// parameter1, x=400mm
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0xC8,
-		0x43,
-	)
-	// parameter2, y=0mm
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-	)
-	// parameter3, z=200mm
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x48,
-		0x43,
-	)
-	// parameter4, roll = pi
-	c1.params = append(c1.params,
-		0xDB,
-		0x0F,
-		0x49,
-		0x40,
-	)
-	// parameter5, pitch=0
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-	)
-	//parameter 6, yaw=0
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x00,
-		0x00,
-	)
-	// parameter8, speed=100mm/s
+	floatBytes := make([]byte, 4)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.X)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ)))
+	c1.params = append(c1.params, floatBytes...)
+
+	// parameter7, speed=100mm/s
 	c1.params = append(c1.params,
 		0x00,
 		0x00,
 		0xC8,
 		0x42,
 	)
-	// parameter9, accel=2000mm/s
+	// parameter8, accel=2000mm/s
 	c1.params = append(c1.params,
 		0x00,
 		0x00,
 		0xFA,
 		0x44,
 	)
-	//parameter 10, motion time=0
+	// parameter 9, motion time=0
 	c1.params = append(c1.params,
 		0x00,
 		0x00,
 		0x00,
 		0x00,
+	)
+
+	// parameter 10, motion coordinate system
+	c1.params = append(c1.params,
+		0x00, // 0x00 base, 0x01 tool
+	)
+
+	// parameter 11, absolute pose
+	c1.params = append(
+		c1.params,
+		0x00, // 0x00 absolute, 0x01 relative
 	)
 
 	_, err := x.send(ctx, c1, true)
