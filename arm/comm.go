@@ -11,7 +11,6 @@ import (
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/referenceframe"
-	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	rutils "go.viam.com/rdk/utils"
 	"go.viam.com/utils"
@@ -101,6 +100,7 @@ var regMap = map[string]byte{
 	"ClearWarn":      0x11,
 	"ToggleBrake":    0x12,
 	"SetMode":        0x13,
+	"MoveToPos":      0x15,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
@@ -672,7 +672,74 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	if err := x.start(ctx); err != nil {
 		return err
 	}
-	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
+	c1 := x.newCmd(regMap["MoveToPos"])
+
+	// parameter1, x=400mm
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0xC8,
+		0x43,
+	)
+	// parameter2, y=0mm
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+	)
+	// parameter3, z=200mm
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x48,
+		0x43,
+	)
+	// parameter4, roll = pi
+	c1.params = append(c1.params,
+		0xDB,
+		0x0F,
+		0x49,
+		0x40,
+	)
+	// parameter5, pitch=0
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+	)
+	//parameter 6, yaw=0
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+	)
+	// parameter8, speed=100mm/s
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0xC8,
+		0x42,
+	)
+	// parameter9, accel=2000mm/s
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0xFA,
+		0x44,
+	)
+	//parameter 10, motion time=0
+	c1.params = append(c1.params,
+		0x00,
+		0x00,
+		0x00,
+		0x00,
+	)
+
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
 		return err
 	}
 	return x.opMgr.WaitForSuccess(
