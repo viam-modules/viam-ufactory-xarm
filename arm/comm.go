@@ -11,7 +11,6 @@ import (
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/referenceframe"
-	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	rutils "go.viam.com/rdk/utils"
 	"go.viam.com/utils"
@@ -109,6 +108,7 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"SetEEModel":     0x4E,
+	"MoveToPos":      0x5C,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
 	"VacuumControl":  0x7F,
@@ -672,7 +672,50 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	if err := x.start(ctx); err != nil {
 		return err
 	}
-	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
+	point := pos.Point()
+	angles := pos.Orientation().AxisAngles()
+	c1 := x.newCmd(regMap["MoveToPos"])
+
+	floatBytes := make([]byte, 4)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.X)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX * angles.Theta)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY * angles.Theta)))
+	c1.params = append(c1.params, floatBytes...)
+
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ * angles.Theta)))
+	c1.params = append(c1.params, floatBytes...)
+
+	// parameter7, speed=100mm/s
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(100.0)))
+	c1.params = append(c1.params, floatBytes...)
+
+	// parameter8, accel=2000mm/s
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(2000.0)))
+	c1.params = append(c1.params, floatBytes...)
+
+	// parameter 9, motion time=0
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(0)))
+	c1.params = append(c1.params, floatBytes...)
+
+	// parameter 10, motion coordinate system
+	c1.params = append(c1.params,
+		0x00, // 0x00 base coordinate system
+		0x00, // absolute position
+	)
+
+	_, err := x.send(ctx, c1, true)
+	if err != nil {
 		return err
 	}
 	return x.opMgr.WaitForSuccess(
