@@ -687,13 +687,13 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX * angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY * angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ * angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
 	// parameter7, speed=100mm/s
