@@ -17,6 +17,7 @@ import (
 )
 
 const errCodeCollision = 0x1F
+const positionMotionMode = 0
 const servoMotionMode = 1
 
 var servoErrorMap = map[byte]string{
@@ -669,9 +670,15 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-	if err := x.start(ctx); err != nil {
+
+	if err := x.setMotionMode(ctx, positionMotionMode); err != nil {
 		return err
 	}
+
+	if err := x.setMotionState(ctx, 0); err != nil {
+		return err
+	}
+
 	point := pos.Point()
 	angles := pos.Orientation().AxisAngles()
 	c1 := x.newCmd(regMap["MoveToPos"])
@@ -687,21 +694,21 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX * angles.Theta)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX*angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY * angles.Theta)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY*angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ * angles.Theta)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ*angles.Theta)))
 	c1.params = append(c1.params, floatBytes...)
 
 	// parameter7, speed=100mm/s
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(100.0)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(defaultSpeed)))
 	c1.params = append(c1.params, floatBytes...)
 
 	// parameter8, accel=2000mm/s
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(2000.0)))
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(defaultAccel)))
 	c1.params = append(c1.params, floatBytes...)
 
 	// parameter 9, motion time=0
@@ -714,10 +721,10 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 		0x00, // absolute position
 	)
 
-	_, err := x.send(ctx, c1, true)
-	if err != nil {
+	if _, err := x.send(ctx, c1, true); err != nil {
 		return err
 	}
+
 	return x.opMgr.WaitForSuccess(
 		ctx,
 		time.Millisecond*50,
