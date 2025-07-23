@@ -11,13 +11,13 @@ import (
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/referenceframe"
-	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	rutils "go.viam.com/rdk/utils"
 	"go.viam.com/utils"
 )
 
 const errCodeCollision = 0x1F
+const positionMotionMode = 0
 const servoMotionMode = 1
 
 var servoErrorMap = map[byte]string{
@@ -109,6 +109,7 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"SetEEModel":     0x4E,
+	"MoveToPos":      0x5C,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
 	"VacuumControl":  0x7F,
@@ -665,16 +666,47 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 	return referenceframe.ComputeOOBPosition(x.model, joints)
 }
 
+func helper(params []byte, num float64) []byte {
+	floatBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(num)))
+	return append(params, floatBytes...)
+}
+
 // MoveToPosition moves the arm to the specified cartesian position.
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
-	if err := x.start(ctx); err != nil {
+
+	if err := x.setMotionMode(ctx, positionMotionMode); err != nil {
 		return err
 	}
-	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
+
+	if err := x.setMotionState(ctx, 0); err != nil {
 		return err
 	}
+
+	point := pos.Point()
+	angles := pos.Orientation().AxisAngles()
+	c1 := x.newCmd(regMap["MoveToPos"])
+
+	c1.params = helper(c1.params, point.X)
+	c1.params = helper(c1.params, point.Y)
+	c1.params = helper(c1.params, point.Z)
+	c1.params = helper(c1.params, angles.RX*angles.Theta)
+	c1.params = helper(c1.params, angles.RY*angles.Theta)
+	c1.params = helper(c1.params, angles.RZ*angles.Theta)
+	c1.params = helper(c1.params, defaultSpeed) // speed mm/s
+	c1.params = helper(c1.params, defaultAccel) // acceleration mm/s
+	c1.params = helper(c1.params, 0.0) // motion time
+	c1.params = append(c1.params,
+		0x01, // tool coordinate system
+		0x00, // absolute position
+	)
+
+	if _, err := x.send(ctx, c1, true); err != nil {
+		return err
+	}
+
 	return x.opMgr.WaitForSuccess(
 		ctx,
 		time.Millisecond*50,

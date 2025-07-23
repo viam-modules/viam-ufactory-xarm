@@ -14,9 +14,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rhysd/actionlint v1.6.24
 	go.uber.org/multierr v1.11.0
-	go.viam.com/api v0.1.452
 	go.viam.com/rdk v0.82.0
-	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.1.147
 	gotest.tools/gotestsum v1.12.2
 )
@@ -113,7 +111,6 @@ require (
 	github.com/go-latex/latex v0.0.0-20230307184459-12ec69307ad9 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-nlopt/nlopt v0.0.0-20230219125344-443d3362dcb5 // indirect
 	github.com/go-pdf/fpdf v0.6.0 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
@@ -315,6 +312,8 @@ require (
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	go.viam.com/api v0.1.452 // indirect
+	go.viam.com/test v1.2.4 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
