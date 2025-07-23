@@ -689,8 +689,6 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	angles := pos.Orientation().AxisAngles()
 	c1 := x.newCmd(regMap["MoveToPos"])
 
-	floatBytes := make([]byte, 4)
-
 	c1.params = helper(c1.params, point.X)
 	c1.params = helper(c1.params, point.Y)
 	c1.params = helper(c1.params, point.Z)
