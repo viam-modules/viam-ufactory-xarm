@@ -666,6 +666,12 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 	return referenceframe.ComputeOOBPosition(x.model, joints)
 }
 
+func helper(params []byte, num float64) []byte {
+	floatBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(num)))
+	return append(params, floatBytes...)
+}
+
 // MoveToPosition moves the arm to the specified cartesian position.
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
@@ -685,39 +691,17 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 
 	floatBytes := make([]byte, 4)
 
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.X)))
-	c1.params = append(c1.params, floatBytes...)
-
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Y)))
-	c1.params = append(c1.params, floatBytes...)
-
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(point.Z)))
-	c1.params = append(c1.params, floatBytes...)
-
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RX * angles.Theta)))
-	c1.params = append(c1.params, floatBytes...)
-
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RY * angles.Theta)))
-	c1.params = append(c1.params, floatBytes...)
-
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(angles.RZ * angles.Theta)))
-	c1.params = append(c1.params, floatBytes...)
-
-	// parameter7, speed=100mm/s
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(defaultSpeed)))
-	c1.params = append(c1.params, floatBytes...)
-
-	// parameter8, accel=2000mm/s
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(defaultAccel)))
-	c1.params = append(c1.params, floatBytes...)
-
-	// parameter 9, motion time=0
-	binary.LittleEndian.PutUint32(floatBytes, math.Float32bits(float32(0)))
-	c1.params = append(c1.params, floatBytes...)
-
-	// parameter 10,11
+	c1.params = helper(c1.params, point.X)
+	c1.params = helper(c1.params, point.Y)
+	c1.params = helper(c1.params, point.Z)
+	c1.params = helper(c1.params, angles.RX*angles.Theta)
+	c1.params = helper(c1.params, angles.RY*angles.Theta)
+	c1.params = helper(c1.params, angles.RZ*angles.Theta)
+	c1.params = helper(c1.params, defaultSpeed) // speed mm/s
+	c1.params = helper(c1.params, defaultAccel) // acceleration mm/s
+	c1.params = helper(c1.params, 0.0) // motion time
 	c1.params = append(c1.params,
-		0x01, // 0x00 base coordinate system, 0x00 tool coordinate system
+		0x01, // tool coordinate system
 		0x00, // absolute position
 	)
 
