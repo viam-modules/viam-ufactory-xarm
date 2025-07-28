@@ -56,7 +56,7 @@ func realMain() error {
 		return err
 	}
 
-	a, err := xarm.NewXArm(ctx, arm.Named("foo"), &c, logger, xarm.ModelName6DOF)
+	a, err := xarm.NewXArm(ctx, arm.Named("foo"), &c, logger, xarm.ModelName6DOF, nil)
 	if err != nil {
 		return err
 	}

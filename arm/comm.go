@@ -357,22 +357,6 @@ func (x *xArm) start(ctx context.Context) error {
 	return nil
 }
 
-// motionStopped will check if all arm pieces have stopped moving.
-func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
-	c := x.newCmd(regMap["GetState"])
-	sData, err := x.send(ctx, c, true)
-	if err != nil {
-		return false, err
-	}
-	if len(sData.params) < 2 {
-		return false, errors.New("malformed state data response in motionStopped")
-	}
-	if sData.params[1] != 1 {
-		return true, nil
-	}
-	return false, nil
-}
-
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
 	x.closed.Store(true)
@@ -667,19 +651,18 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 
 // MoveToPosition moves the arm to the specified cartesian position.
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
-	ctx, done := x.opMgr.New(ctx)
-	defer done()
-	if err := x.start(ctx); err != nil {
-		return err
+	if x.motion == nil {
+		return fmt.Errorf("xarm cannot do MoveToPosition without speficying a motion service")
 	}
-	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
-		return err
-	}
-	return x.opMgr.WaitForSuccess(
+
+	_, err := x.motion.Move(
 		ctx,
-		time.Millisecond*50,
-		x.motionStopped,
+		motion.MoveReq{
+			ComponentName: x.Name(),
+			Destination:   referenceframe.NewPoseInFrame(x.Name().ShortName(), pos),
+		},
 	)
+	return err
 }
 
 // JointPositions returns the current positions of all joints.
