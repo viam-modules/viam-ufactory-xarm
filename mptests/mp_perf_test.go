@@ -1,4 +1,4 @@
-package arm
+package mptests
 
 import (
 	"context"
