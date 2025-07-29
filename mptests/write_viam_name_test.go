@@ -1,4 +1,4 @@
-package arm
+package mptests
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"github.com/golang/geo/r3"
 	pb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/logging"
-	"go.viam.com/rdk/motionplan"
+	"go.viam.com/rdk/motionplan/armplanning"
 	frame "go.viam.com/rdk/referenceframe"
 	spatial "go.viam.com/rdk/spatialmath"
 	"go.viam.com/test"
@@ -24,7 +24,7 @@ func TestWriteViam(t *testing.T) {
 
 	ctx := context.Background()
 	logger := logging.NewTestLogger(t)
-	m, err := frame.ParseModelJSONFile("xarm7_kinematics.json", "")
+	m, err := frame.ParseModelJSONFile("../arm/xarm7_kinematics.json", "")
 	test.That(t, err, test.ShouldBeNil)
 
 	err = fs.AddFrame(m, fs.World())
@@ -65,26 +65,26 @@ func TestWriteViam(t *testing.T) {
 	seedMap := map[string][]frame.Input{}
 	seedMap[m.Name()] = home7
 
-	plan, err := motionplan.PlanMotion(ctx, &motionplan.PlanRequest{
-		Logger: logger,
-		Goals: []*motionplan.PlanState{
-			motionplan.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
+	plan, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
+		Goals: []*armplanning.PlanState{
+			armplanning.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
 		},
-		StartState:  motionplan.NewPlanState(nil, seedMap),
-		FrameSystem: fs,
+		StartState:     armplanning.NewPlanState(nil, seedMap),
+		FrameSystem:    fs,
+		PlannerOptions: &armplanning.PlannerOptions{},
 	})
 	test.That(t, err, test.ShouldBeNil)
 
-	opt := map[string]interface{}{"motion_profile": motionplan.LinearMotionProfile}
 	goToGoal := func(seedMap map[string][]frame.Input, goal spatial.Pose) map[string][]frame.Input {
-		plan, err := motionplan.PlanMotion(ctx, &motionplan.PlanRequest{
-			Logger: logger,
-			Goals: []*motionplan.PlanState{
-				motionplan.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
+		plan, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
+			Goals: []*armplanning.PlanState{
+				armplanning.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
 			},
-			StartState:  motionplan.NewPlanState(nil, seedMap),
+			StartState:  armplanning.NewPlanState(nil, seedMap),
 			FrameSystem: fs,
-			Options:     opt,
+			PlannerOptions: &armplanning.PlannerOptions{
+				MotionProfile: armplanning.LinearMotionProfile,
+			},
 		})
 		test.That(t, err, test.ShouldBeNil)
 		return plan.Trajectory()[len(plan.Trajectory())-1]

@@ -1,19 +1,20 @@
-package arm
+package mptests
 
 import (
 	"context"
 	"testing"
 
 	"github.com/golang/geo/r3"
+	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	"go.viam.com/rdk/logging"
-	"go.viam.com/rdk/motionplan"
+	"go.viam.com/rdk/motionplan/armplanning"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/test"
 )
 
-func makeTestFrameSystem(logger logging.Logger) (referenceframe.FrameSystem, error) {
-	armModel, err := MakeModelFrame(ModelName6DOF, nil, nil, logger)
+func makeTestFrameSystem(logger logging.Logger) (*referenceframe.FrameSystem, error) {
+	armModel, err := xarm.MakeModelFrame(xarm.ModelName6DOF, nil, nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -75,16 +76,15 @@ func BenchmarkMP1(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		planReq := &motionplan.PlanRequest{
-			Logger:      logger,
+		planReq := &armplanning.PlanRequest{
 			FrameSystem: fs,
-			Goals: []*motionplan.PlanState{
-				motionplan.NewPlanState(referenceframe.FrameSystemPoses{"gripper-right": dest}, nil),
+			Goals: []*armplanning.PlanState{
+				armplanning.NewPlanState(referenceframe.FrameSystemPoses{"gripper-right": dest}, nil),
 			},
-			StartState: motionplan.NewPlanState(nil, referenceframe.FrameSystemInputs{"arm-right": startJoints}),
+			StartState: armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{"arm-right": startJoints}),
 		}
 
-		plan, err := motionplan.PlanMotion(ctx, planReq)
+		plan, err := armplanning.PlanMotion(ctx, logger, planReq)
 		test.That(b, err, test.ShouldBeNil)
 
 		logger.Infof("plan: %v", plan)
