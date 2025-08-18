@@ -921,9 +921,10 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 			return nil, err
 		}
 		if len(res.params) != 5 {
-			return nil, fmt.Errorf("register read 0x18 returned an array of length %d expected length 5 raw data %v", len(res.params), res.params)
+			return nil, fmt.Errorf("reading status register at address 0x18 returned an array of length %d expected length 5 raw data %v", len(res.params), res.params)
 		}
 		isHolding := false
+		// byte 5 of register 0x18 is 0 when stopped, 1 when opened and 2 when closed
 		if res.params[4] == 2 {
 			isHolding = true
 		}

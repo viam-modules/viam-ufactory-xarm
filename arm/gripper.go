@@ -140,7 +140,7 @@ func (g *myGripperLite) IsHoldingSomething(
 	}
 	isHolding, ok := isHoldingRaw.(bool)
 	if !ok {
-		return gripper.HoldingStatus{}, fmt.Errorf("isHolding value is not a bool, %v is a %T", isHoldingRaw, isHoldingRaw)
+		return gripper.HoldingStatus{}, fmt.Errorf("key `%s` value is not a bool, %v is a %T", gripperLiteActionIsClosed, isHoldingRaw, isHoldingRaw)
 	}
 
 	return gripper.HoldingStatus{
@@ -165,8 +165,7 @@ func (g *myGripperLite) IsMoving(context.Context) (bool, error) {
 }
 
 func (g *myGripperLite) Stop(ctx context.Context, extra map[string]interface{}) error {
-	g.isMoving.Store(true)
-	defer g.isMoving.Store(false)
+	g.isMoving.Store(false)
 	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
 		gripperLiteActionKey: gripperLiteActionStop,
 	})
