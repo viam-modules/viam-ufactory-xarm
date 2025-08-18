@@ -163,6 +163,14 @@ The arm itself runs xArm Studio. A developer should be able to use it through th
 }
 ```
 
+## gripper lite
+A two finger gripper compatible with the xarm lite6 model
+```
+{
+   "arm" : "arm"
+}
+```
+
 ## vacuum gripper
 The vacuum gripper only works if it has a wired connection to the not, not a contact connection
 ```

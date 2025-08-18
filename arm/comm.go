@@ -116,6 +116,13 @@ var regMap = map[string]byte{
 	"VacuumState":    0x80,
 }
 
+const (
+	ioControlParameterWord1High = 257
+	ioControlParameterWord2High = 514
+	ioControlParameterWord1Low  = 256
+	ioControlParameterWord2Low  = 512
+)
+
 type cmd struct {
 	tid    uint16
 	prot   uint16
@@ -843,6 +850,87 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]interface{}, error) {
+	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
+	var c cmd
+	var err error
+	switch action {
+	case gripperLiteActionClose:
+		arg := make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2High))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+
+		arg = make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1Low))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionOpen:
+		arg := make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2Low))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+
+		arg = make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1High))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionStop:
+		arg := make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1Low))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+
+		arg = make([]byte, 4)
+		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2Low))
+		c = x.vacuumPreamble()
+		c.params = append(c.params, arg...)
+		if _, err = x.send(ctx, c, true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionIsClosed:
+		c := x.newCmd(regMap["VacuumState"])
+		additionalParams := []byte{
+			0x09,
+			0x0A,
+			0x18,
+		}
+		c.params = append(c.params, additionalParams...)
+		res, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(res.params) != 5 {
+			return nil, fmt.Errorf("register read 0x18 returned an array of length %d expected length 5 raw data %v", len(res.params), res.params)
+		}
+		isHolding := false
+		if res.params[4] == 2 {
+			isHolding = true
+		}
+		return map[string]interface{}{gripperLiteActionIsClosed: isHolding}, nil
+	}
+
+	return nil, fmt.Errorf("gripper lite action %s is not supported", action)
 }
 
 // Close maps to open in ufactory.
