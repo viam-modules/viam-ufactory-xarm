@@ -862,7 +862,6 @@ func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
 
 func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]interface{}, error) {
 	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
-	var c cmd
 	var err error
 	switch action {
 	case gripperLiteActionClose:
