@@ -49,6 +49,13 @@ const (
 	getErrorKey              = "get_error"
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
+	gripperLiteActionKey     = "gripper_lite_action"
+
+	// gripperLiteActionKeys.
+	gripperLiteActionOpen     = "open"
+	gripperLiteActionClose    = "close"
+	gripperLiteActionIsClosed = "is_closed"
+	gripperLiteActionStop     = "stop"
 )
 
 //go:embed xarm6_kinematics.json
@@ -492,6 +499,19 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 		resp[vacuumGripperStateKey] = res
+		validCommand = true
+	}
+
+	if action, ok := cmd[gripperLiteActionKey]; ok {
+		act, ok := action.(string)
+		if !ok {
+			return nil, fmt.Errorf("action %v (%T) is not a string", action, action)
+		}
+		res, err := x.liteGripperAction(ctx, act)
+		if err != nil {
+			return nil, err
+		}
+		resp[gripperLiteActionKey] = res
 		validCommand = true
 	}
 

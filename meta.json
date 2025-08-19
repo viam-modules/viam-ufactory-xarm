@@ -34,6 +34,12 @@
       "model": "viam:ufactory:vacuum_gripper",
       "markdown_link": "README.md#vacuum-gripper",
       "short_description": "vacuum gripper component driver for the ufactory vacuum gripper"
+    },
+    {
+      "api": "rdk:component:gripper",
+      "model": "viam:ufactory:gripper_lite",
+      "markdown_link": "README.md#gripper-lite",
+      "short_description": "gripper lite component driver for two fingers gripper install on lite6"
     }
   ],
   "build":{
