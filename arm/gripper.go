@@ -165,7 +165,7 @@ func (g *myGripperLite) IsMoving(context.Context) (bool, error) {
 }
 
 func (g *myGripperLite) Stop(ctx context.Context, extra map[string]interface{}) error {
-	g.isMoving.Store(false)
+	defer g.isMoving.Store(false)
 	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
 		gripperLiteActionKey: gripperLiteActionStop,
 	})
@@ -181,7 +181,7 @@ func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]interface{}
 
 	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
 
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 27 + (clawSize.Z / -2)}), clawSize, "claws")
+	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +226,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 
 	g := &myGripper{
 		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("foo"),
+		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
 		logger: logger,
 	}
 

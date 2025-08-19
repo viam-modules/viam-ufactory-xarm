@@ -852,59 +852,41 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 	return nil
 }
 
+func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
+	arg := make([]byte, 4)
+	binary.LittleEndian.PutUint32(arg, math.Float32bits(word))
+	c := x.vacuumPreamble()
+	c.params = append(c.params, arg...)
+	return c
+}
+
 func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]interface{}, error) {
 	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
 	var c cmd
 	var err error
 	switch action {
 	case gripperLiteActionClose:
-		arg := make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2High))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2High), true); err != nil {
 			return nil, err
 		}
-
-		arg = make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1Low))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{}, nil
 	case gripperLiteActionOpen:
-		arg := make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2Low))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
 			return nil, err
 		}
 
-		arg = make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1High))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1High), true); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{}, nil
 	case gripperLiteActionStop:
-		arg := make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord1Low))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
 			return nil, err
 		}
-
-		arg = make([]byte, 4)
-		binary.LittleEndian.PutUint32(arg, math.Float32bits(ioControlParameterWord2Low))
-		c = x.vacuumPreamble()
-		c.params = append(c.params, arg...)
-		if _, err = x.send(ctx, c, true); err != nil {
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
 			return nil, err
 		}
 		return map[string]interface{}{}, nil
