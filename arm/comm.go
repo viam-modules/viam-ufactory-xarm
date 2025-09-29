@@ -639,12 +639,32 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 		if err != nil {
 			return err
 		}
+
+		// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
+		// before issuing the next `MoveJoints` command.
 		if !utils.SelectContextOrWait(ctx, time.Duration(1000000./x.moveHZ)*time.Microsecond) {
 			return ctx.Err()
 		}
 	}
 
-	return nil
+	// Our guessing for how long to wait usually accumulates to be 10% off by the end. Wait until
+	// the arm has definitely stopped moving by polling the arm state.
+	for ctx.Err() == nil {
+		stateCmd := x.newCmd(regMap["GetState"])
+		resp, err := x.send(ctx, stateCmd, true)
+		if err != nil {
+			return fmt.Errorf("error getting state waiting for movement to stop: %w", err)
+		}
+
+		if resp.params[0] == 0x00 && resp.params[1] == 0x01 {
+			// Still moving.
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			break
+		}
+	}
+
+	return ctx.Err()
 }
 
 // EndPosition computes and returns the current cartesian position.
