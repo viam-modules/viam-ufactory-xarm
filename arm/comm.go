@@ -653,7 +653,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 		stateCmd := x.newCmd(regMap["GetState"])
 		resp, err := x.send(ctx, stateCmd, true)
 		if err != nil {
-			return fmt.Errorf("error getting state waiting for movement to stop:", err)
+			return fmt.Errorf("error getting state waiting for movement to stop: %w", err)
 		}
 
 		if resp.params[0] == 0x00 && resp.params[1] == 0x01 {
