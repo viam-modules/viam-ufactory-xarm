@@ -649,7 +649,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 
 	// Our guessing for how long to wait usually accumulates to be 10% off by the end. Wait until
 	// the arm has definitely stopped moving by polling the arm state.
-	for {
+	for ctx.Err() == nil {
 		stateCmd := x.newCmd(regMap["GetState"])
 		resp, err := x.send(ctx, stateCmd, true)
 		if err != nil {
@@ -664,7 +664,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 		}
 	}
 
-	return nil
+	return ctx.Err()
 }
 
 // EndPosition computes and returns the current cartesian position.
