@@ -1,7 +1,6 @@
 package mptests
 
 import (
-	"context"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -53,7 +52,7 @@ func makeTestFrameSystem(logger logging.Logger) (*referenceframe.FrameSystem, er
 }
 
 func BenchmarkMP1(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	logger := logging.NewTestLogger(b)
 
 	fs, err := makeTestFrameSystem(logger)

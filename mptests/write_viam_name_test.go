@@ -1,7 +1,6 @@
 package mptests
 
 import (
-	"context"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -22,7 +21,7 @@ var (
 func TestWriteViam(t *testing.T) {
 	fs := frame.NewEmptyFrameSystem("test")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := logging.NewTestLogger(t)
 	m, err := frame.ParseModelJSONFile("../arm/xarm7_kinematics.json", "")
 	test.That(t, err, test.ShouldBeNil)
