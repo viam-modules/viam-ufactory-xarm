@@ -1,7 +1,6 @@
 package mptests
 
 import (
-	"context"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -53,7 +52,7 @@ func makeTestFrameSystem(logger logging.Logger) (*referenceframe.FrameSystem, er
 }
 
 func BenchmarkMP1(b *testing.B) {
-	ctx := context.Background()
+	ctx := b.Context()
 	logger := logging.NewTestLogger(b)
 
 	fs, err := makeTestFrameSystem(logger)
@@ -84,7 +83,7 @@ func BenchmarkMP1(b *testing.B) {
 			StartState: armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{"arm-right": startJoints}),
 		}
 
-		plan, err := armplanning.PlanMotion(ctx, logger, planReq)
+		plan, _, err := armplanning.PlanMotion(ctx, logger, planReq)
 		test.That(b, err, test.ShouldBeNil)
 
 		logger.Infof("plan: %v", plan)

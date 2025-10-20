@@ -685,8 +685,8 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 	_, err := x.motion.Move(
 		ctx,
 		motion.MoveReq{
-			ComponentName: x.Name(),
-			Destination:   referenceframe.NewPoseInFrame(x.Name().ShortName(), pos),
+			ComponentName: x.Name().Name,
+			Destination:   referenceframe.NewPoseInFrame(fmt.Sprintf("%v_origin", x.Name().Name), pos),
 		},
 	)
 	return err
