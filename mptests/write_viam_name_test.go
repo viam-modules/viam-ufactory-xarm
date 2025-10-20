@@ -65,7 +65,7 @@ func TestWriteViam(t *testing.T) {
 	seedMap := map[string][]frame.Input{}
 	seedMap[m.Name()] = home7
 
-	plan, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
+	plan, _, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
 		Goals: []*armplanning.PlanState{
 			armplanning.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
 		},
@@ -76,15 +76,12 @@ func TestWriteViam(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 
 	goToGoal := func(seedMap map[string][]frame.Input, goal spatial.Pose) map[string][]frame.Input {
-		plan, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
+		plan, _, err := armplanning.PlanMotion(ctx, logger, &armplanning.PlanRequest{
 			Goals: []*armplanning.PlanState{
 				armplanning.NewPlanState(frame.FrameSystemPoses{eraserFrame.Name(): frame.NewPoseInFrame(frame.World, goal)}, nil),
 			},
 			StartState:  armplanning.NewPlanState(nil, seedMap),
 			FrameSystem: fs,
-			PlannerOptions: &armplanning.PlannerOptions{
-				MotionProfile: armplanning.LinearMotionProfile,
-			},
 		})
 		test.That(t, err, test.ShouldBeNil)
 		return plan.Trajectory()[len(plan.Trajectory())-1]

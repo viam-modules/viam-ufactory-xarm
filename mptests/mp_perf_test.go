@@ -84,7 +84,7 @@ func BenchmarkMP1(b *testing.B) {
 			StartState: armplanning.NewPlanState(nil, referenceframe.FrameSystemInputs{"arm-right": startJoints}),
 		}
 
-		plan, err := armplanning.PlanMotion(ctx, logger, planReq)
+		plan, _, err := armplanning.PlanMotion(ctx, logger, planReq)
 		test.That(b, err, test.ShouldBeNil)
 
 		logger.Infof("plan: %v", plan)
