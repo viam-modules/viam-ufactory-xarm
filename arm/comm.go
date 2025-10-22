@@ -810,7 +810,8 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	if len(res.params) != 9 {
 		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
 	}
-	return int32(binary.BigEndian.Uint32(res.params[5:])), nil
+
+	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
 }
 
 func (x *xArm) getVacuumStatus(ctx context.Context) (bool, error) {
