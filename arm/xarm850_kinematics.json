@@ -1,0 +1,212 @@
+{
+    "name": "xArm850",
+    "links": [
+        {
+            "id": "link_base",
+            "parent": "world",
+            "translation": {
+                "x": -0.25599000,
+                "y": -0.00285790,
+                "z": 449.74900000
+            },
+            "geometry": {
+                "x": 190,
+                "y": 190,
+                "z": 185,
+                "translation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 92.5
+                }
+            }
+        },
+        {
+            "id": "link_1",
+            "parent": "joint_1",
+            "translation": {
+                "x": 0.05700000,
+                "y": 13.84200000,
+                "z": -20.55000000
+            },
+            "geometry": {
+                "x": 120.619,
+                "y": 185.133,
+                "z": 238.5,
+                "translation": {
+                    "x": 0,
+                    "y": 32.5667,
+                    "z": -59.25
+                }
+            }
+        },
+        {
+            "id": "link_2",
+            "parent": "joint_2",
+            "translation": {
+                "x": 713.42500000,
+                "y": 0.09500000,
+                "z": 7.58600000
+            },
+            "geometry": {
+                "x": 500.07,
+                "y": 119.987,
+                "z": 161.805,
+                "translation": {
+                    "x": 189.857,
+                    "y": 1.33514e-05,
+                    "z": 31.0907
+                }
+            }
+        },
+        {
+            "id": "link_3",
+            "parent": "joint_3",
+            "translation": {
+                "x": 278.83400000,
+                "y": 539.41000000,
+                "z": 9.78000000
+            },
+            "geometry": {
+                "x": 244.852,
+                "y": 209.475,
+                "z": 164.943,
+                "translation": {
+                    "x": 72.5729,
+                    "y": 54.7623,
+                    "z": 37.5205
+                }
+            }
+        },
+        {
+            "id": "link_4",
+            "parent": "joint_4",
+            "translation": {
+                "x": 0.26600000,
+                "y": -38.33000000,
+                "z": -101.91500000
+            },
+            "geometry": {
+                "x": 89.8432,
+                "y": 159.837,
+                "z": 304,
+                "translation": {
+                    "x": 0.0113983,
+                    "y": -35.0283,
+                    "z": -114
+                }
+            }
+        },
+        {
+            "id": "link_5",
+            "parent": "joint_5",
+            "translation": {
+                "x": 0.54100000,
+                "y": -15.60100000,
+                "z": -15.23200000
+            },
+            "geometry": {
+                "x": 84,
+                "y": 131.9,
+                "z": 92.4808,
+                "translation": {
+                    "x": 0,
+                    "y": 6.55,
+                    "z": -4.25959
+                }
+            }
+        },
+        {
+            "id": "link_6",
+            "parent": "joint_6",
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "geometry": {
+                "x": 83.493,
+                "y": 88.0693,
+                "z": 30,
+                "translation": {
+                    "x": 0.139103,
+                    "y": -2.28463,
+                    "z": -15
+                }
+            }
+        }
+    ],
+    "joints": [
+        {
+            "id": "joint_1",
+            "type": "revolute",
+            "parent": "link_base",
+            "axis": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+            },
+            "max": 359,
+            "min": -359
+        },
+        {
+            "id": "joint_2",
+            "type": "revolute",
+            "parent": "link_1",
+            "axis": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            "max": 131.0,
+            "min": -131.9
+        },
+        {
+            "id": "joint_3",
+            "type": "revolute",
+            "parent": "link_2",
+            "axis": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            "max": 3.49,
+            "min": -241.9
+        },
+        {
+            "id": "joint_4",
+            "type": "revolute",
+            "parent": "link_3",
+            "axis": {
+                "x": 0,
+                "y": 0,
+                "z": -1
+            },
+            "max": 359,
+            "min": -359
+        },
+        {
+            "id": "joint_5",
+            "type": "revolute",
+            "parent": "link_4",
+            "axis": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
+            "max": 123.9,
+            "min": 123.9
+        },
+        {
+            "id": "joint_6",
+            "type": "revolute",
+            "parent": "link_5",
+            "axis": {
+                "x": 0,
+                "y": 0,
+                "z": -1
+            },
+            "max": 359,
+            "min": -359
+        }
+    ]
+}
