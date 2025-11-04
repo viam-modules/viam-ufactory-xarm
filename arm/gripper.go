@@ -19,8 +19,19 @@ import (
 	"go.viam.com/utils"
 )
 
-// GripperModel model for the ufactory gripper.
-var GripperModel = family.WithModel("gripper")
+const (
+	// ModelNameGripper is the gripper commonly attached to xArm6/xArm7.
+	ModelNameGripper = "gripper"
+	// ModelNameGripperLite is the gripper commonly attached to the lite6.
+	ModelNameGripperLite = "gripper_lite"
+)
+
+var (
+	// GripperModel model for the ufactory gripper.
+	GripperModel = family.WithModel(ModelNameGripper)
+	// GripperModelLite model for the ufactory gripper-lite.
+	GripperModelLite = family.WithModel(ModelNameGripperLite)
+)
 
 const fullyClosedThreshold = 10
 const fullyOpenThreshold = 830
@@ -46,18 +57,35 @@ func init() {
 		resource.Registration[gripper.Gripper, *GripperConfig]{
 			Constructor: newGripper,
 		})
+	resource.RegisterComponent(
+		gripper.API,
+		GripperModelLite,
+		resource.Registration[gripper.Gripper, *GripperConfig]{
+			Constructor: newGripperLite,
+		})
 }
 
-func newGripper(ctx context.Context, deps resource.Dependencies, config resource.Config, logger logging.Logger) (gripper.Gripper, error) {
+type myGripperLite struct {
+	resource.AlwaysRebuild
+
+	name resource.Name
+
+	arm      arm.Arm
+	isMoving atomic.Bool
+
+	logger logging.Logger
+}
+
+func newGripperLite(ctx context.Context, deps resource.Dependencies, config resource.Config, logger logging.Logger) (gripper.Gripper, error) {
 	newConf, err := resource.NativeConfig[*GripperConfig](config)
 	if err != nil {
 		return nil, err
 	}
 
-	g := &myGripper{
-		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("foo"),
-		logger: logger,
+	g := &myGripperLite{
+		name:     config.ResourceName(),
+		logger:   logger,
+		isMoving: atomic.Bool{},
 	}
 
 	g.arm, err = arm.FromDependencies(deps, newConf.Arm)
@@ -66,6 +94,114 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	}
 
 	return g, nil
+}
+
+func (g *myGripperLite) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
+	g.isMoving.Store(true)
+	defer g.isMoving.Store(false)
+	if _, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		gripperLiteActionKey: gripperLiteActionClose,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (g *myGripperLite) Open(ctx context.Context, extra map[string]interface{}) error {
+	g.isMoving.Store(true)
+	defer g.isMoving.Store(false)
+	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		gripperLiteActionKey: gripperLiteActionOpen,
+	})
+	return err
+}
+
+func (g *myGripperLite) IsHoldingSomething(
+	ctx context.Context,
+	extra map[string]interface{},
+) (gripper.HoldingStatus, error) {
+	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		gripperLiteActionKey: gripperLiteActionIsClosed,
+	})
+	if err != nil {
+		return gripper.HoldingStatus{}, err
+	}
+	val, ok := res[gripperLiteActionKey]
+	if !ok {
+		return gripper.HoldingStatus{}, fmt.Errorf("command %s didn't return key %s instead got %+v", gripperLiteActionIsClosed, gripperLiteActionKey, res)
+	}
+	converted, ok := val.(map[string]interface{})
+	if !ok {
+		return gripper.HoldingStatus{}, fmt.Errorf("expected map[string]interface{} got %v of type %T", val, val)
+	}
+	isHoldingRaw, ok := converted[gripperLiteActionIsClosed]
+	if !ok {
+		return gripper.HoldingStatus{}, fmt.Errorf("response doesn't contain the key: %s have : %v", gripperLiteActionIsClosed, val)
+	}
+	isHolding, ok := isHoldingRaw.(bool)
+	if !ok {
+		return gripper.HoldingStatus{}, fmt.Errorf("key `%s` value is not a bool, %v is a %T", gripperLiteActionIsClosed, isHoldingRaw, isHoldingRaw)
+	}
+
+	return gripper.HoldingStatus{
+		IsHoldingSomething: isHolding,
+	}, nil
+}
+
+func (g *myGripperLite) Name() resource.Name {
+	return g.name
+}
+
+func (g *myGripperLite) Close(ctx context.Context) error {
+	return g.Stop(ctx, nil)
+}
+
+func (g *myGripperLite) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
+func (g *myGripperLite) IsMoving(context.Context) (bool, error) {
+	return g.isMoving.Load(), nil
+}
+
+func (g *myGripperLite) Stop(ctx context.Context, extra map[string]interface{}) error {
+	defer g.isMoving.Store(false)
+	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		gripperLiteActionKey: gripperLiteActionStop,
+	})
+	return err
+}
+
+func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	if err != nil {
+		return nil, err
+	}
+
+	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
+
+	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
+	if err != nil {
+		return nil, err
+	}
+
+	return []spatialmath.Geometry{
+		caseBox,
+		claws,
+	}, nil
+}
+
+func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
+	return errors.ErrUnsupported
 }
 
 type myGripper struct {
@@ -80,6 +216,26 @@ type myGripper struct {
 	isMoving         atomic.Bool
 
 	logger logging.Logger
+}
+
+func newGripper(ctx context.Context, deps resource.Dependencies, config resource.Config, logger logging.Logger) (gripper.Gripper, error) {
+	newConf, err := resource.NativeConfig[*GripperConfig](config)
+	if err != nil {
+		return nil, err
+	}
+
+	g := &myGripper{
+		name:   config.ResourceName(),
+		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
+		logger: logger,
+	}
+
+	g.arm, err = arm.FromDependencies(deps, newConf.Arm)
+	if err != nil {
+		return nil, err
+	}
+
+	return g, nil
 }
 
 func (g *myGripper) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {

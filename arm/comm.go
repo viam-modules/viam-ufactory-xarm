@@ -116,6 +116,13 @@ var regMap = map[string]byte{
 	"VacuumState":    0x80,
 }
 
+const (
+	ioControlParameterWord1High = 257
+	ioControlParameterWord2High = 514
+	ioControlParameterWord1Low  = 256
+	ioControlParameterWord2Low  = 512
+)
+
 type cmd struct {
 	tid    uint16
 	prot   uint16
@@ -355,22 +362,6 @@ func (x *xArm) start(ctx context.Context) error {
 	}
 	x.started.Store(true)
 	return nil
-}
-
-// motionStopped will check if all arm pieces have stopped moving.
-func (x *xArm) motionStopped(ctx context.Context) (bool, error) {
-	c := x.newCmd(regMap["GetState"])
-	sData, err := x.send(ctx, c, true)
-	if err != nil {
-		return false, err
-	}
-	if len(sData.params) < 2 {
-		return false, errors.New("malformed state data response in motionStopped")
-	}
-	if sData.params[1] != 1 {
-		return true, nil
-	}
-	return false, nil
 }
 
 // Close shuts down the arm servos and engages brakes.
@@ -648,12 +639,32 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 		if err != nil {
 			return err
 		}
+
+		// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
+		// before issuing the next `MoveJoints` command.
 		if !utils.SelectContextOrWait(ctx, time.Duration(1000000./x.moveHZ)*time.Microsecond) {
 			return ctx.Err()
 		}
 	}
 
-	return nil
+	// Our guessing for how long to wait usually accumulates to be 10% off by the end. Wait until
+	// the arm has definitely stopped moving by polling the arm state.
+	for ctx.Err() == nil {
+		stateCmd := x.newCmd(regMap["GetState"])
+		resp, err := x.send(ctx, stateCmd, true)
+		if err != nil {
+			return fmt.Errorf("error getting state waiting for movement to stop: %w", err)
+		}
+
+		if resp.params[0] == 0x00 && resp.params[1] == 0x01 {
+			// Still moving.
+			time.Sleep(10 * time.Millisecond)
+		} else {
+			break
+		}
+	}
+
+	return ctx.Err()
 }
 
 // EndPosition computes and returns the current cartesian position.
@@ -667,19 +678,18 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 
 // MoveToPosition moves the arm to the specified cartesian position.
 func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
-	ctx, done := x.opMgr.New(ctx)
-	defer done()
-	if err := x.start(ctx); err != nil {
-		return err
+	if x.motion == nil {
+		return fmt.Errorf("xarm cannot do MoveToPosition without speficying a motion service")
 	}
-	if err := motion.MoveArm(ctx, x.logger, x, pos); err != nil {
-		return err
-	}
-	return x.opMgr.WaitForSuccess(
+
+	_, err := x.motion.Move(
 		ctx,
-		time.Millisecond*50,
-		x.motionStopped,
+		motion.MoveReq{
+			ComponentName: x.Name().Name,
+			Destination:   referenceframe.NewPoseInFrame(fmt.Sprintf("%v_origin", x.Name().Name), pos),
+		},
 	)
+	return err
 }
 
 // JointPositions returns the current positions of all joints.
@@ -784,7 +794,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	return err
 }
 
-func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
+func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
 	c.params = append(c.params, 0x00, 0x02)
@@ -800,7 +810,8 @@ func (x *xArm) getGripperPosition(ctx context.Context) (uint32, error) {
 	if len(res.params) != 9 {
 		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
 	}
-	return binary.BigEndian.Uint32(res.params[5:]), nil
+
+	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
 }
 
 func (x *xArm) getVacuumStatus(ctx context.Context) (bool, error) {
@@ -860,6 +871,69 @@ func (x *xArm) grabVacuum(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
+	arg := make([]byte, 4)
+	binary.LittleEndian.PutUint32(arg, math.Float32bits(word))
+	c := x.vacuumPreamble()
+	c.params = append(c.params, arg...)
+	return c
+}
+
+func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]interface{}, error) {
+	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
+	var err error
+	switch action {
+	case gripperLiteActionClose:
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2High), true); err != nil {
+			return nil, err
+		}
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionOpen:
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
+			return nil, err
+		}
+
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1High), true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionStop:
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
+			return nil, err
+		}
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{}, nil
+	case gripperLiteActionIsClosed:
+		c := x.newCmd(regMap["VacuumState"])
+		additionalParams := []byte{
+			0x09,
+			0x0A,
+			0x18,
+		}
+		c.params = append(c.params, additionalParams...)
+		res, err := x.send(ctx, c, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(res.params) != 5 {
+			return nil, fmt.Errorf("status register at address 0x18 returned an array of length %d expected length 5 raw data %v", len(res.params), res.params)
+		}
+		isHolding := false
+		// byte 5 of register 0x18 is 0 when stopped, 1 when opened and 2 when closed
+		if res.params[4] == 2 {
+			isHolding = true
+		}
+		return map[string]interface{}{gripperLiteActionIsClosed: isHolding}, nil
+	}
+
+	return nil, fmt.Errorf("gripper lite action %s is not supported", action)
 }
 
 // Close maps to open in ufactory.

@@ -17,6 +17,7 @@ import (
 	"go.viam.com/rdk/operation"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/rdk/utils"
 )
@@ -26,11 +27,10 @@ const (
 	minSpeed = 3.    // degrees per second
 	maxAccel = 1145. // degrees per second per second
 
-	defaultSpeed       = maxSpeed / 3 // degrees per second
-	defaultAccel       = maxAccel / 3 // degrees per second per second
-	defaultPort        = 502
-	defaultMoveHz      = 100. // Don't change this
-	defaultSensitivity = 3
+	defaultSpeed  = maxSpeed / 3 // degrees per second
+	defaultAccel  = maxAccel / 3 // degrees per second per second
+	defaultPort   = 502
+	defaultMoveHz = 100. // Don't change this
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
@@ -48,6 +48,13 @@ const (
 	getErrorKey              = "get_error"
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
+	gripperLiteActionKey     = "gripper_lite_action"
+
+	// gripperLiteActionKeys.
+	gripperLiteActionOpen     = "open"
+	gripperLiteActionClose    = "close"
+	gripperLiteActionIsClosed = "is_closed"
+	gripperLiteActionStop     = "stop"
 )
 
 //go:embed xarm6_kinematics.json
@@ -94,6 +101,7 @@ type xArm struct {
 	closed atomic.Bool
 	opMgr  *operation.SingleOperationManager
 	logger logging.Logger
+	motion motion.Service
 
 	// below is all configuration things
 	dof    int
@@ -118,11 +126,11 @@ func register(model resource.Model) {
 		resource.Registration[arm.Arm, *Config]{
 			Constructor: func(
 				ctx context.Context,
-				_ resource.Dependencies,
+				deps resource.Dependencies,
 				conf resource.Config,
 				logger logging.Logger,
 			) (arm.Arm, error) {
-				return newxArm(ctx, conf, logger, model.Name)
+				return newxArm(ctx, conf, logger, model.Name, deps)
 			},
 		},
 	)
@@ -134,8 +142,9 @@ type Config struct {
 	Port         int     `json:"port,omitempty"`
 	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
 	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	Sensitivity  int     `json:"collision_sensitivity,omitempty"`
+	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
+	Motion       string  `json:"motion"`
 }
 
 // Validate validates the config.
@@ -155,11 +164,17 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
 	}
 
-	if cfg.Sensitivity != 0 && (cfg.Sensitivity < 1 || cfg.Sensitivity > 5) {
-		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 1-5", cfg.Sensitivity)
+	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
 	}
 
-	return []string{}, []string{}, nil
+	deps := []string{}
+
+	if cfg.Motion != "" {
+		deps = append(deps, motion.Named(cfg.Motion).String())
+	}
+
+	return deps, []string{}, nil
 }
 
 func (cfg *Config) speed() float32 {
@@ -174,13 +189,6 @@ func (cfg *Config) acceleration() float32 {
 		return defaultAccel
 	}
 	return cfg.Acceleration
-}
-
-func (cfg *Config) sensitivity() int {
-	if cfg.Sensitivity == 0 {
-		return defaultSensitivity
-	}
-	return cfg.Sensitivity
 }
 
 func (cfg *Config) host() string {
@@ -243,17 +251,19 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 }
 
 // newxArm returns a new xArm of the specified modelName.
-func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, modelName string) (arm.Arm, error) {
+func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, modelName string, deps resource.Dependencies) (arm.Arm, error) {
 	newConf, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName)
+	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName, deps)
 }
 
 // NewXArm creates a new x arm connection.
-func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger logging.Logger, modelName string) (arm.Arm, error) {
+func NewXArm(ctx context.Context, name resource.Name,
+	newConf *Config, logger logging.Logger, modelName string, deps resource.Dependencies) (arm.Arm, error) {
+	var err error
 	x := xArm{
 		name:   name,
 		conf:   newConf,
@@ -266,7 +276,17 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
 
-	err := x.connect(ctx)
+	if newConf.Motion != "" {
+		if deps == nil {
+			return nil, fmt.Errorf("no deps")
+		}
+		x.motion, err = motion.FromDependencies(deps, newConf.Motion)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = x.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -298,9 +318,11 @@ func NewXArm(ctx context.Context, name resource.Name, newConf *Config, logger lo
 		}
 	}
 
-	err = x.setCollisionDetectionSensitivity(ctx, newConf.sensitivity())
-	if err != nil {
-		return nil, err
+	if newConf.Sensitivity != nil {
+		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &x, nil
@@ -471,6 +493,19 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 		resp[vacuumGripperStateKey] = res
+		validCommand = true
+	}
+
+	if action, ok := cmd[gripperLiteActionKey]; ok {
+		act, ok := action.(string)
+		if !ok {
+			return nil, fmt.Errorf("action %v (%T) is not a string", action, action)
+		}
+		res, err := x.liteGripperAction(ctx, act)
+		if err != nil {
+			return nil, err
+		}
+		resp[gripperLiteActionKey] = res
 		validCommand = true
 	}
 
