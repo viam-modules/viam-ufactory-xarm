@@ -277,7 +277,8 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return multierr.Combine(fmt.Errorf("unable to reset the error %w", errors.New(armBoxErrorMap[currentState[1]])), err)
 		}
 		if newState.params[0]&errorState != 0 {
-			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the arm is properly wired and the e-stopped is released. Decoded errors is %w ", errors.New(armBoxErrorMap[currentState[1]]))
+			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
+				errors.New(armBoxErrorMap[currentState[1]]))
 		}
 		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxErrorMap[currentState[1]]))
 	}
@@ -290,7 +291,8 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return multierr.Combine(fmt.Errorf("unable to reset the warning %w", errors.New(armBoxWarnMap[currentState[2]])), err)
 		}
 		if newState.params[0]&warningState != 0 {
-			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the arm is properly wired and the e-stopped is released. Decoded errors is %w ", errors.New(armBoxWarnMap[currentState[2]]))
+			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
+				errors.New(armBoxWarnMap[currentState[2]]))
 		}
 		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
 	}
@@ -382,7 +384,6 @@ func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
 }
 
 func (x *xArm) start(ctx context.Context) error {
-
 	if x.started.Load() {
 		return nil
 	}
