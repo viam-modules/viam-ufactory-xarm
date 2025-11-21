@@ -293,7 +293,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 
 	err = x.start(ctx)
 	if err != nil {
-		return nil, multierr.Combine(errors.Wrap(err, "failed to start xarm"), err, x.Close(ctx))
+		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
 	}
 
 	current := []referenceframe.Input{}
@@ -465,7 +465,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		validCommand = true
 	}
 	if _, ok := cmd[clearErrorKey]; ok {
-		if err := x.resetErrorState(ctx); err != nil {
+		if err := x.checkReadyState(ctx, false); err != nil {
 			return nil, err
 		}
 		validCommand = true

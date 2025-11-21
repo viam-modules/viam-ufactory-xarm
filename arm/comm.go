@@ -19,6 +19,9 @@ import (
 
 const errCodeCollision = 0x1F
 const servoMotionMode = 1
+const errorState = 1 << 6
+const warningState = 1 << 5
+const notReadyForMotionState = 1 << 4
 
 var servoErrorMap = map[byte]string{
 	0x00: "xArm Servo: Joint Communication Error",
@@ -164,7 +167,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		state := resp.params[0]
 		// the 2nd and 3rd MSB in state byte indicate if there
 		// is an error or warning respectively.
-		if state&(1<<6|1<<5) != 0 {
+		if state&(errorState|warningState) != 0 {
 			params, err := x.getErrorParams(ctx)
 			if err != nil {
 				return cmd{}, err
@@ -176,9 +179,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 					"through UFACTORY Studio or clear_error do command")
 			}
 			// Any other errors are cleared automatically by the driver.
-			return cmd{}, multierr.Combine(
-				decodeError(params),
-				x.resetErrorState(ctx))
+			return cmd{}, decodeError(params)
 		}
 	}
 	return resp, err
@@ -253,15 +254,53 @@ func (x *xArm) CheckServoErrors(ctx context.Context) error {
 	}
 	return err
 }
+func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
+	// read the current arm state
+	// bit6 is 1 if there is an error
+	// bit5 is 1 if there is a warning
+	// bit4 is 1 if not ready for motion
+	currentState, err := x.getErrorParams(ctx)
+	if err != nil {
+		// most likely indicative of a communication issue
+		return multierr.Combine(fmt.Errorf("cannot check the state of the arm, check communication configuration"), err)
+	}
 
-func (x *xArm) resetErrorState(ctx context.Context) error {
-	c1 := x.newCmd(regMap["ClearError"])
-	c2 := x.newCmd(regMap["ClearWarn"])
-	_, err1 := x.send(ctx, c1, false)
-	_, err2 := x.send(ctx, c2, false)
-	err3 := x.setMotionMode(ctx, servoMotionMode)
-	err4 := x.setMotionState(ctx, 0)
-	return multierr.Combine(err1, err2, err3, err4)
+	if currentState[0]&errorState != 0 {
+		// we assume that if we run into an error we will need to restart the servos etc.
+		x.started.Store(false)
+
+		// we are in error state, we will attempt to clear the error
+		// if we fail we will return the error code
+		c := x.newCmd(regMap["ClearError"])
+		newState, err := x.send(ctx, c, false)
+		if err != nil {
+			return multierr.Combine(fmt.Errorf("unable to reset the error %w", errors.New(armBoxErrorMap[currentState[1]])), err)
+		}
+		if newState.params[0]&errorState != 0 {
+			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
+				errors.New(armBoxErrorMap[currentState[1]]))
+		}
+		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxErrorMap[currentState[1]]))
+	}
+	if currentState[0]&warningState != 0 {
+		// we are in warning state, we will attempt to clear the warning
+		// if we fail we will return the warning code
+		c := x.newCmd(regMap["ClearWarn"])
+		newState, err := x.send(ctx, c, false)
+		if err != nil {
+			return multierr.Combine(fmt.Errorf("unable to reset the warning %w", errors.New(armBoxWarnMap[currentState[2]])), err)
+		}
+		if newState.params[0]&warningState != 0 {
+			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
+				errors.New(armBoxWarnMap[currentState[2]]))
+		}
+		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
+	}
+	if currentState[0]&notReadyForMotionState != 0 && enableMotion {
+		x.logger.Error("motion not ready will enbale it")
+		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
+	}
+	return nil
 }
 
 func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
@@ -349,6 +388,10 @@ func (x *xArm) start(ctx context.Context) error {
 		return nil
 	}
 
+	if err := x.checkReadyState(ctx, false); err != nil {
+		return err
+	}
+
 	err := x.toggleServos(ctx, true)
 	if err != nil {
 		return err
@@ -419,24 +462,9 @@ func (x *xArm) MoveThroughJointPositions(
 			"max acceleration",
 		)
 	}
-	// set to servo motion mode
-	if err := x.setMotionMode(ctx, servoMotionMode); err != nil {
-		return err
-	}
 
-	// Ensure the robot is in correct state to move
-	b, err := x.getErrorParams(ctx)
-	if err != nil {
+	if err := x.checkReadyState(ctx, true); err != nil {
 		return err
-	}
-	state := b[0]
-
-	// xarm is not in movement state: was just restarted or estopped
-	// must set state back to motion
-	if state == 0x10 {
-		if err = x.setMotionState(ctx, 0); err != nil {
-			return err
-		}
 	}
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
@@ -694,6 +722,10 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 
 // JointPositions returns the current positions of all joints.
 func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{}) ([]referenceframe.Input, error) {
+	if err := x.checkReadyState(ctx, false); err != nil {
+		return nil, err
+	}
+
 	c := x.newCmd(regMap["JointPos"])
 
 	jData, err := x.send(ctx, c, true)
