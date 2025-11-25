@@ -66,6 +66,9 @@ var xArm7modeljson []byte
 //go:embed lite6_kinematics.json
 var lite6modeljson []byte
 
+//go:embed xarm850_kinematics.json
+var xArm850modeljson []byte
+
 const (
 	// ModelName6DOF is the name of a UFactory xArm 6.
 	ModelName6DOF = "xArm6"
@@ -73,6 +76,8 @@ const (
 	ModelName7DOF = "xArm7"
 	// ModelNameLite is the name of a UFactory Lite 6.
 	ModelNameLite = "lite6"
+	// ModelName850 is the name of a UFactory 850.
+	ModelName850 = "xArm850"
 )
 
 var (
@@ -84,6 +89,8 @@ var (
 	XArm7Model = family.WithModel(ModelName7DOF)
 	// XArmLite6Model defines the resource.Model for the lite6.
 	XArmLite6Model = family.WithModel(ModelNameLite)
+	// XArm850Model defines the resource.Model for the 850.
+	XArm850Model = family.WithModel(ModelName850)
 )
 
 type xArm struct {
@@ -114,7 +121,7 @@ type xArm struct {
 }
 
 func init() {
-	for _, model := range []resource.Model{XArm6Model, XArm7Model, XArmLite6Model} {
+	for _, model := range []resource.Model{XArm6Model, XArm7Model, XArmLite6Model, XArm850Model} {
 		register(model)
 	}
 }
@@ -217,6 +224,8 @@ func getModelJSON(modelName string) ([]byte, error) {
 		return lite6modeljson, nil
 	case ModelName7DOF:
 		return xArm7modeljson, nil
+	case ModelName850:
+		return xArm850modeljson, nil
 	default:
 		return nil, fmt.Errorf("no kinematics information for xarm of model %s", modelName)
 	}

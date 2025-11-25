@@ -23,6 +23,12 @@
       "markdown_link": "README.md#configure-your-xarm",
       "short_description": "arm component driver for the ufactory lite6"
     },
+     {
+      "api": "rdk:component:arm",
+      "model": "viam:ufactory:xArm850",
+      "markdown_link": "README.md#configure-your-xarm",
+      "short_description": "arm component driver for the ufactory xArm850"
+    },
     {
       "api": "rdk:component:gripper",
       "model": "viam:ufactory:gripper",
