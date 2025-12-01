@@ -2,8 +2,6 @@ module github.com/viam-modules/viam-ufactory-xarm
 
 go 1.25.1
 
-toolchain go1.23
-
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/axw/gocov v1.1.0
