@@ -434,12 +434,7 @@ func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (m
 		if err != nil {
 			return nil, err
 		}
-		if len(modelPartMesh.Mesh) > 0 {
-			// len > 0 indicates we actually have a 3D model for thus armModel and part Name
-			models[modelPart] = &modelPartMesh
-		} else {
-			return nil, fmt.Errorf("no 3D model found for arm model and part %s", modelPart)
-		}
+		models[modelPart] = &modelPartMesh
 	}
 
 	return models, nil
