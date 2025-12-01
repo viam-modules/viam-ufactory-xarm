@@ -392,6 +392,9 @@ func (x *xArm) connect(ctx context.Context) error {
 func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
 	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
+
+	// the model path is safe because it is constructed from the module root and the model and name and has no user input
+	// #nosec G304
 	glb, err := os.ReadFile(path)
 	if err != nil {
 		return commonpb.Mesh{}, err
