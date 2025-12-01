@@ -40,7 +40,6 @@ jobs:
           git init
           git add .
           chown -R testbot:testbot .
-          sudo -u testbot bash -lc 'make tool-install'
           sudo -u testbot bash -lc 'make lint'
 
           if [ -n "$GEN_DIFF" ]; then
