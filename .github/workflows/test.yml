@@ -21,42 +21,38 @@ jobs:
       GOARCH: ${{ matrix.arch }}
     timeout-minutes: 45
     steps:
-      - name: Check out main branch code
-        if: github.event_name != 'pull_request_target'
-        uses: actions/checkout@v3
 
-      - name: Check out PR branch code
-        if: github.event_name == 'pull_request_target'
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
+    - name: Check out main branch code
+      if: github.event_name != 'pull_request_target'
+      uses: actions/checkout@v3
 
-      - name: Set up Go 1.25.1
-        uses: actions/setup-go@v4
-        with:
-          go-version: 1.25.1
+    - name: Check out PR branch code
+      if: github.event_name == 'pull_request_target'
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: apt update
-        run: |
-          apt-get update
+    - name: apt update
+      run: |
+        apt-get update
 
-      - name: Verify no uncommitted changes from make lint
-        run: |
-          git init
-          git add .
-          chown -R testbot:testbot .
-          sudo -u testbot bash -lc 'make lint'
+    - name: Verify no uncommitted changes from make lint
+      run: |
+        git init
+        git add .
+        chown -R testbot:testbot .
+        sudo -u testbot bash -lc 'make lint'
 
-          if [ -n "$GEN_DIFF" ]; then
-              echo '"make lint" resulted in changes not in git' 1>&2
-              git status
-              exit 1
-          fi
+        if [ -n "$GEN_DIFF" ]; then
+            echo '"make lint" resulted in changes not in git' 1>&2
+            git status
+            exit 1
+        fi
+    
+    - name: run tests
+      run: |
+        sudo -u testbot bash -lc 'make test'
 
-      - name: run tests
-        run: |
-          sudo -u testbot bash -lc 'make test'
-
-      - name: make build
-        run: |
-          sudo -u testbot bash -lc 'make build'
+    - name: make build
+      run: |
+        sudo -u testbot bash -lc 'make build'
