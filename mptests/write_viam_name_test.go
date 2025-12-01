@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	home7 = frame.FloatsToInputs([]float64{0, 0, 0, 0, 0, 0, 0})
+	home7 = []float64{0, 0, 0, 0, 0, 0, 0}
 	wbY   = -426.
 )
 

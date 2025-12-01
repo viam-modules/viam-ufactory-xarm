@@ -72,7 +72,7 @@ func realMain() error {
 	logger.Infof("positions: %v", pos)
 
 	if moveJoint >= 0 {
-		pos[moveJoint].Value += rutils.DegToRad(moveAmount)
+		pos[moveJoint] += rutils.DegToRad(moveAmount)
 		logger.Infof("moving to: %v", pos)
 		err = a.MoveToJointPositions(ctx, pos, nil)
 		if err != nil {

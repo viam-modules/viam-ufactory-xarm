@@ -273,7 +273,7 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 	}
 
 	for _, j := range badJoints {
-		now := utils.RadToDeg(current[j].Value)
+		now := utils.RadToDeg(current[j])
 		m.Joints[j].Min = now - 1
 		m.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
