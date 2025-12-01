@@ -88,7 +88,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		isMoving: atomic.Bool{},
 	}
 
-	g.arm, err = arm.FromDependencies(deps, newConf.Arm)
+	g.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +230,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		logger: logger,
 	}
 
-	g.arm, err = arm.FromDependencies(deps, newConf.Arm)
+	g.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
 		return nil, err
 	}

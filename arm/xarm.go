@@ -12,6 +12,7 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
+	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -250,7 +251,7 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 	}
 
 	for _, j := range badJoints {
-		now := utils.RadToDeg(current[j].Value)
+		now := utils.RadToDeg(current[j])
 		m.Joints[j].Min = now - 1
 		m.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
@@ -289,7 +290,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if deps == nil {
 			return nil, fmt.Errorf("no deps")
 		}
-		x.motion, err = motion.FromDependencies(deps, newConf.Motion)
+		x.motion, err = motion.FromProvider(deps, newConf.Motion)
 		if err != nil {
 			return nil, err
 		}
@@ -372,6 +373,10 @@ func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error
 
 func (x *xArm) GoToInputs(ctx context.Context, inputSteps ...[]referenceframe.Input) error {
 	return x.MoveThroughJointPositions(ctx, inputSteps, nil, nil)
+}
+
+func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]spatialmath.Geometry, error) {
