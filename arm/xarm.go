@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
+	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -92,6 +94,27 @@ var (
 	// XArm850Model defines the resource.Model for the 850.
 	XArm850Model = family.WithModel(ModelName850)
 )
+
+var armTo3DModelParts = map[string][]string{
+	"lite6": {
+		"base_top",
+		"base",
+		"gripper_mount",
+		"lower_forearm",
+		"upper_arm",
+		"upper_forearm",
+		"wrist_link",
+	},
+	"xArm6": {
+		"base_top",
+		"base",
+		"gripper_mount",
+		"lower_forearm",
+		"upper_arm",
+		"upper_forearm",
+		"wrist_link",
+	},
+}
 
 type xArm struct {
 	resource.AlwaysRebuild
@@ -366,6 +389,19 @@ func (x *xArm) connect(ctx context.Context) error {
 	return nil
 }
 
+func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
+	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
+	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
+	glb, err := os.ReadFile(path)
+	if err != nil {
+		return commonpb.Mesh{}, err
+	}
+	return commonpb.Mesh{
+		Mesh:        glb,
+		ContentType: "model/gltf-binary",
+	}, nil
+}
+
 func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
 	return x.JointPositions(ctx, nil)
 }
@@ -384,6 +420,29 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]
 		return nil, err
 	}
 	return gif.Geometries(), nil
+}
+
+func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
+	models := make(map[string]*commonpb.Mesh)
+	armModelParts := armTo3DModelParts[x.model.Name()]
+	if armModelParts == nil {
+		return models, nil
+	}
+
+	for _, modelPart := range armModelParts {
+		modelPartMesh, err := threeDMeshFromName(x.model.Name(), modelPart)
+		if err != nil {
+			return nil, err
+		}
+		if len(modelPartMesh.Mesh) > 0 {
+			// len > 0 indicates we actually have a 3D model for thus armModel and part Name
+			models[modelPart] = &modelPartMesh
+		} else {
+			return nil, fmt.Errorf("no 3D model found for arm model and part %s", modelPart)
+		}
+	}
+
+	return models, nil
 }
 
 func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
