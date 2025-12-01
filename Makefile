@@ -16,10 +16,10 @@ clean:
 	rm -rf $(BIN_OUTPUT_PATH)/viam-xarm $(BIN_OUTPUT_PATH)/module.tar.gz
 
 tool-install:
-	GOBIN=`pwd`/$(TOOL_BIN) go install github.com/edaniels/golinters/cmd/combined@v0.0.5-0.20220906153528-641155550742
-	GOBIN=`pwd`/$(TOOL_BIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
-	GOBIN=`pwd`/$(TOOL_BIN) go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.8
-
+	GOBIN=`pwd`/$(TOOL_BIN) go install \
+		github.com/edaniels/golinters/cmd/combined \
+		github.com/golangci/golangci-lint/cmd/golangci-lint \
+		github.com/rhysd/actionlint/cmd/actionlint
 
 gofmt:
 	gofmt -w -s .
