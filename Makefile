@@ -24,7 +24,7 @@ tool-install:
 gofmt:
 	gofmt -w -s .
 
-lint: gofmt tool-install
+lint: gofmt
 	go mod tidy
 	PATH=$(PATH_WITH_TOOLS) golangci-lint run -c etc/.golangci.yaml --fix
 
@@ -32,5 +32,5 @@ update-rdk:
 	go get go.viam.com/rdk@latest
 	go mod tidy
 
-test: tool-install
+test:
 	go test -v -race -failfast ./...

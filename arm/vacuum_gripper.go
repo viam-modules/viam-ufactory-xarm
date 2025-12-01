@@ -40,7 +40,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		logger: logger,
 	}
 
-	g.arm, err = arm.FromDependencies(deps, newConf.Arm)
+	g.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
 		return nil, err
 	}

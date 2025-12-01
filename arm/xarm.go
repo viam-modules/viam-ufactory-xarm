@@ -312,7 +312,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if deps == nil {
 			return nil, fmt.Errorf("no deps")
 		}
-		x.motion, err = motion.FromDependencies(deps, newConf.Motion)
+		x.motion, err = motion.FromProvider(deps, newConf.Motion)
 		if err != nil {
 			return nil, err
 		}
