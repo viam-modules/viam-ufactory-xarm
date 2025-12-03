@@ -17,6 +17,8 @@ clean:
 
 tool-install:
 	GOBIN=`pwd`/$(TOOL_BIN) go install \
+		github.com/edaniels/golinters/cmd/combined \
+		github.com/golangci/golangci-lint/cmd/golangci-lint \
 		github.com/rhysd/actionlint/cmd/actionlint
 
 gofmt:
@@ -24,7 +26,7 @@ gofmt:
 
 lint: gofmt tool-install
 	go mod tidy
-	PATH=$(PATH_WITH_TOOLS) go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2 run -c etc/.golangci.yaml --fix
+	PATH=$(PATH_WITH_TOOLS) golangci-lint run -c etc/.golangci.yaml --fix
 
 update-rdk:
 	go get go.viam.com/rdk@latest
