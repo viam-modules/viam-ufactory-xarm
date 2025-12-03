@@ -545,12 +545,11 @@ func (x *xArm) createRawJointSteps(
 	displacementTotal := 0.
 
 	for _, toInputs := range inputSteps {
-		to := toInputs
-		maxVal := floatMaxDiff(from, to)
+		maxVal := floatMaxDiff(from, toInputs)
 		displacementTotal += maxVal
 		nSteps := (math.Abs(maxVal) / speed) * x.moveHZ
 		stepTotal += nSteps
-		from = to
+		from = toInputs
 	}
 
 	nominalAccelSteps := int((speed / acceleration) * x.moveHZ) // This many steps to accelerate, and the same to decelerate
@@ -575,10 +574,9 @@ func (x *xArm) createRawJointSteps(
 		from = startInputs
 		lastInputs := startInputs
 		for i, toInputs := range allInputSteps {
-			to := toInputs
 			runningFrom := from
 
-			for currDiff := floatMaxDiff(runningFrom, to); currDiff > 1e-6; currDiff = floatMaxDiff(runningFrom, to) {
+			for currDiff := floatMaxDiff(runningFrom, toInputs); currDiff > 1e-6; currDiff = floatMaxDiff(runningFrom, toInputs) {
 				if currSpeed <= 0 {
 					break
 				}
@@ -614,7 +612,7 @@ func (x *xArm) createRawJointSteps(
 				lastInputs = nextInputs
 			}
 			lastInputs = toInputs
-			from = to
+			from = toInputs
 		}
 		return len(allInputSteps), steps, nil
 	}
