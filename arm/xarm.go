@@ -584,7 +584,3 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 func (x *xArm) Name() resource.Name {
 	return x.name
 }
-
-func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
-	return nil, nil //nolint: nilnil
-}
