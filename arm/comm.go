@@ -526,7 +526,7 @@ func (x *xArm) createRawJointSteps(
 	accelStep := acceleration / x.moveHZ
 	interwaypointAccelStep := interwaypointAccel / x.moveHZ
 
-	from := referenceframe.InputsToFloats(startInputs)
+	from := startInputs
 
 	// We want smooth acceleration/motion but there's no guarantee the provided inputs have continuous velocity signs
 	floatMaxDiff := func(from, to []float64) float64 {
@@ -545,12 +545,11 @@ func (x *xArm) createRawJointSteps(
 	displacementTotal := 0.
 
 	for _, toInputs := range inputSteps {
-		to := referenceframe.InputsToFloats(toInputs)
-		maxVal := floatMaxDiff(from, to)
+		maxVal := floatMaxDiff(from, toInputs)
 		displacementTotal += maxVal
 		nSteps := (math.Abs(maxVal) / speed) * x.moveHZ
 		stepTotal += nSteps
-		from = to
+		from = toInputs
 	}
 
 	nominalAccelSteps := int((speed / acceleration) * x.moveHZ) // This many steps to accelerate, and the same to decelerate
@@ -572,13 +571,12 @@ func (x *xArm) createRawJointSteps(
 	) (int, [][]float64, error) {
 		currSpeed := accelStep
 		steps := [][]float64{}
-		from = referenceframe.InputsToFloats(startInputs)
+		from = startInputs
 		lastInputs := startInputs
 		for i, toInputs := range allInputSteps {
-			to := referenceframe.InputsToFloats(toInputs)
 			runningFrom := from
 
-			for currDiff := floatMaxDiff(runningFrom, to); currDiff > 1e-6; currDiff = floatMaxDiff(runningFrom, to) {
+			for currDiff := floatMaxDiff(runningFrom, toInputs); currDiff > 1e-6; currDiff = floatMaxDiff(runningFrom, toInputs) {
 				if currSpeed <= 0 {
 					break
 				}
@@ -594,8 +592,8 @@ func (x *xArm) createRawJointSteps(
 				if err != nil {
 					return 0, nil, err
 				}
-				runningFrom = referenceframe.InputsToFloats(nextInputs)
-				steps = append(steps, referenceframe.InputsToFloats(nextInputs))
+				runningFrom = nextInputs
+				steps = append(steps, nextInputs)
 
 				if currSpeed < speed {
 					currSpeed += accelStep * stepSize
@@ -614,7 +612,7 @@ func (x *xArm) createRawJointSteps(
 				lastInputs = nextInputs
 			}
 			lastInputs = toInputs
-			from = to
+			from = toInputs
 		}
 		return len(allInputSteps), steps, nil
 	}
@@ -627,7 +625,7 @@ func (x *xArm) createRawJointSteps(
 	accelInputSteps := [][]referenceframe.Input{}
 	for i, inputStep := range inputSteps {
 		if i == accelStop {
-			accelInputSteps = append(accelInputSteps, referenceframe.FloatsToInputs(decelSteps[len(decelSteps)-1]))
+			accelInputSteps = append(accelInputSteps, decelSteps[len(decelSteps)-1])
 			break
 		}
 		accelInputSteps = append(accelInputSteps, inputStep)
@@ -745,7 +743,7 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 		idx := i*4 + 1
 		radians = append(radians, float64(rutils.Float32FromBytesLE((jData.params[idx : idx+4]))))
 	}
-	return referenceframe.FloatsToInputs(radians), nil
+	return radians, nil
 }
 
 // Stop stops the xArm but also reinitializes the arm so it can take commands again.

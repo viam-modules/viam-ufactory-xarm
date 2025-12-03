@@ -12,6 +12,8 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
+
+	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/operation"
@@ -250,7 +252,7 @@ func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.
 	}
 
 	for _, j := range badJoints {
-		now := utils.RadToDeg(current[j].Value)
+		now := utils.RadToDeg(current[j])
 		m.Joints[j].Min = now - 1
 		m.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
@@ -526,4 +528,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 
 func (x *xArm) Name() resource.Name {
 	return x.name
+}
+
+func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
+	return nil, nil
 }
