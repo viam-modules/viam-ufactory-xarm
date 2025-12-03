@@ -12,7 +12,6 @@ import (
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
-
 	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
@@ -291,7 +290,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if deps == nil {
 			return nil, fmt.Errorf("no deps")
 		}
-		x.motion, err = motion.FromDependencies(deps, newConf.Motion)
+		x.motion, err = motion.FromProvider(deps, newConf.Motion)
 		if err != nil {
 			return nil, err
 		}
@@ -531,5 +530,5 @@ func (x *xArm) Name() resource.Name {
 }
 
 func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
-	return nil, nil
+	return nil, nil //nolint: nilnil
 }
