@@ -60,7 +60,7 @@ func BenchmarkMP1(b *testing.B) {
 
 	logger.Infof("fs: %v", fs)
 
-	startJoints := []referenceframe.Input{
+	startJoints := []float64{
 		-1.6046726703643799,
 		-0.9392223954200745,
 		-0.28884029388427734,

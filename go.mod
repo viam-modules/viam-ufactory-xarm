@@ -33,6 +33,8 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.29.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.51.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.51.0 // indirect
+	github.com/Masterminds/semver/v3 v3.3.0 // indirect
+	github.com/OpenPeeDeeP/depguard/v2 v2.2.1 // indirect
 	github.com/a8m/envsubst v1.4.2 // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20201229220542-30ce2eb5d4dc // indirect
@@ -42,6 +44,9 @@ require (
 	github.com/bitfield/gotestdox v0.2.2 // indirect
 	github.com/bluenviron/gortsplib/v4 v4.8.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
+	github.com/bombsimon/wsl/v4 v4.5.0 // indirect
+	github.com/breml/bidichk v0.3.2 // indirect
+	github.com/breml/errchkjson v0.4.0 // indirect
 	github.com/bufbuild/protocompile v0.9.0 // indirect
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/campoy/embedmd v1.0.0 // indirect
@@ -51,6 +56,7 @@ require (
 	github.com/chenzhekl/goply v0.0.0-20190930133256-258c2381defd // indirect
 	github.com/chewxy/hm v1.0.0 // indirect
 	github.com/chewxy/math32 v1.0.8 // indirect
+	github.com/ckaznocha/intrange v0.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/cncf/xds/go v0.0.0-20250501225837-2ac532fd4443 // indirect
@@ -75,8 +81,16 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-nlopt/nlopt v0.0.0-20230219125344-443d3362dcb5 // indirect
-	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/go-toolsmith/astcast v1.1.0 // indirect
+	github.com/go-toolsmith/astcopy v1.1.0 // indirect
+	github.com/go-toolsmith/astequal v1.2.0 // indirect
+	github.com/go-toolsmith/astfmt v1.1.0 // indirect
+	github.com/go-toolsmith/astp v1.1.0 // indirect
+	github.com/go-toolsmith/strparse v1.1.0 // indirect
+	github.com/go-toolsmith/typep v1.1.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
@@ -92,6 +106,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
+	github.com/gordonklaus/ineffassign v0.1.0 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 // indirect
@@ -139,8 +154,19 @@ require (
 	github.com/pion/turn/v2 v2.1.6 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
+	github.com/polyfloyd/go-errorlint v1.7.1 // indirect
+	github.com/prometheus/client_golang v1.22.0 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/common v0.64.0 // indirect
+	github.com/prometheus/procfs v0.15.1 // indirect
+	github.com/quasilyte/go-ruleguard v0.4.3-0.20240823090925-0fe6f58b47b1 // indirect
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22 // indirect
+	github.com/quasilyte/gogrep v0.5.0 // indirect
+	github.com/quasilyte/regex/syntax v0.0.0-20210819130434-b3f0c404a727 // indirect
+	github.com/quasilyte/stdinfo v0.0.0-20220114132959-f7386bf02567 // indirect
+	github.com/raeperd/recvcheck v0.2.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/rs/cors v1.11.1 // indirect
 	github.com/samber/lo v1.51.0 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
@@ -187,6 +213,7 @@ require (
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/exp v0.0.0-20241009180824-f66d83c29e7c // indirect
+	golang.org/x/exp/typeparams v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/image v0.25.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
