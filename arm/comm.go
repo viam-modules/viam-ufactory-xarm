@@ -669,7 +669,9 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 		}
 
 		sleepTime := (time.Duration(1000000./mo.moveHZ) * time.Microsecond) - time.Since(loopTimeStart)
-
+		if sleepTime < 0 {
+			x.logger.Warnf("sleepTime is negative (%v) which means we aren't sending joints fast enough", sleepTime)
+		}
 		// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
 		// before issuing the next `MoveJoints` command.
 		if !utils.SelectContextOrWait(ctx, sleepTime) {
