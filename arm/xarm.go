@@ -382,6 +382,22 @@ type moveOptions struct {
 	waitAtEnd bool
 }
 
+func f64(extra map[string]interface{}, n string) (float64, bool) {
+	v, ok := extra[n]
+	if !ok {
+		return 0, false
+	}
+
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	default:
+		return 0, false
+	}
+}
+
 func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) moveOptions {
 	x.confLock.Lock()
 	defer x.confLock.Unlock()
@@ -396,37 +412,33 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) 
 
 	if opts != nil {
 		if opts.MaxVelRads != 0 {
-			opts.MaxVelRads = x.clampMoveOptions(
-				opts.MaxVelRads,
-				utils.DegToRad(minSpeed),
-				utils.DegToRad(maxSpeed),
-				"max velocity",
-			)
-
 			o.speed = opts.MaxVelRads
 		}
 
 		if opts.MaxAccRads != 0 {
-			opts.MaxAccRads = x.clampMoveOptions(
-				opts.MaxAccRads,
-				0,
-				utils.DegToRad(maxAccel),
-				"max acceleration",
-			)
-
 			o.acceleration = opts.MaxAccRads
 		}
 	}
 
 	if extra != nil {
-		v, ok := extra["speed_r"].(float64)
+		v, ok := f64(extra, "speed_r")
 		if ok {
 			o.speed = v
 		}
 
-		v, ok = extra["accel_r"].(float64)
+		v, ok = f64(extra, "speed_d")
+		if ok {
+			o.speed = utils.DegToRad(v)
+		}
+
+		v, ok = f64(extra, "acceleration_r")
 		if ok {
 			o.acceleration = v
+		}
+
+		v, ok = f64(extra, "acceleration_d")
+		if ok {
+			o.acceleration = utils.DegToRad(v)
 		}
 
 		if extra["direct"] == true {
@@ -437,6 +449,20 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) 
 			o.waitAtEnd = false
 		}
 	}
+
+	o.speed = x.clampMoveOptions(
+		o.speed,
+		utils.DegToRad(minSpeed),
+		utils.DegToRad(maxSpeed),
+		"max velocity",
+	)
+
+	o.acceleration = x.clampMoveOptions(
+		o.acceleration,
+		0,
+		utils.DegToRad(maxAccel),
+		"max acceleration",
+	)
 
 	return o
 }
