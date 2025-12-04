@@ -460,16 +460,21 @@ func (x *xArm) MoveThroughJointPositions(
 	}
 
 	doInterp := true
-	if extra != nil && extra["direct"] == true {
-		if len(positions) > 1 {
-			return fmt.Errorf("direct only work with 1 position, send %d", len(positions))
-		}
-		doInterp = false
-	}
-
 	waitAtEnd := true
-	if extra != nil && extra["waitAtEnd"] == false {
-		waitAtEnd = false
+	if len(extra) > 0 {
+		x.logger.Infof("extra: %v", extra)
+		if extra["direct"] == true {
+			if len(positions) > 1 {
+				return fmt.Errorf("direct only work with 1 position, send %d", len(positions))
+			}
+			doInterp = false
+			x.logger.Infof("doInterp set to false")
+		}
+
+		if extra["waitAtEnd"] == false {
+			waitAtEnd = false
+			x.logger.Infof("waitAtEnd set to false")
+		}
 	}
 
 	if err := x.checkReadyState(ctx, true); err != nil {
