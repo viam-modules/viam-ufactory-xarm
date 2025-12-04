@@ -433,19 +433,15 @@ func (x *xArm) Close(ctx context.Context) error {
 	return nil
 }
 
-// MoveToJointPositions moves the arm to the requested joint positions.
-func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
-	ctx, done := x.opMgr.New(ctx)
-	defer done()
-	return x.GoToInputs(ctx, newPositions)
-}
-
 func (x *xArm) MoveThroughJointPositions(
 	ctx context.Context,
 	positions [][]referenceframe.Input,
 	opts *arm.MoveOptions,
-	_ map[string]interface{},
+	extra map[string]interface{},
 ) error {
+	ctx, done := x.opMgr.New(ctx)
+	defer done()
+
 	if opts != nil {
 		// Ensure move options are within the valid range
 		opts.MaxVelRads = x.clampMoveOptions(
@@ -463,24 +459,43 @@ func (x *xArm) MoveThroughJointPositions(
 		)
 	}
 
+	doInterp := true
+	if extra != nil && extra["direct"] == true {
+		if len(positions) > 1 {
+			return fmt.Errorf("direct only work with 1 position, send %d", len(positions))
+		}
+		doInterp = false
+	}
+
+	waitAtEnd := true
+	if extra != nil && extra["waitAtEnd"] == false {
+		waitAtEnd = false
+	}
+
 	if err := x.checkReadyState(ctx, true); err != nil {
 		return err
 	}
+
 	for _, goal := range positions {
 		// check that joint positions are not out of bounds
 		if err := arm.CheckDesiredJointPositions(ctx, x, goal); err != nil {
 			return err
 		}
 	}
-	curPos, err := x.JointPositions(ctx, nil)
-	if err != nil {
-		return err
+
+	armRawSteps := positions
+	if doInterp {
+		curPos, err := x.JointPositions(ctx, nil)
+		if err != nil {
+			return err
+		}
+		armRawSteps, err = x.createRawJointSteps(curPos, positions, opts)
+		if err != nil {
+			return err
+		}
 	}
-	armRawSteps, err := x.createRawJointSteps(curPos, positions, opts)
-	if err != nil {
-		return err
-	}
-	return x.executeInputs(ctx, armRawSteps)
+
+	return x.executeInputs(ctx, armRawSteps, waitAtEnd)
 }
 
 func (x *xArm) clampMoveOptions(val, minVal, maxVal float64, name string) float64 {
@@ -641,12 +656,14 @@ func (x *xArm) createRawJointSteps(
 	return accelSteps, nil
 }
 
-func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
+func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, waitAtEnd bool) error {
 	if err := x.start(ctx); err != nil {
 		return err
 	}
 	// convenience for structuring and sending individual joint steps
 	for _, step := range rawSteps {
+		loopTimeStart := time.Now()
+
 		c := x.newCmd(regMap["MoveJoints"])
 		jFloatBytes := make([]byte, 4)
 		for _, jRad := range step {
@@ -666,16 +683,18 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64) error {
 			return err
 		}
 
+		sleepTime := (time.Duration(1000000./x.moveHZ) * time.Microsecond) - time.Since(loopTimeStart)
+
 		// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
 		// before issuing the next `MoveJoints` command.
-		if !utils.SelectContextOrWait(ctx, time.Duration(1000000./x.moveHZ)*time.Microsecond) {
+		if !utils.SelectContextOrWait(ctx, sleepTime) {
 			return ctx.Err()
 		}
 	}
 
 	// Our guessing for how long to wait usually accumulates to be 10% off by the end. Wait until
 	// the arm has definitely stopped moving by polling the arm state.
-	for ctx.Err() == nil {
+	for waitAtEnd && ctx.Err() == nil {
 		stateCmd := x.newCmd(regMap["GetState"])
 		resp, err := x.send(ctx, stateCmd, true)
 		if err != nil {

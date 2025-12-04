@@ -409,6 +409,11 @@ func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error
 	return x.JointPositions(ctx, nil)
 }
 
+// MoveToJointPositions moves the arm to the requested joint positions.
+func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
+	return x.MoveThroughJointPositions(ctx, [][]referenceframe.Input{newPositions}, nil, extra)
+}
+
 func (x *xArm) GoToInputs(ctx context.Context, inputSteps ...[]referenceframe.Input) error {
 	return x.MoveThroughJointPositions(ctx, inputSteps, nil, nil)
 }
