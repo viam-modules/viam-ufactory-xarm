@@ -104,6 +104,7 @@ var regMap = map[string]byte{
 	"ClearWarn":      0x11,
 	"ToggleBrake":    0x12,
 	"SetMode":        0x13,
+	"P2PJoint":       0x17,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
@@ -267,7 +268,7 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 
 	if currentState[0]&errorState != 0 {
 		// we assume that if we run into an error we will need to restart the servos etc.
-		x.started.Store(false)
+		x.started.Store(-1)
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
@@ -383,8 +384,13 @@ func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
 	return err
 }
 
-func (x *xArm) start(ctx context.Context) error {
-	if x.started.Load() {
+func (x *xArm) start(ctx context.Context, direct bool) error {
+	mode := byte(servoMotionMode)
+	if direct {
+		mode = 0
+	}
+
+	if x.started.Load() == int32(mode) {
 		return nil
 	}
 
@@ -396,14 +402,15 @@ func (x *xArm) start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = x.setMotionMode(ctx, servoMotionMode)
+
+	err = x.setMotionMode(ctx, mode)
 	if err != nil {
 		return err
 	}
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return err
 	}
-	x.started.Store(true)
+	x.started.Store(int32(mode))
 	return nil
 }
 
@@ -500,7 +507,7 @@ func (x *xArm) MoveThroughJointPositions(
 		}
 	}
 
-	return x.executeInputs(ctx, armRawSteps, waitAtEnd)
+	return x.executeInputs(ctx, armRawSteps, !doInterp, waitAtEnd)
 }
 
 func (x *xArm) clampMoveOptions(val, minVal, maxVal float64, name string) float64 {
@@ -661,15 +668,19 @@ func (x *xArm) createRawJointSteps(
 	return accelSteps, nil
 }
 
-func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, waitAtEnd bool) error {
-	if err := x.start(ctx); err != nil {
+func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, direct, waitAtEnd bool) error {
+	if err := x.start(ctx, direct); err != nil {
 		return err
 	}
 	// convenience for structuring and sending individual joint steps
 	for _, step := range rawSteps {
 		loopTimeStart := time.Now()
 
-		c := x.newCmd(regMap["MoveJoints"])
+		cName := "MoveJoints"
+		if direct {
+			cName = "P2PJoint"
+		}
+		c := x.newCmd(regMap[cName])
 		jFloatBytes := make([]byte, 4)
 		for _, jRad := range step {
 			binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(jRad)))
@@ -679,10 +690,16 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, waitAtEn
 		for dof := x.dof; dof < 7; dof++ {
 			c.params = append(c.params, 0, 0, 0, 0)
 		}
-		// When in servoj mode, motion time, speed, and acceleration are not handled by the control box
+
+		// speed
+		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(x.speed)))
+		c.params = append(c.params, jFloatBytes...)
+		// acceleration
+		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(x.acceleration)))
+		c.params = append(c.params, jFloatBytes...)
+		// Motion Time - not used by the arm yet
 		c.params = append(c.params, 0, 0, 0, 0)
-		c.params = append(c.params, 0, 0, 0, 0)
-		c.params = append(c.params, 0, 0, 0, 0)
+
 		_, err := x.send(ctx, c, true)
 		if err != nil {
 			return err
@@ -775,13 +792,13 @@ func (x *xArm) Stop(ctx context.Context, extra map[string]interface{}) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 
-	x.started.Store(false)
+	x.started.Store(-1)
 
 	if err := x.setMotionState(ctx, 3); err != nil {
 		return err
 	}
 
-	return x.start(ctx)
+	return x.start(ctx, false)
 }
 
 // IsMoving returns whether the arm is moving.

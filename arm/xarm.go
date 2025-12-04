@@ -122,7 +122,7 @@ type xArm struct {
 	moveLock sync.Mutex
 
 	// state of movement things
-	started atomic.Bool
+	started atomic.Int32 // -1 is off, >= 0 is mode
 	tid     uint16
 
 	name   resource.Name
@@ -170,8 +170,8 @@ func register(model resource.Model) {
 type Config struct {
 	Host         string  `json:"host"`
 	Port         int     `json:"port,omitempty"`
-	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	Speed        float64 `json:"speed_degs_per_sec,omitempty"`
+	Acceleration float64 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
@@ -211,14 +211,14 @@ func (cfg *Config) speed() float32 {
 	if cfg.Speed == 0 {
 		return defaultSpeed
 	}
-	return cfg.Speed
+	return float32(cfg.Speed)
 }
 
 func (cfg *Config) acceleration() float32 {
 	if cfg.Acceleration == 0 {
 		return defaultAccel
 	}
-	return cfg.Acceleration
+	return float32(cfg.Acceleration)
 }
 
 func (cfg *Config) host() string {
@@ -323,7 +323,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, err
 	}
 
-	err = x.start(ctx)
+	err = x.start(ctx, false)
 	if err != nil {
 		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
 	}
@@ -370,7 +370,7 @@ func (x *xArm) resetConnection() {
 		x.logger.Infof("error closing old socket: %v", err)
 	}
 	x.conn = nil
-	x.started.Store(false)
+	x.started.Store(-1)
 }
 
 func (x *xArm) connect(ctx context.Context) error {
@@ -379,7 +379,7 @@ func (x *xArm) connect(ctx context.Context) error {
 	var d net.Dialer
 	var err error
 
-	x.started.Store(false)
+	x.started.Store(-1)
 
 	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
 	if err != nil {
