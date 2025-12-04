@@ -138,6 +138,7 @@ type xArm struct {
 	model  referenceframe.Model
 	moveHZ float64 // Number of joint positions to send per second
 
+	// TODO: remove this lock and make this not settable
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
@@ -172,6 +173,7 @@ type Config struct {
 	Port         int     `json:"port,omitempty"`
 	Speed        float64 `json:"speed_degs_per_sec,omitempty"`
 	Acceleration float64 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ       float64 `json:"move_hz,omitempty"`
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
@@ -192,6 +194,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.Speed != 0 && (cfg.Speed < minSpeed || cfg.Speed > maxSpeed) {
 		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
+	}
+
+	if cfg.MoveHZ > 0 && (cfg.MoveHZ < 20 || cfg.MoveHZ > 1000) {
+		return nil, nil, fmt.Errorf("MoveHZ has to be between 20 and 1000")
 	}
 
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
@@ -219,6 +225,13 @@ func (cfg *Config) acceleration() float32 {
 		return defaultAccel
 	}
 	return float32(cfg.Acceleration)
+}
+
+func (cfg *Config) moveHZ() float64 {
+	if cfg.MoveHZ <= 0 {
+		return defaultMoveHz
+	}
+	return cfg.MoveHZ
 }
 
 func (cfg *Config) host() string {
@@ -300,7 +313,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		name:   name,
 		conf:   newConf,
 		tid:    0,
-		moveHZ: defaultMoveHz,
+		moveHZ: newConf.moveHZ(),
 		opMgr:  operation.NewSingleOperationManager(),
 		logger: logger,
 
@@ -358,6 +371,74 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 
 	return &x, nil
+}
+
+type moveOptions struct {
+	speed        float64
+	acceleration float64
+	moveHZ       float64
+
+	direct    bool
+	waitAtEnd bool
+}
+
+func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) moveOptions {
+	x.confLock.Lock()
+	defer x.confLock.Unlock()
+
+	o := moveOptions{
+		speed:        x.speed,
+		acceleration: x.acceleration,
+		moveHZ:       x.moveHZ,
+		direct:       false,
+		waitAtEnd:    true,
+	}
+
+	if opts != nil {
+		if opts.MaxVelRads != 0 {
+			opts.MaxVelRads = x.clampMoveOptions(
+				opts.MaxVelRads,
+				utils.DegToRad(minSpeed),
+				utils.DegToRad(maxSpeed),
+				"max velocity",
+			)
+
+			o.speed = opts.MaxVelRads
+		}
+
+		if opts.MaxAccRads != 0 {
+			opts.MaxAccRads = x.clampMoveOptions(
+				opts.MaxAccRads,
+				0,
+				utils.DegToRad(maxAccel),
+				"max acceleration",
+			)
+
+			o.acceleration = opts.MaxAccRads
+		}
+	}
+
+	if extra != nil {
+		v, ok := extra["speed_r"].(float64)
+		if ok {
+			o.speed = v
+		}
+
+		v, ok = extra["accel_r"].(float64)
+		if ok {
+			o.acceleration = v
+		}
+
+		if extra["direct"] == true {
+			o.direct = true
+		}
+
+		if extra["waitAtEnd"] == false {
+			o.waitAtEnd = false
+		}
+	}
+
+	return o
 }
 
 func (x *xArm) resetConnection() {

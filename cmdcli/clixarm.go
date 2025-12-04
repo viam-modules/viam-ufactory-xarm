@@ -29,6 +29,7 @@ func realMain() error {
 		BadJoints:    []int{},
 		Speed:        0,
 		Acceleration: 0,
+		MoveHZ:       0,
 	}
 
 	bj := -1
@@ -45,6 +46,7 @@ func realMain() error {
 	flag.BoolVar(&debug, "debug", debug, "debug")
 	flag.Float64Var(&c.Speed, "speed", c.Speed, "speed in degs per second")
 	flag.Float64Var(&c.Acceleration, "acceleration", c.Acceleration, "acceleration in degs per sec^2")
+	flag.Float64Var(&c.MoveHZ, "move-hz", c.MoveHZ, "")
 
 	direct := flag.Bool("direct", false, "")
 	doNotWait := flag.Bool("do-not-wait", false, "")
