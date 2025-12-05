@@ -474,7 +474,7 @@ func (x *xArm) internalMoveThroughJointPositions(
 	}
 
 	armRawSteps := positions
-	if !mo.direct {
+	if !mo.direct && mo.interpolate {
 		curPos, err := x.JointPositions(ctx, nil)
 		if err != nil {
 			return err
@@ -636,7 +636,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 		return err
 	}
 	// convenience for structuring and sending individual joint steps
-	for _, step := range rawSteps {
+	for stepIdx, step := range rawSteps {
 		loopTimeStart := time.Now()
 
 		cName := "MoveJoints"
@@ -668,14 +668,16 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 			return err
 		}
 
-		sleepTime := (time.Duration(1000000./mo.moveHZ) * time.Microsecond) - time.Since(loopTimeStart)
-		if sleepTime < 0 {
-			x.logger.Warnf("sleepTime is negative (%v) which means we aren't sending joints fast enough", sleepTime)
-		}
-		// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
-		// before issuing the next `MoveJoints` command.
-		if !utils.SelectContextOrWait(ctx, sleepTime) {
-			return ctx.Err()
+		if mo.waitAtEnd || (stepIdx+1) < len(rawSteps) {
+			sleepTime := (time.Duration(1000000./mo.moveHZ) * time.Microsecond) - time.Since(loopTimeStart)
+			if sleepTime < 0 {
+				x.logger.Warnf("sleepTime is negative (%v) which means we aren't sending joints fast enough", sleepTime)
+			}
+			// `MoveJoints` API calls are async. The response is immediate. We guess how long to sleep
+			// before issuing the next `MoveJoints` command.
+			if !utils.SelectContextOrWait(ctx, sleepTime) {
+				return ctx.Err()
+			}
 		}
 	}
 

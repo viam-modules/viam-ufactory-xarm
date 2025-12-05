@@ -378,8 +378,9 @@ type moveOptions struct {
 	acceleration float64
 	moveHZ       float64
 
-	direct    bool
-	waitAtEnd bool
+	direct      bool
+	waitAtEnd   bool
+	interpolate bool
 }
 
 func f64(extra map[string]interface{}, n string) (float64, bool) {
@@ -408,6 +409,7 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) 
 		moveHZ:       x.moveHZ,
 		direct:       false,
 		waitAtEnd:    true,
+		interpolate:  true,
 	}
 
 	if opts != nil {
@@ -447,6 +449,10 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) 
 
 		if extra["waitAtEnd"] == false {
 			o.waitAtEnd = false
+		}
+
+		if extra["interpolate"] == false {
+			o.interpolate = false
 		}
 	}
 
