@@ -122,7 +122,7 @@ type xArm struct {
 	moveLock sync.Mutex
 
 	// state of movement things
-	started atomic.Bool
+	started atomic.Int32 // -1 is off, >= 0 is mode
 	tid     uint16
 
 	name   resource.Name
@@ -138,6 +138,7 @@ type xArm struct {
 	model  referenceframe.Model
 	moveHZ float64 // Number of joint positions to send per second
 
+	// TODO: remove this lock and make this not settable
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
@@ -170,8 +171,9 @@ func register(model resource.Model) {
 type Config struct {
 	Host         string  `json:"host"`
 	Port         int     `json:"port,omitempty"`
-	Speed        float32 `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float32 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	Speed        float64 `json:"speed_degs_per_sec,omitempty"`
+	Acceleration float64 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ       float64 `json:"move_hz,omitempty"`
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
@@ -194,6 +196,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("given speed %f must be between %f and %f", cfg.Speed, minSpeed, maxSpeed)
 	}
 
+	if cfg.MoveHZ > 0 && (cfg.MoveHZ < 20 || cfg.MoveHZ > 1000) {
+		return nil, nil, fmt.Errorf("MoveHZ has to be between 20 and 1000")
+	}
+
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
 		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
 	}
@@ -211,14 +217,21 @@ func (cfg *Config) speed() float32 {
 	if cfg.Speed == 0 {
 		return defaultSpeed
 	}
-	return cfg.Speed
+	return float32(cfg.Speed)
 }
 
 func (cfg *Config) acceleration() float32 {
 	if cfg.Acceleration == 0 {
 		return defaultAccel
 	}
-	return cfg.Acceleration
+	return float32(cfg.Acceleration)
+}
+
+func (cfg *Config) moveHZ() float64 {
+	if cfg.MoveHZ <= 0 {
+		return defaultMoveHz
+	}
+	return cfg.MoveHZ
 }
 
 func (cfg *Config) host() string {
@@ -300,7 +313,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		name:   name,
 		conf:   newConf,
 		tid:    0,
-		moveHZ: defaultMoveHz,
+		moveHZ: newConf.moveHZ(),
 		opMgr:  operation.NewSingleOperationManager(),
 		logger: logger,
 
@@ -323,7 +336,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, err
 	}
 
-	err = x.start(ctx)
+	err = x.start(ctx, false)
 	if err != nil {
 		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
 	}
@@ -360,6 +373,100 @@ func NewXArm(ctx context.Context, name resource.Name,
 	return &x, nil
 }
 
+type moveOptions struct {
+	speed        float64
+	acceleration float64
+	moveHZ       float64
+
+	direct    bool
+	waitAtEnd bool
+}
+
+func f64(extra map[string]interface{}, n string) (float64, bool) {
+	v, ok := extra[n]
+	if !ok {
+		return 0, false
+	}
+
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	default:
+		return 0, false
+	}
+}
+
+func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) moveOptions {
+	x.confLock.Lock()
+	defer x.confLock.Unlock()
+
+	o := moveOptions{
+		speed:        x.speed,
+		acceleration: x.acceleration,
+		moveHZ:       x.moveHZ,
+		direct:       false,
+		waitAtEnd:    true,
+	}
+
+	if opts != nil {
+		if opts.MaxVelRads != 0 {
+			o.speed = opts.MaxVelRads
+		}
+
+		if opts.MaxAccRads != 0 {
+			o.acceleration = opts.MaxAccRads
+		}
+	}
+
+	if extra != nil {
+		v, ok := f64(extra, "speed_r")
+		if ok {
+			o.speed = v
+		}
+
+		v, ok = f64(extra, "speed_d")
+		if ok {
+			o.speed = utils.DegToRad(v)
+		}
+
+		v, ok = f64(extra, "acceleration_r")
+		if ok {
+			o.acceleration = v
+		}
+
+		v, ok = f64(extra, "acceleration_d")
+		if ok {
+			o.acceleration = utils.DegToRad(v)
+		}
+
+		if extra["direct"] == true {
+			o.direct = true
+		}
+
+		if extra["waitAtEnd"] == false {
+			o.waitAtEnd = false
+		}
+	}
+
+	o.speed = x.clampMoveOptions(
+		o.speed,
+		utils.DegToRad(minSpeed),
+		utils.DegToRad(maxSpeed),
+		"max velocity",
+	)
+
+	o.acceleration = x.clampMoveOptions(
+		o.acceleration,
+		0,
+		utils.DegToRad(maxAccel),
+		"max acceleration",
+	)
+
+	return o
+}
+
 func (x *xArm) resetConnection() {
 	if x.conn == nil {
 		return
@@ -370,7 +477,7 @@ func (x *xArm) resetConnection() {
 		x.logger.Infof("error closing old socket: %v", err)
 	}
 	x.conn = nil
-	x.started.Store(false)
+	x.started.Store(-1)
 }
 
 func (x *xArm) connect(ctx context.Context) error {
@@ -379,7 +486,7 @@ func (x *xArm) connect(ctx context.Context) error {
 	var d net.Dialer
 	var err error
 
-	x.started.Store(false)
+	x.started.Store(-1)
 
 	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
 	if err != nil {
@@ -407,6 +514,11 @@ func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 
 func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
 	return x.JointPositions(ctx, nil)
+}
+
+// MoveToJointPositions moves the arm to the requested joint positions.
+func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
+	return x.MoveThroughJointPositions(ctx, [][]referenceframe.Input{newPositions}, nil, extra)
 }
 
 func (x *xArm) GoToInputs(ctx context.Context, inputSteps ...[]referenceframe.Input) error {

@@ -24,7 +24,7 @@ func TestCreateRawJointSteps1(t *testing.T) {
 
 	positions := [][]float64{{1, 0, 0, 0, 0, 1}}
 
-	out, err := x.createRawJointSteps(start, positions, nil)
+	out, err := x.createRawJointSteps(start, positions, x.moveOptions(nil, nil))
 	test.That(t, err, test.ShouldBeNil)
 
 	minMoves := (1 / x.speed) * x.moveHZ
