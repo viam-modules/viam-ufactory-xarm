@@ -283,7 +283,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 
 	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
 		"setup_gripper": true,
-		"move_gripper":  goal,
+		"move_gripper":  float64(goal),
 	})
 	if err != nil {
 		return 0, err
