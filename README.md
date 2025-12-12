@@ -31,7 +31,7 @@ The following attributes are available:
 
 | Name                                | Type    | Inclusion    | Description                                                                                                      |
 |-------------------------------------|---------|--------------|------------------------------------------------------------------------------------------------------------------|
-| `host`                              | string  | **Required** | The IP address of the xArm. There is usually a sticker on the control box specifying the IP address.                                                                                     |
+| `host`                              | string  | **Required** | The IP address of the xArm. There is usually a sticker on the control box specifying the IP address. See below for detailed networking instructions.                                                                                      |
 | `port`                              | string  | Optional     | The port at which the IP address accesses the xArm. The default is 502.                                          |
 | `speed_degs_per_sec`                | float32 | Optional     | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
@@ -42,13 +42,14 @@ The following steps can be followed when running viam-server on your mac.
 1. Connect an ethernet cable between the Arm's control box and a USB-C hub/adapter connected to your mac.
 1. Open "System Setting" -> "Network"
 1. Click on the USB-C device within the "Other services" list
+1. Ensure the device does not show "not connected", "not configured", or any status with a red indicator. If this is the case, there is a connection issue with the USB-C device, the ethernet cable, or the state of the Arm's control box. As soon as there is a yellow indicator, proceed with networking configuration below.
 1. Click on "Details..."
 1. Click on "TCP/IP"
 1. Change "Configure IPv4" to "Manually".
-1. Set the IP Address to any IP in the same subnet. For example if the xArm IP is `192.168.1.2`, then an IP such as `192.168.1.10` should be set.
+1. Set the IP Address to any IP in the same subnet as the arm's IP address. There is usually a sticker on the control box specifying the IP. For example if the xArm IP is `192.168.1.2`, then an IP such as `192.168.1.10` should be set in your mac's system settings.
 1. Set the Subnet Mask to `255.255.255.0`
 1. Click OK to save the changes.
-1. Your mac should now be able to connect to the xArm, and you can verify with `ping` to make sure that the arm is reachable.
+1. Your mac should now be able to connect to the xArm, and you can verify with `ping <host>` to the arm's IP address. Note that the IP address setup in your mac's networking settings is not the ping address and should not be used in Viam configuration. It was only set to establish a network to talk to the arm on the IP address that is specified on the control box.
 
 ### Using within a Frame System
 
