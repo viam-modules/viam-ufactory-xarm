@@ -283,7 +283,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 
 	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
 		"setup_gripper": true,
-		"move_gripper":  goal,
+		"move_gripper":  float64(goal),
 	})
 	if err != nil {
 		return 0, err
@@ -293,7 +293,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	start := time.Now()
 
 	for {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(15 * time.Millisecond)
 
 		pos, err := g.getPosition(ctx)
 		if err != nil {
@@ -304,7 +304,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 			return pos, nil
 		}
 
-		if old >= 0 && math.Abs(float64(pos-old)) <= 3 {
+		if old >= 0 && math.Abs(float64(pos-old)) <= 2 {
 			return pos, nil
 		}
 
