@@ -205,12 +205,15 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 
 	deps := []string{}
+	opt := []string{}
 
 	if cfg.Motion != "" {
 		deps = append(deps, motion.Named(cfg.Motion).String())
+	} else {
+		deps = append(deps, motion.Named("builtin").String())
 	}
 
-	return deps, []string{}, nil
+	return deps, opt, nil
 }
 
 func (cfg *Config) speed() float32 {
@@ -328,6 +331,11 @@ func NewXArm(ctx context.Context, name resource.Name,
 		x.motion, err = motion.FromProvider(deps, newConf.Motion)
 		if err != nil {
 			return nil, err
+		}
+	} else {
+		x.motion, err = motion.FromProvider(deps, "builtin")
+		if err != nil {
+			logger.Debugf("couldn't get default motion: %v", err)
 		}
 	}
 
