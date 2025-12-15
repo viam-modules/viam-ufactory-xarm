@@ -210,7 +210,7 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Motion != "" {
 		deps = append(deps, motion.Named(cfg.Motion).String())
 	} else {
-		deps = append(deps, motion.Named("builtin").String())
+		opt = append(deps, motion.Named("builtin").String())
 	}
 
 	return deps, opt, nil
