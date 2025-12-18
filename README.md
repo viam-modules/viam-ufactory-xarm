@@ -37,6 +37,7 @@ The following attributes are available:
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
 | `collision_sensitivity`| int | Optional | Collision sensitivity range from 1-5. The larger the value, the smaller the force required to trigger the collision protection emergency stop. The default is 3.
 | `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
+| `motion`| string | Optional | The Motion Service to use for MoveToPosition API calls. Defaults to the builtin motion service                                                    |
 #### Connecting using macOS
 The following steps can be followed when running viam-server on your mac.
 1. Connect an ethernet cable between the Arm's control box and a USB-C hub/adapter connected to your mac.
