@@ -52,6 +52,22 @@ The following steps can be followed when running viam-server on your mac.
 1. Click OK to save the changes.
 1. Your mac should now be able to connect to the xArm, and you can verify with `ping <host>` to the arm's IP address. Note that the IP address setup in your mac's networking settings is not the ping address and should not be used in Viam configuration. It was only set to establish a network to talk to the arm on the IP address that is specified on the control box.
 
+#### Connecting using a Raspberry Pi
+The following steps may need to be followed when running viam-server on your pi.
+
+
+1. Connect an Ethernet cable from the xArm's control box to the Pi.
+2. Open a terminal on the Pi.
+3. Assign the Pi an IP address on the same subnet as the arm. For example, if the xArm’s IP is `192.168.1.2`, you can use:
+```bash
+sudo ip addr add 192.168.1.10/24 dev eth0
+sudo ip link set eth0 up
+```
+4. Verify connectivity by pinging the xArm:
+```bash
+ping 192.168.1.2
+```
+
 ### Using within a Frame System
 
 If you are using your xArm in conjuction with other components it might be useful to add your arm to the frame system. You may do so by pasting the following in your config:
