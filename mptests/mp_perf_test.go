@@ -72,7 +72,9 @@ func BenchmarkMP1(b *testing.B) {
 	dest := referenceframe.NewPoseInFrame("world", spatialmath.NewPose(r3.Vector{X: 191.391061, Y: 297.871836, Z: 371.730225},
 		&spatialmath.OrientationVectorDegrees{OX: 0.801501, OY: -0.597993, OZ: -0.000224, Theta: 101.891328}))
 
-	for b.Loop() {
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
 		planReq := &armplanning.PlanRequest{
 			FrameSystem: fs,
 			Goals: []*armplanning.PlanState{
