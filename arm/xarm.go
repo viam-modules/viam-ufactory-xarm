@@ -95,6 +95,13 @@ var (
 	XArm850Model = family.WithModel(ModelName850)
 )
 
+var modelNameToURDFFile = map[string]string{
+	ModelName6DOF: "xarm6.urdf",
+	ModelName7DOF: "xarm7.urdf",
+	ModelNameLite: "lite6.urdf",
+	ModelName850:  "uf850.urdf",
+}
+
 var armTo3DModelParts = map[string][]string{
 	"lite6": {
 		"base_top",
@@ -177,6 +184,7 @@ type Config struct {
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
+	UseURDFs     bool    `json:"use_urdfs,omitempty"`
 }
 
 // Validate validates the config.
@@ -271,31 +279,48 @@ func getModelJSON(modelName string) ([]byte, error) {
 }
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
-func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.Input, logger logging.Logger) (referenceframe.Model, error) {
-	jsonData, err := getModelJSON(modelName)
-	if err != nil {
-		return nil, err
-	}
-
-	// empty data probably means that the robot component has no model information
-	if len(jsonData) == 0 {
-		return nil, referenceframe.ErrNoModelInformation
-	}
-
-	m := &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-	err = json.Unmarshal(jsonData, m)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal json file")
+func MakeModelFrame(
+	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, logger logging.Logger,
+) (referenceframe.Model, error) {
+	var cfg *referenceframe.ModelConfigJSON
+	if useURDFs {
+		parsed, err := makeModelFrameFromURDF(modelName)
+		if err != nil {
+			return nil, err
+		}
+		cfg = parsed.ModelConfig()
+	} else {
+		jsonData, err := getModelJSON(modelName)
+		if err != nil {
+			return nil, err
+		}
+		if len(jsonData) == 0 {
+			return nil, referenceframe.ErrNoModelInformation
+		}
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
+		if err := json.Unmarshal(jsonData, cfg); err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal json file")
+		}
 	}
 
 	for _, j := range badJoints {
 		now := utils.RadToDeg(current[j])
-		m.Joints[j].Min = now - 1
-		m.Joints[j].Max = now + 1
+		cfg.Joints[j].Min = now - 1
+		cfg.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
 	}
 
-	return m.ParseConfig(modelName)
+	return cfg.ParseConfig(modelName)
+}
+
+func makeModelFrameFromURDF(modelName string) (referenceframe.Model, error) {
+	urdfFile, ok := modelNameToURDFFile[modelName]
+	if !ok {
+		return nil, fmt.Errorf("no URDF file for xarm model %s", modelName)
+	}
+	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
+	path := fmt.Sprintf("%s/arm/%s", moduleRoot, urdfFile)
+	return referenceframe.ParseModelXMLFile(path, modelName)
 }
 
 // newxArm returns a new xArm of the specified modelName.
@@ -358,7 +383,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, logger)
+	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, logger)
 	if err != nil {
 		return nil, err
 	}

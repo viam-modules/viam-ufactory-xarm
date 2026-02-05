@@ -10,7 +10,7 @@ build:
 
 module: build
 	rm -f $(BIN_OUTPUT_PATH)/module.tar.gz
-	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(BIN_OUTPUT_PATH)/viam-xarm meta.json arm/3d_models
+	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(BIN_OUTPUT_PATH)/viam-xarm meta.json arm/3d_models arm/*.urdf
 
 clean:
 	rm -rf $(BIN_OUTPUT_PATH)/viam-xarm $(BIN_OUTPUT_PATH)/module.tar.gz
@@ -18,7 +18,7 @@ clean:
 tool-install:
 	GOBIN=`pwd`/$(TOOL_BIN) go install \
 		github.com/edaniels/golinters/cmd/combined \
-		github.com/golangci/golangci-lint/cmd/golangci-lint \
+		github.com/golangci/golangci-lint/v2/cmd/golangci-lint \
 		github.com/rhysd/actionlint/cmd/actionlint
 
 gofmt:
