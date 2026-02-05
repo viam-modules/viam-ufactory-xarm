@@ -1,7 +1,7 @@
 package arm
 
 import (
-	// "math"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,13 +9,13 @@ import (
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
-
-	// "go.viam.com/rdk/utils"
+	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
 
 // armDir returns the absolute path to the arm/ directory containing test data.
 func armDir() string {
+	//nolint:dogsled
 	_, file, _, _ := runtime.Caller(0)
 	return filepath.Dir(file)
 }
@@ -105,7 +105,7 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 }
 
 func TestUseURDFsDefaultsFalse(t *testing.T) {
-	cfg := &Config{Host: "1.2.3.4"}
+	cfg := &Config{}
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
 }
 
@@ -125,43 +125,43 @@ func TestModelNameToURDFFileMapping(t *testing.T) {
 	}
 }
 
-// func TestMoveOptions(t *testing.T) {
-// 	logger := logging.NewTestLogger(t)
+func TestMoveOptions(t *testing.T) {
+	logger := logging.NewTestLogger(t)
 
-// 	x := &xArm{
-// 		speed:        utils.DegToRad(defaultSpeed),
-// 		acceleration: utils.DegToRad(defaultAccel),
-// 		moveHZ:       defaultMoveHz,
-// 		logger:       logger,
-// 	}
+	x := &xArm{
+		speed:        utils.DegToRad(defaultSpeed),
+		acceleration: utils.DegToRad(defaultAccel),
+		moveHZ:       defaultMoveHz,
+		logger:       logger,
+	}
 
-// 	base := x.moveOptions(nil, nil)
-// 	test.That(t, base.speed, test.ShouldEqual, x.speed)
-// 	test.That(t, base.acceleration, test.ShouldEqual, x.acceleration)
-// 	test.That(t, base.moveHZ, test.ShouldEqual, x.moveHZ)
+	base := x.moveOptions(nil, nil)
+	test.That(t, base.speed, test.ShouldEqual, x.speed)
+	test.That(t, base.acceleration, test.ShouldEqual, x.acceleration)
+	test.That(t, base.moveHZ, test.ShouldEqual, x.moveHZ)
 
-// 	mo := x.moveOptions(nil, map[string]interface{}{"acceleration_r": 2.5})
-// 	test.That(t, mo.speed, test.ShouldEqual, base.speed)
-// 	test.That(t, mo.acceleration, test.ShouldEqual, 2.5)
-// 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+	mo := x.moveOptions(nil, map[string]interface{}{"acceleration_r": 2.5})
+	test.That(t, mo.speed, test.ShouldEqual, base.speed)
+	test.That(t, mo.acceleration, test.ShouldEqual, 2.5)
+	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-// 	mo = x.moveOptions(nil, map[string]interface{}{"acceleration_r": 500.0})
-// 	test.That(t, mo.speed, test.ShouldEqual, base.speed)
-// 	test.That(t, mo.acceleration, test.ShouldEqual, utils.DegToRad(maxAccel))
-// 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+	mo = x.moveOptions(nil, map[string]interface{}{"acceleration_r": 500.0})
+	test.That(t, mo.speed, test.ShouldEqual, base.speed)
+	test.That(t, mo.acceleration, test.ShouldEqual, utils.DegToRad(maxAccel))
+	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-// 	mo = x.moveOptions(nil, map[string]interface{}{"speed_r": 500.0})
-// 	test.That(t, mo.speed, test.ShouldEqual, utils.DegToRad(maxSpeed))
-// 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
-// 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+	mo = x.moveOptions(nil, map[string]interface{}{"speed_r": 500.0})
+	test.That(t, mo.speed, test.ShouldEqual, utils.DegToRad(maxSpeed))
+	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
+	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-// 	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90.0})
-// 	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
-// 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
-// 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90.0})
+	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
+	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
+	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-// 	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90})
-// 	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
-// 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
-// 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
-// }
+	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90})
+	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
+	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
+	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+}
