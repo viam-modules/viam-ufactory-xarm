@@ -19,7 +19,7 @@ tool-install:
 	GOBIN=`pwd`/$(TOOL_BIN) go install \
 		github.com/edaniels/golinters/cmd/combined \
 		github.com/rhysd/actionlint/cmd/actionlint
-	GOBIN=`pwd`/$(TOOL_BIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+	GOBIN=`pwd`/$(TOOL_BIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0
 
 gofmt:
 	gofmt -w -s .

@@ -140,27 +140,27 @@ func TestMoveOptions(t *testing.T) {
 	test.That(t, base.acceleration, test.ShouldEqual, x.acceleration)
 	test.That(t, base.moveHZ, test.ShouldEqual, x.moveHZ)
 
-	mo := x.moveOptions(nil, map[string]interface{}{"acceleration_r": 2.5})
+	mo := x.moveOptions(nil, map[string]any{"acceleration_r": 2.5})
 	test.That(t, mo.speed, test.ShouldEqual, base.speed)
 	test.That(t, mo.acceleration, test.ShouldEqual, 2.5)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-	mo = x.moveOptions(nil, map[string]interface{}{"acceleration_r": 500.0})
+	mo = x.moveOptions(nil, map[string]any{"acceleration_r": 500.0})
 	test.That(t, mo.speed, test.ShouldEqual, base.speed)
 	test.That(t, mo.acceleration, test.ShouldEqual, utils.DegToRad(maxAccel))
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-	mo = x.moveOptions(nil, map[string]interface{}{"speed_r": 500.0})
+	mo = x.moveOptions(nil, map[string]any{"speed_r": 500.0})
 	test.That(t, mo.speed, test.ShouldEqual, utils.DegToRad(maxSpeed))
 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90.0})
+	mo = x.moveOptions(nil, map[string]any{"speed_d": 90.0})
 	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 
-	mo = x.moveOptions(nil, map[string]interface{}{"speed_d": 90})
+	mo = x.moveOptions(nil, map[string]any{"speed_d": 90})
 	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)

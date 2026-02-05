@@ -96,10 +96,10 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 	return g, nil
 }
 
-func (g *myGripperLite) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
+func (g *myGripperLite) Grab(ctx context.Context, extra map[string]any) (bool, error) {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
-	if _, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	if _, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionClose,
 	}); err != nil {
 		return false, err
@@ -107,10 +107,10 @@ func (g *myGripperLite) Grab(ctx context.Context, extra map[string]interface{}) 
 	return true, nil
 }
 
-func (g *myGripperLite) Open(ctx context.Context, extra map[string]interface{}) error {
+func (g *myGripperLite) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
-	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	_, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionOpen,
 	})
 	return err
@@ -118,9 +118,9 @@ func (g *myGripperLite) Open(ctx context.Context, extra map[string]interface{}) 
 
 func (g *myGripperLite) IsHoldingSomething(
 	ctx context.Context,
-	extra map[string]interface{},
+	extra map[string]any,
 ) (gripper.HoldingStatus, error) {
-	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	res, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionIsClosed,
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func (g *myGripperLite) IsHoldingSomething(
 	if !ok {
 		return gripper.HoldingStatus{}, fmt.Errorf("command %s didn't return key %s instead got %+v", gripperLiteActionIsClosed, gripperLiteActionKey, res)
 	}
-	converted, ok := val.(map[string]interface{})
+	converted, ok := val.(map[string]any)
 	if !ok {
 		return gripper.HoldingStatus{}, fmt.Errorf("expected map[string]interface{} got %v of type %T", val, val)
 	}
@@ -156,23 +156,23 @@ func (g *myGripperLite) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }
 
-func (g *myGripperLite) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func (g *myGripperLite) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (g *myGripperLite) IsMoving(context.Context) (bool, error) {
 	return g.isMoving.Load(), nil
 }
 
-func (g *myGripperLite) Stop(ctx context.Context, extra map[string]interface{}) error {
+func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 	defer g.isMoving.Store(false)
-	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	_, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionStop,
 	})
 	return err
 }
 
-func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
 	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
 	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
 	if err != nil {
@@ -238,7 +238,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	return g, nil
 }
 
-func (g *myGripper) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
+func (g *myGripper) Grab(ctx context.Context, extra map[string]any) (bool, error) {
 	pos, err := g.goToPosition(ctx, 2)
 	if err != nil {
 		return false, err
@@ -247,28 +247,25 @@ func (g *myGripper) Grab(ctx context.Context, extra map[string]interface{}) (boo
 	return pos > fullyClosedThreshold, nil
 }
 
-func (g *myGripper) Open(ctx context.Context, extra map[string]interface{}) error {
+func (g *myGripper) Open(ctx context.Context, extra map[string]any) error {
 	_, err := g.goToPosition(ctx, 840)
 	return err
 }
 
 func (g *myGripper) IsHoldingSomething(
 	ctx context.Context,
-	extra map[string]interface{},
+	extra map[string]any,
 ) (gripper.HoldingStatus, error) {
 	pos, err := g.getPosition(ctx)
 	if err != nil {
 		return gripper.HoldingStatus{}, err
 	}
 
-	isHoldingSomething := true
-	if (pos <= fullyClosedThreshold) || (pos >= fullyOpenThreshold) {
-		isHoldingSomething = false
-	}
+	isHoldingSomething := !((pos <= fullyClosedThreshold) || (pos >= fullyOpenThreshold))
 
 	return gripper.HoldingStatus{
 		IsHoldingSomething: isHoldingSomething,
-		Meta: map[string]interface{}{
+		Meta: map[string]any{
 			"position": pos,
 		},
 	}, nil
@@ -281,7 +278,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
-	_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	_, err := g.arm.DoCommand(ctx, map[string]any{
 		"setup_gripper": true,
 		"move_gripper":  float64(goal),
 	})
@@ -316,7 +313,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 }
 
 func (g *myGripper) getPosition(ctx context.Context) (int, error) {
-	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	res, err := g.arm.DoCommand(ctx, map[string]any{
 		getGripperKey: true,
 	})
 	if err != nil {
@@ -339,27 +336,27 @@ func (g *myGripper) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }
 
-func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
+func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	if cmd["get"] == true {
 		pos, err := g.getPosition(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"pos": pos}, nil
+		return map[string]any{"pos": pos}, nil
 	}
-	return map[string]interface{}{}, nil
+	return map[string]any{}, nil
 }
 
 func (g *myGripper) IsMoving(context.Context) (bool, error) {
 	return g.isMoving.Load(), nil
 }
 
-func (g *myGripper) Stop(context.Context, map[string]interface{}) error {
+func (g *myGripper) Stop(context.Context, map[string]any) error {
 	// TODO(erh): fix me
 	return nil
 }
 
-func (g *myGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
 	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
 	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
 	if err != nil {

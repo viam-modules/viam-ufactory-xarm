@@ -416,7 +416,7 @@ type moveOptions struct {
 	interpolate bool
 }
 
-func f64(extra map[string]interface{}, n string) (float64, bool) {
+func f64(extra map[string]any, n string) (float64, bool) {
 	v, ok := extra[n]
 	if !ok {
 		return 0, false
@@ -432,7 +432,7 @@ func f64(extra map[string]interface{}, n string) (float64, bool) {
 	}
 }
 
-func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) moveOptions {
+func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOptions {
 	x.confLock.Lock()
 	defer x.confLock.Unlock()
 
@@ -556,7 +556,7 @@ func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error
 }
 
 // MoveToJointPositions moves the arm to the requested joint positions.
-func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
+func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]any) error {
 	return x.MoveThroughJointPositions(ctx, [][]referenceframe.Input{newPositions}, nil, extra)
 }
 
@@ -564,7 +564,7 @@ func (x *xArm) GoToInputs(ctx context.Context, inputSteps ...[]referenceframe.In
 	return x.MoveThroughJointPositions(ctx, inputSteps, nil, nil)
 }
 
-func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (x *xArm) Geometries(ctx context.Context, extra map[string]any) ([]spatialmath.Geometry, error) {
 	inputs, err := x.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
@@ -576,7 +576,7 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]
 	return gif.Geometries(), nil
 }
 
-func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
+func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[string]*commonpb.Mesh, error) {
 	models := make(map[string]*commonpb.Mesh)
 	armModelParts := armTo3DModelParts[x.model.Name()]
 	if armModelParts == nil {
@@ -598,8 +598,8 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
-func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
-	resp := map[string]interface{}{}
+func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	resp := map[string]any{}
 	validCommand := false
 
 	if val, ok := cmd[moveGripperKey]; ok {
@@ -693,7 +693,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"state": sData.params}, nil
+		return map[string]any{"state": sData.params}, nil
 	}
 	if _, ok := cmd[getErrorKey]; ok {
 		c := x.newCmd(regMap["GetError"])
@@ -702,7 +702,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 
-		return map[string]interface{}{"error info": sData.params}, nil
+		return map[string]any{"error info": sData.params}, nil
 	}
 	if _, ok := cmd[getVacuumGripperStateKey]; ok {
 		res, err := x.getVacuumStatus(ctx)

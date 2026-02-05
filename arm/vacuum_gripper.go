@@ -61,12 +61,12 @@ type myVacuumGripper struct {
 	logger logging.Logger
 }
 
-func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}) (bool, error) {
+func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool, error) {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
 	{
-		_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		_, err := g.arm.DoCommand(ctx, map[string]any{
 			grabVacuumKey: true,
 		})
 		if err != nil {
@@ -77,12 +77,12 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]interface{}
 	return true, nil
 }
 
-func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}) error {
+func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)
 	defer g.isMoving.Store(false)
 
 	{
-		_, err := g.arm.DoCommand(ctx, map[string]interface{}{
+		_, err := g.arm.DoCommand(ctx, map[string]any{
 			openVacuumKey: true,
 		})
 		if err != nil {
@@ -94,9 +94,9 @@ func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]interface{}
 
 func (g *myVacuumGripper) IsHoldingSomething(
 	ctx context.Context,
-	extra map[string]interface{},
+	extra map[string]any,
 ) (gripper.HoldingStatus, error) {
-	res, err := g.arm.DoCommand(ctx, map[string]interface{}{
+	res, err := g.arm.DoCommand(ctx, map[string]any{
 		getVacuumGripperStateKey: true,
 	})
 	if err != nil {
@@ -113,20 +113,20 @@ func (g *myVacuumGripper) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }
 
-func (g *myVacuumGripper) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
-	return map[string]interface{}{}, nil
+func (g *myVacuumGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	return map[string]any{}, nil
 }
 
 func (g *myVacuumGripper) IsMoving(context.Context) (bool, error) {
 	return g.isMoving.Load(), nil
 }
 
-func (g *myVacuumGripper) Stop(context.Context, map[string]interface{}) error {
+func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 	// TODO(erh): fix me
 	return nil
 }
 
-func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
 	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
 		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
 		caseBoxSize,

@@ -36,7 +36,7 @@ func realMain() error {
 	debug := false
 	moveJoint := -1
 	moveAmount := 5.0
-	extra := map[string]interface{}{}
+	extra := map[string]any{}
 
 	flag.StringVar(&c.Host, "host", c.Host, "host")
 	flag.IntVar(&c.Port, "port", c.Port, "port")
