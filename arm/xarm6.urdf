@@ -133,7 +133,6 @@
     <parent link="link4"/>
     <child link="link5"/>
     <origin rpy="1.5708 0 0" xyz="0 0 0"/>
-    <origin rpy="1.5708 0 0" xyz="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="32.0" lower="-1.69297" upper="3.141592653589793" velocity="3.14"/>
     <dynamics damping="1.0" friction="1.0"/>
@@ -150,7 +149,7 @@
   <joint name="joint6" type="revolute">
     <parent link="link5"/>
     <child link="link6"/>
-    <origin rpy="-1.5708 0 0" xyz="0.076 0.097 0"/>
+    <origin rpy="-1.5708 3.14159265359 0" xyz="0.076 0.097 0"/>
     <axis xyz="0 0 1"/>
     <limit effort="20.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.14"/>
     <dynamics damping="1.0" friction="1.0"/>
