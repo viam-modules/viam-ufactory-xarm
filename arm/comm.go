@@ -371,19 +371,6 @@ func (x *xArm) toggleServos(ctx context.Context, enable bool) error {
 	return err
 }
 
-// toggleBrake toggles the brakes on or off.
-// True disengages brakes, false engages them.
-func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
-	c := x.newCmd(regMap["ToggleBrake"])
-	var enByte byte
-	if disable {
-		enByte = 1
-	}
-	c.params = append(c.params, 8, enByte)
-	_, err := x.send(ctx, c, true)
-	return err
-}
-
 func (x *xArm) start(ctx context.Context, direct bool) error {
 	mode := byte(servoMotionMode)
 	if direct {
@@ -422,9 +409,7 @@ func (x *xArm) Close(ctx context.Context) error {
 	}
 
 	err := multierr.Combine(
-		x.toggleBrake(ctx, false),
-		x.toggleServos(ctx, false),
-		x.setMotionState(ctx, 4),
+		x.setMotionState(ctx, 3),
 		x.conn.Close(),
 	)
 
