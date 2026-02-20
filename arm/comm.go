@@ -10,11 +10,13 @@ import (
 
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/ml"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	rutils "go.viam.com/rdk/utils"
 	"go.viam.com/utils"
+	"gorgonia.org/tensor"
 )
 
 const errCodeCollision = 0x1F
@@ -472,7 +474,112 @@ func (x *xArm) internalMoveThroughJointPositions(
 	}
 
 	armRawSteps := positions
-	if !mo.direct && mo.interpolate {
+	if x.trajGen != nil {
+		x.logger.Info("yo traj gen using trajectory generator")
+		curPos, err := x.JointPositions(ctx, nil)
+		if err != nil {
+			return err
+		}
+		nWaypoints := len(positions) + 1
+		waypoints := make([]float64, 0, nWaypoints*x.dof)
+		for _, inp := range curPos {
+			waypoints = append(waypoints, inp)
+		}
+		for _, wp := range positions {
+			for _, inp := range wp {
+				waypoints = append(waypoints, inp)
+			}
+		}
+
+		x.confLock.Lock()
+		speed := x.speed
+		accel := x.acceleration
+		x.confLock.Unlock()
+
+		velLimits := make([]float64, x.dof)
+		accelLimits := make([]float64, x.dof)
+		for i := range velLimits {
+			velLimits[i] = speed
+			accelLimits[i] = accel
+		}
+
+		pathTol := x.trajGenConf.PathToleranceDeltaRads
+		if pathTol == 0 {
+			pathTol = 0.01
+		}
+		colinRatio := x.trajGenConf.PathColinearizationRatio
+		if colinRatio == 0 {
+			colinRatio = 0.03
+		}
+		dedupTol := x.trajGenConf.WaypointDeduplicationToleranceRads
+		if dedupTol == 0 {
+			dedupTol = 1e-3
+		}
+		samplingFreq := x.trajGenConf.TrajectorySamplingFreqHz
+		if samplingFreq == 0 {
+			samplingFreq = int64(x.moveHZ)
+		}
+
+		x.logger.Info("yo traj gen calling trajectory generator with nwaypoints: ", nWaypoints)
+		outMap, err := x.trajGen.Infer(ctx, ml.Tensors{
+			"waypoints_rads": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(nWaypoints, x.dof),
+				tensor.WithBacking(waypoints),
+			),
+			"velocity_limits_rads_per_sec": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(x.dof),
+				tensor.WithBacking(velLimits),
+			),
+			"acceleration_limits_rads_per_sec2": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(x.dof),
+				tensor.WithBacking(accelLimits),
+			),
+			"path_tolerance_delta_rads": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(1),
+				tensor.WithBacking([]float64{pathTol}),
+			),
+			"path_colinearization_ratio": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(1),
+				tensor.WithBacking([]float64{colinRatio}),
+			),
+			"waypoint_deduplication_tolerance_rads": tensor.New(
+				tensor.Of(tensor.Float64),
+				tensor.WithShape(1),
+				tensor.WithBacking([]float64{dedupTol}),
+			),
+			"trajectory_sampling_freq_hz": tensor.New(
+				tensor.Of(tensor.Int64),
+				tensor.WithShape(1),
+				tensor.WithBacking([]int64{samplingFreq}),
+			),
+		})
+		if err != nil {
+			return err
+		}
+
+		configsTensor, ok := outMap["configurations_rads"]
+		if !ok {
+			// Service returns an empty map when fewer than 2 distinct waypoints
+			// remain after deduplication -- the arm is already at the goal.
+			return nil
+		}
+		configsData := configsTensor.Data().([]float64)
+		nSamples := configsTensor.Shape()[0]
+		x.logger.Info("yo traj gen num samples: ", nSamples)
+		armRawSteps = make([][]referenceframe.Input, nSamples)
+		for i := 0; i < nSamples; i++ {
+			step := make([]referenceframe.Input, x.dof)
+			for j := 0; j < x.dof; j++ {
+				step[j] = configsData[i*x.dof+j]
+			}
+			armRawSteps[i] = step
+		}
+	} else if !mo.direct && mo.interpolate {
 		curPos, err := x.JointPositions(ctx, nil)
 		if err != nil {
 			return err

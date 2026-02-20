@@ -19,6 +19,7 @@ import (
 	"go.viam.com/rdk/operation"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/services/mlmodel"
 	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/rdk/utils"
@@ -132,13 +133,15 @@ type xArm struct {
 	started atomic.Int32 // -1 is off, >= 0 is mode
 	tid     uint16
 
-	name   resource.Name
-	conf   *Config
-	conn   net.Conn
-	closed atomic.Bool
-	opMgr  *operation.SingleOperationManager
-	logger logging.Logger
-	motion motion.Service
+	name    resource.Name
+	conf    *Config
+	conn    net.Conn
+	closed  atomic.Bool
+	opMgr   *operation.SingleOperationManager
+	logger  logging.Logger
+	motion  motion.Service
+	trajGen     mlmodel.Service
+	trajGenConf TrajGenConfig
 
 	// below is all configuration things
 	dof    int
@@ -174,17 +177,27 @@ func register(model resource.Model) {
 	)
 }
 
+// TrajGenConfig holds configuration for the trajectory generator ML model service.
+type TrajGenConfig struct {
+	Service                            string  `json:"service"`
+	PathToleranceDeltaRads             float64 `json:"path_tolerance_delta_rads,omitempty"`
+	PathColinearizationRatio           float64 `json:"path_colinearization_ratio,omitempty"`
+	WaypointDeduplicationToleranceRads float64 `json:"waypoint_deduplication_tolerance_rads,omitempty"`
+	TrajectorySamplingFreqHz           int64   `json:"trajectory_sampling_freq_hz,omitempty"`
+}
+
 // Config is used for converting config attributes.
 type Config struct {
-	Host         string  `json:"host"`
-	Port         int     `json:"port,omitempty"`
-	Speed        float64 `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float64 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ       float64 `json:"move_hz,omitempty"`
-	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
-	BadJoints    []int   `json:"bad-joints"`
-	Motion       string  `json:"motion"`
-	UseURDFs     bool    `json:"use_urdfs,omitempty"`
+	Host         string         `json:"host"`
+	Port         int            `json:"port,omitempty"`
+	Speed        float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ       float64        `json:"move_hz,omitempty"`
+	Sensitivity  *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints    []int          `json:"bad-joints"`
+	Motion       string         `json:"motion"`
+	UseURDFs     bool           `json:"use_urdfs,omitempty"`
+	TrajGen      *TrajGenConfig `json:"traj_gen,omitempty"`
 }
 
 // Validate validates the config.
@@ -221,6 +234,9 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		opt = append(opt, motion.Named("builtin").String())
 	}
 
+	if cfg.TrajGen != nil && cfg.TrajGen.Service != "" {
+		deps = append(deps, cfg.TrajGen.Service)
+	}
 	return deps, opt, nil
 }
 
@@ -362,6 +378,14 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if err != nil {
 			logger.Debugf("couldn't get default motion: %v", err)
 		}
+	}
+
+	if newConf.TrajGen != nil && newConf.TrajGen.Service != "" {
+		x.trajGen, err = mlmodel.FromProvider(deps, newConf.TrajGen.Service)
+		if err != nil {
+			return nil, err
+		}
+		x.trajGenConf = *newConf.TrajGen
 	}
 
 	err = x.connect(ctx)
