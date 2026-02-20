@@ -48,6 +48,8 @@ const (
 	clearErrorKey            = "clear_error"
 	getStateKey              = "get_state"
 	getErrorKey              = "get_error"
+	setManualModeKey         = "set_manual_mode"
+	setNormalModeKey         = "set_normal_mode"
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
 	gripperLiteActionKey     = "gripper_lite_action"
@@ -723,6 +725,24 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[gripperLiteActionKey] = res
+		validCommand = true
+	}
+
+	if _, ok := cmd[setManualModeKey]; ok {
+		if err := x.setMotionMode(ctx, 2); err != nil {
+			return nil, err
+		}
+		if err := x.setMotionState(ctx, 0); err != nil {
+			return nil, err
+		}
+		x.started.Store(-1)
+		validCommand = true
+	}
+	if _, ok := cmd[setNormalModeKey]; ok {
+		x.started.Store(-1)
+		if err := x.start(ctx, false); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
