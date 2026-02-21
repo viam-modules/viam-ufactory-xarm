@@ -468,6 +468,7 @@ func (x *xArm) internalMoveThroughJointPositions(
 		if err != nil {
 			return err
 		}
+		// trajectory generation thinks we are already at our goal, so don't move.
 		if trajSteps == nil {
 			return nil
 		}
