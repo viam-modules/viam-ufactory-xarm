@@ -37,6 +37,10 @@ const (
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
+	defaultTrajGenPathToleranceDeltaRads             = 0.01
+	defaultTrajGenPathColinearizationRatio           = 0.03
+	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
+
 	// DoCommand keys.
 	loadKey                  = "load"
 	moveGripperKey           = "move_gripper"
@@ -140,8 +144,7 @@ type xArm struct {
 	opMgr   *operation.SingleOperationManager
 	logger  logging.Logger
 	motion  motion.Service
-	trajGen     mlmodel.Service
-	trajGenConf TrajGenConfig
+	trajGen mlmodel.Service
 
 	// below is all configuration things
 	dof    int
@@ -384,7 +387,15 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if err != nil {
 			return nil, err
 		}
-		x.trajGenConf = *newConf.TrajGen
+		if newConf.TrajGen.PathToleranceDeltaRads == 0 {
+			newConf.TrajGen.PathToleranceDeltaRads = defaultTrajGenPathToleranceDeltaRads
+		}
+		if newConf.TrajGen.PathColinearizationRatio == 0 {
+			newConf.TrajGen.PathColinearizationRatio = defaultTrajGenPathColinearizationRatio
+		}
+		if newConf.TrajGen.WaypointDeduplicationToleranceRads == 0 {
+			newConf.TrajGen.WaypointDeduplicationToleranceRads = defaultTrajGenWaypointDeduplicationToleranceRads
+		}
 	}
 
 	err = x.connect(ctx)

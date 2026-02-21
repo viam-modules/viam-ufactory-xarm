@@ -515,18 +515,6 @@ func (x *xArm) createTrajGenSteps(
 		accelLimits[i] = accel
 	}
 
-	pathTol := x.trajGenConf.PathToleranceDeltaRads
-	if pathTol == 0 {
-		pathTol = 0.01
-	}
-	colinRatio := x.trajGenConf.PathColinearizationRatio
-	if colinRatio == 0 {
-		colinRatio = 0.03
-	}
-	dedupTol := x.trajGenConf.WaypointDeduplicationToleranceRads
-	if dedupTol == 0 {
-		dedupTol = 1e-3
-	}
 	x.logger.Debugf("calling trajectory generator with %d waypoints", nWaypoints)
 	outMap, err := x.trajGen.Infer(ctx, ml.Tensors{
 		"waypoints_rads": tensor.New(
@@ -547,17 +535,17 @@ func (x *xArm) createTrajGenSteps(
 		"path_tolerance_delta_rads": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{pathTol}),
+			tensor.WithBacking([]float64{x.conf.TrajGen.PathToleranceDeltaRads}),
 		),
 		"path_colinearization_ratio": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{colinRatio}),
+			tensor.WithBacking([]float64{x.conf.TrajGen.PathColinearizationRatio}),
 		),
 		"waypoint_deduplication_tolerance_rads": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{dedupTol}),
+			tensor.WithBacking([]float64{x.conf.TrajGen.WaypointDeduplicationToleranceRads}),
 		),
 		"trajectory_sampling_freq_hz": tensor.New(
 			tensor.Of(tensor.Int64),
