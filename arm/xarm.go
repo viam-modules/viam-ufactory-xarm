@@ -183,7 +183,6 @@ type TrajGenConfig struct {
 	PathToleranceDeltaRads             float64 `json:"path_tolerance_delta_rads,omitempty"`
 	PathColinearizationRatio           float64 `json:"path_colinearization_ratio,omitempty"`
 	WaypointDeduplicationToleranceRads float64 `json:"waypoint_deduplication_tolerance_rads,omitempty"`
-	TrajectorySamplingFreqHz           int64   `json:"trajectory_sampling_freq_hz,omitempty"`
 }
 
 // Config is used for converting config attributes.

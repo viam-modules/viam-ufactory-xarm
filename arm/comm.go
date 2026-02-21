@@ -541,11 +541,6 @@ func (x *xArm) createTrajGenSteps(
 	if dedupTol == 0 {
 		dedupTol = 1e-3
 	}
-	samplingFreq := x.trajGenConf.TrajectorySamplingFreqHz
-	if samplingFreq == 0 {
-		samplingFreq = int64(x.moveHZ)
-	}
-
 	x.logger.Debugf("calling trajectory generator with %d waypoints", nWaypoints)
 	outMap, err := x.trajGen.Infer(ctx, ml.Tensors{
 		"waypoints_rads": tensor.New(
@@ -581,7 +576,7 @@ func (x *xArm) createTrajGenSteps(
 		"trajectory_sampling_freq_hz": tensor.New(
 			tensor.Of(tensor.Int64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]int64{samplingFreq}),
+			tensor.WithBacking([]int64{int64(x.moveHZ)}),
 		),
 	})
 	if err != nil {
