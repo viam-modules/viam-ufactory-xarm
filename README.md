@@ -172,6 +172,29 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 })
 ```
 
+### Manual Mode (Teaching Mode)
+
+You can put the arm into manual mode, which allows you to physically move the arm by hand. This is useful for teaching positions or manually positioning the arm for maintenance/storage.
+
+To enter manual mode:
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "enter_manual_mode": true,
+})
+```
+
+To exit manual mode and return to normal operation:
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "exit_manual_mode": true,
+})
+```
+
+> [!NOTE]
+> When in manual mode, the arm will be free to move by hand. Make sure the arm is properly supported and in a safe position before entering manual mode.
+
 ## UFactory xArm Resources
 
 The below documents will be useful for developers looking to contribute to this repository.

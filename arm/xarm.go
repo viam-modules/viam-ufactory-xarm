@@ -51,6 +51,8 @@ const (
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
 	gripperLiteActionKey     = "gripper_lite_action"
+	enterManualModeKey       = "enter_manual_mode"
+	exitManualModeKey        = "exit_manual_mode"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -723,6 +725,22 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[gripperLiteActionKey] = res
+		validCommand = true
+	}
+
+	if _, ok := cmd[enterManualModeKey]; ok {
+		if err := x.enterManualMode(ctx); err != nil {
+			return nil, err
+		}
+		resp["status"] = "entered manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[exitManualModeKey]; ok {
+		if err := x.exitManualMode(ctx); err != nil {
+			return nil, err
+		}
+		resp["status"] = "exited manual mode"
 		validCommand = true
 	}
 

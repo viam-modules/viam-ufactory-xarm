@@ -19,6 +19,7 @@ import (
 
 const errCodeCollision = 0x1F
 const servoMotionMode = 1
+const manualMode = 2
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
@@ -179,6 +180,10 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
 					"through UFACTORY Studio or clear_error do command")
 			}
+			// Check for manual mode error (0x25)
+			if errCode == 0x25 {
+				return cmd{}, fmt.Errorf("arm is in manual mode: use DoCommand with 'exit_manual_mode' to return to normal operation")
+			}
 			// Any other errors are cleared automatically by the driver.
 			return cmd{}, decodeError(params)
 		}
@@ -298,6 +303,11 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
 	}
 	if currentState[0]&notReadyForMotionState != 0 && enableMotion {
+		// Check if we're intentionally in manual mode - if so, don't "fix" it
+		if x.started.Load() == int32(manualMode) {
+			x.logger.Debug("Arm is in manual mode, skipping motion ready check")
+			return nil
+		}
 		x.logger.Error("motion not ready will enbale it")
 		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
 	}
@@ -357,6 +367,19 @@ func (x *xArm) setMotionMode(ctx context.Context, state byte) error {
 	return err
 }
 
+// toggleBrake toggles the brakes on or off.
+// True disengages brakes, false engages them.
+func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
+	c := x.newCmd(regMap["ToggleBrake"])
+	var enByte byte
+	if disable {
+		enByte = 1
+	}
+	c.params = append(c.params, 8, enByte)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
 // toggleServos toggles the servos on or off.
 // True enables servos and disengages brakes.
 // False disables servos without engaging brakes.
@@ -399,6 +422,108 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 	}
 	x.started.Store(int32(mode))
 	return nil
+}
+
+// enterManualMode puts the arm into manual mode (joint teaching mode).
+// In mode 2, the arm enters zero gravity mode with automatic gravity compensation,
+// allowing free movement by hand.
+func (x *xArm) enterManualMode(ctx context.Context) error {
+	x.logger.Info("Entering manual mode (zero gravity mode)")
+
+	// Clear any errors before entering manual mode
+	if err := x.checkReadyState(ctx, false); err != nil {
+		x.logger.Warnf("Could not fully clear ready state: %v", err)
+	}
+
+	// Set motion mode to 2 (manual/teaching mode)
+	// This automatically enables zero-gravity mode with gravity compensation
+	x.logger.Info("Setting motion mode to 2 (manual/teaching mode)")
+	if err := x.setMotionMode(ctx, manualMode); err != nil {
+		return fmt.Errorf("failed to set manual mode: %w", err)
+	}
+
+	// Set motion state to 0 (standby/ready)
+	// This activates the mode and prepares for manual teaching
+	x.logger.Info("Setting motion state to 0")
+	if err := x.setMotionState(ctx, 0); err != nil {
+		return fmt.Errorf("failed to activate manual mode: %w", err)
+	}
+
+	// Disengage brakes to allow physical movement
+	x.logger.Info("Disengaging brakes to allow movement")
+	if err := x.toggleBrake(ctx, true); err != nil {
+		return fmt.Errorf("failed to disengage brakes: %w", err)
+	}
+
+	// Disable servos to allow completely free movement
+	x.logger.Info("Disabling servos to allow free movement")
+	if err := x.toggleServos(ctx, false); err != nil {
+		x.logger.Warnf("Failed to disable servos: %v (continuing anyway)", err)
+	}
+
+	// Update internal state
+	x.started.Store(int32(manualMode))
+
+	// Verify we're actually in manual mode
+	if inManual, err := x.isInManualMode(ctx); err == nil {
+		x.logger.Infof("Mode verification: isInManualMode = %v", inManual)
+		if !inManual {
+			x.logger.Warn("WARNING: Mode verification shows we're NOT in manual mode!")
+		}
+	} else {
+		x.logger.Warnf("Could not verify manual mode: %v", err)
+	}
+
+	// Also check the raw state
+	c := x.newCmd(regMap["GetState"])
+	if resp, err := x.send(ctx, c, false); err == nil && len(resp.params) >= 2 {
+		x.logger.Infof("Raw GetState response: params[0]=0x%02X, params[1]=0x%02X (mode should be 2)", 
+			resp.params[0], resp.params[1])
+	}
+
+	x.logger.Info("Manual mode enabled - arm should now be freely moveable by hand")
+	x.logger.Info("Note: Gravity compensation is active - arm should hold position when released")
+	x.logger.Info("If arm is still rigid, check logs above for mode verification")
+
+	return nil
+}
+
+// exitManualMode exits manual mode and returns the arm to normal operation.
+func (x *xArm) exitManualMode(ctx context.Context) error {
+	x.logger.Info("Exiting manual mode")
+
+	// Reset internal state flag to force re-initialization
+	x.started.Store(-1)
+
+	// Use the existing start function to return to normal servo mode (mode 1)
+	// This will:
+	// - Set mode back to servoMotionMode (1)
+	// - Enable servos properly
+	// - Set state to 0 (ready)
+	if err := x.start(ctx, false); err != nil {
+		return fmt.Errorf("failed to exit manual mode: %w", err)
+	}
+
+	x.logger.Info("Manual mode exited - arm ready for programmatic commands")
+	return nil
+}
+
+// isInManualMode checks if the arm is currently in manual mode.
+func (x *xArm) isInManualMode(ctx context.Context) (bool, error) {
+	c := x.newCmd(regMap["GetState"])
+	resp, err := x.send(ctx, c, false)
+	if err != nil {
+		return false, err
+	}
+
+	if len(resp.params) < 2 {
+		return false, errors.New("unexpected response from GetState")
+	}
+
+	// params[1] contains the current mode
+	// Mode 2 is manual/teaching mode
+	currentMode := resp.params[1]
+	return currentMode == manualMode, nil
 }
 
 // Close shuts down the arm servos and engages brakes.
