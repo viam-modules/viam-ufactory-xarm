@@ -381,19 +381,6 @@ func (x *xArm) toggleServos(ctx context.Context, enable bool) error {
 	return err
 }
 
-// toggleBrake toggles the brakes on or off.
-// True disengages brakes, false engages them.
-func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
-	c := x.newCmd(regMap["ToggleBrake"])
-	var enByte byte
-	if disable {
-		enByte = 1
-	}
-	c.params = append(c.params, 8, enByte)
-	_, err := x.send(ctx, c, true)
-	return err
-}
-
 func (x *xArm) start(ctx context.Context, direct bool) error {
 	mode := byte(servoMotionMode)
 	if direct {
@@ -531,36 +518,31 @@ func (x *xArm) isInManualMode(ctx context.Context) (bool, error) {
 
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
-	x.closed.Store(true)
-
 	if x.conn == nil {
+		x.closed.Store(true)
 		return nil
 	}
 
-	if err := x.toggleBrake(ctx, false); err != nil {
-		return err
-	}
-	if err := x.toggleServos(ctx, false); err != nil {
-		return err
-	}
-	if err := x.setMotionState(ctx, 4); err != nil {
-		return err
-	}
+	err := multierr.Combine(
+		x.setMotionState(ctx, 3),
+		x.conn.Close(),
+	)
 
-	err := x.conn.Close()
 	if err != nil {
-		return err
+		x.logger.Warnf("closing connection failed: %v", err)
 	}
-	x.conn = nil
 
-	return nil
+	x.conn = nil
+	x.closed.Store(true)
+
+	return err
 }
 
 func (x *xArm) MoveThroughJointPositions(
 	ctx context.Context,
 	positions [][]referenceframe.Input,
 	opts *arm.MoveOptions,
-	extra map[string]interface{},
+	extra map[string]any,
 ) error {
 	mo := x.moveOptions(opts, extra)
 	return x.internalMoveThroughJointPositions(ctx, positions, mo)
@@ -818,7 +800,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 }
 
 // EndPosition computes and returns the current cartesian position.
-func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (spatialmath.Pose, error) {
+func (x *xArm) EndPosition(ctx context.Context, extra map[string]any) (spatialmath.Pose, error) {
 	joints, err := x.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
@@ -827,7 +809,7 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]interface{}) (s
 }
 
 // MoveToPosition moves the arm to the specified cartesian position.
-func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]interface{}) error {
+func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]any) error {
 	if x.motion == nil {
 		return fmt.Errorf("xarm cannot do MoveToPosition without speficying a motion service")
 	}
@@ -843,7 +825,7 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 }
 
 // JointPositions returns the current positions of all joints.
-func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{}) ([]referenceframe.Input, error) {
+func (x *xArm) JointPositions(ctx context.Context, extra map[string]any) ([]referenceframe.Input, error) {
 	if err := x.checkReadyState(ctx, false); err != nil {
 		return nil, err
 	}
@@ -871,7 +853,7 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]interface{})
 }
 
 // Stop stops the xArm but also reinitializes the arm so it can take commands again.
-func (x *xArm) Stop(ctx context.Context, extra map[string]interface{}) error {
+func (x *xArm) Stop(ctx context.Context, extra map[string]any) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 
@@ -1035,7 +1017,7 @@ func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
 	return c
 }
 
-func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]interface{}, error) {
+func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]any, error) {
 	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
 	var err error
 	switch action {
@@ -1046,7 +1028,7 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	case gripperLiteActionOpen:
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
 			return nil, err
@@ -1055,7 +1037,7 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1High), true); err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	case gripperLiteActionStop:
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
 			return nil, err
@@ -1063,7 +1045,7 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	case gripperLiteActionIsClosed:
 		c := x.newCmd(regMap["VacuumState"])
 		additionalParams := []byte{
@@ -1084,7 +1066,7 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		if res.params[4] == 2 {
 			isHolding = true
 		}
-		return map[string]interface{}{gripperLiteActionIsClosed: isHolding}, nil
+		return map[string]any{gripperLiteActionIsClosed: isHolding}, nil
 	}
 
 	return nil, fmt.Errorf("gripper lite action %s is not supported", action)

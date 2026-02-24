@@ -97,6 +97,13 @@ var (
 	XArm850Model = family.WithModel(ModelName850)
 )
 
+var modelNameToURDFFile = map[string]string{
+	ModelName6DOF: "xarm6.urdf",
+	ModelName7DOF: "xarm7.urdf",
+	ModelNameLite: "lite6.urdf",
+	ModelName850:  "uf850.urdf",
+}
+
 var armTo3DModelParts = map[string][]string{
 	"lite6": {
 		"base_top",
@@ -179,6 +186,7 @@ type Config struct {
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
+	UseURDFs     bool    `json:"use_urdfs,omitempty"`
 }
 
 // Validate validates the config.
@@ -273,31 +281,48 @@ func getModelJSON(modelName string) ([]byte, error) {
 }
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
-func MakeModelFrame(modelName string, badJoints []int, current []referenceframe.Input, logger logging.Logger) (referenceframe.Model, error) {
-	jsonData, err := getModelJSON(modelName)
-	if err != nil {
-		return nil, err
-	}
-
-	// empty data probably means that the robot component has no model information
-	if len(jsonData) == 0 {
-		return nil, referenceframe.ErrNoModelInformation
-	}
-
-	m := &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-	err = json.Unmarshal(jsonData, m)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal json file")
+func MakeModelFrame(
+	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, logger logging.Logger,
+) (referenceframe.Model, error) {
+	var cfg *referenceframe.ModelConfigJSON
+	if useURDFs {
+		parsed, err := makeModelFrameFromURDF(modelName)
+		if err != nil {
+			return nil, err
+		}
+		cfg = parsed.ModelConfig()
+	} else {
+		jsonData, err := getModelJSON(modelName)
+		if err != nil {
+			return nil, err
+		}
+		if len(jsonData) == 0 {
+			return nil, referenceframe.ErrNoModelInformation
+		}
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
+		if err := json.Unmarshal(jsonData, cfg); err != nil {
+			return nil, errors.Wrap(err, "failed to unmarshal json file")
+		}
 	}
 
 	for _, j := range badJoints {
 		now := utils.RadToDeg(current[j])
-		m.Joints[j].Min = now - 1
-		m.Joints[j].Max = now + 1
+		cfg.Joints[j].Min = now - 1
+		cfg.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
 	}
 
-	return m.ParseConfig(modelName)
+	return cfg.ParseConfig(modelName)
+}
+
+func makeModelFrameFromURDF(modelName string) (referenceframe.Model, error) {
+	urdfFile, ok := modelNameToURDFFile[modelName]
+	if !ok {
+		return nil, fmt.Errorf("no URDF file for xarm model %s", modelName)
+	}
+	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
+	path := fmt.Sprintf("%s/arm/%s", moduleRoot, urdfFile)
+	return referenceframe.ParseModelXMLFile(path, modelName)
 }
 
 // newxArm returns a new xArm of the specified modelName.
@@ -360,7 +385,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, logger)
+	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +418,7 @@ type moveOptions struct {
 	interpolate bool
 }
 
-func f64(extra map[string]interface{}, n string) (float64, bool) {
+func f64(extra map[string]any, n string) (float64, bool) {
 	v, ok := extra[n]
 	if !ok {
 		return 0, false
@@ -409,7 +434,7 @@ func f64(extra map[string]interface{}, n string) (float64, bool) {
 	}
 }
 
-func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]interface{}) moveOptions {
+func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOptions {
 	x.confLock.Lock()
 	defer x.confLock.Unlock()
 
@@ -533,7 +558,7 @@ func (x *xArm) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error
 }
 
 // MoveToJointPositions moves the arm to the requested joint positions.
-func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]interface{}) error {
+func (x *xArm) MoveToJointPositions(ctx context.Context, newPositions []referenceframe.Input, extra map[string]any) error {
 	return x.MoveThroughJointPositions(ctx, [][]referenceframe.Input{newPositions}, nil, extra)
 }
 
@@ -541,7 +566,7 @@ func (x *xArm) GoToInputs(ctx context.Context, inputSteps ...[]referenceframe.In
 	return x.MoveThroughJointPositions(ctx, inputSteps, nil, nil)
 }
 
-func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]spatialmath.Geometry, error) {
+func (x *xArm) Geometries(ctx context.Context, extra map[string]any) ([]spatialmath.Geometry, error) {
 	inputs, err := x.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
@@ -553,7 +578,7 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]interface{}) ([]
 	return gif.Geometries(), nil
 }
 
-func (x *xArm) Get3DModels(ctx context.Context, extra map[string]interface{}) (map[string]*commonpb.Mesh, error) {
+func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[string]*commonpb.Mesh, error) {
 	models := make(map[string]*commonpb.Mesh)
 	armModelParts := armTo3DModelParts[x.model.Name()]
 	if armModelParts == nil {
@@ -575,8 +600,8 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
-func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
-	resp := map[string]interface{}{}
+func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	resp := map[string]any{}
 	validCommand := false
 
 	if val, ok := cmd[moveGripperKey]; ok {
@@ -670,7 +695,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"state": sData.params}, nil
+		return map[string]any{"state": sData.params}, nil
 	}
 	if _, ok := cmd[getErrorKey]; ok {
 		c := x.newCmd(regMap["GetError"])
@@ -679,7 +704,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[s
 			return nil, err
 		}
 
-		return map[string]interface{}{"error info": sData.params}, nil
+		return map[string]any{"error info": sData.params}, nil
 	}
 	if _, ok := cmd[getVacuumGripperStateKey]; ok {
 		res, err := x.getVacuumStatus(ctx)

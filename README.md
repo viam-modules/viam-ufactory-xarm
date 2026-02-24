@@ -37,6 +37,7 @@ The following attributes are available:
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
 | `collision_sensitivity`| int | Optional | Collision sensitivity range from 1-5. The larger the value, the smaller the force required to trigger the collision protection emergency stop. The default is 3.
 | `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
+| `motion`| string | Optional | The Motion Service to use for MoveToPosition API calls. Defaults to the builtin motion service                                                    |
 #### Connecting using macOS
 The following steps can be followed when running viam-server on your mac.
 1. Connect an ethernet cable between the Arm's control box and a USB-C hub/adapter connected to your mac.
@@ -50,6 +51,22 @@ The following steps can be followed when running viam-server on your mac.
 1. Set the Subnet Mask to `255.255.255.0`
 1. Click OK to save the changes.
 1. Your mac should now be able to connect to the xArm, and you can verify with `ping <host>` to the arm's IP address. Note that the IP address setup in your mac's networking settings is not the ping address and should not be used in Viam configuration. It was only set to establish a network to talk to the arm on the IP address that is specified on the control box.
+
+#### Connecting using a Raspberry Pi
+The following steps may need to be followed when running viam-server on your pi.
+
+
+1. Connect an Ethernet cable from the xArm's control box to the Pi.
+2. Open a terminal on the Pi.
+3. Assign the Pi an IP address on the same subnet as the arm. For example, if the xArm’s IP is `192.168.1.2`, you can use:
+```bash
+sudo ip addr add 192.168.1.10/24 dev eth0
+sudo ip link set eth0 up
+```
+4. Verify connectivity by pinging the xArm:
+```bash
+ping 192.168.1.2
+```
 
 ### Using within a Frame System
 
