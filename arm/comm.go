@@ -436,16 +436,7 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		return fmt.Errorf("failed to activate manual mode: %w", err)
 	}
 
-	// Disengage brakes to allow physical movement
-	// The brakes mechanically lock the joints - they must be released for manual movement
-	x.logger.Info("Disengaging brakes to allow movement")
-	if err := x.toggleBrake(ctx, true); err != nil {
-		return fmt.Errorf("failed to disengage brakes: %w", err)
-	}
-
-	// Disable servos to allow completely free movement
-	// The documentation suggests mode 2 should do this automatically,
-	// but in practice we may need to explicitly disable servos
+	// Disable servos to allow free movement and disengage brakes
 	x.logger.Info("Disabling servos to allow free movement")
 	if err := x.toggleServos(ctx, false); err != nil {
 		x.logger.Warnf("Failed to disable servos: %v (continuing anyway)", err)
