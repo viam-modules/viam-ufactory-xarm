@@ -303,6 +303,11 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
 	}
 	if currentState[0]&notReadyForMotionState != 0 && enableMotion {
+		// Check if we're intentionally in manual mode - if so, don't "fix" it
+		if x.started.Load() == int32(manualMode) {
+			x.logger.Debug("Arm is in manual mode, skipping motion ready check")
+			return nil
+		}
 		x.logger.Error("motion not ready will enbale it")
 		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
 	}
@@ -432,21 +437,56 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 
 	// Set motion mode to 2 (manual/teaching mode)
 	// This automatically enables zero-gravity mode with gravity compensation
+	x.logger.Info("Setting motion mode to 2 (manual/teaching mode)")
 	if err := x.setMotionMode(ctx, manualMode); err != nil {
 		return fmt.Errorf("failed to set manual mode: %w", err)
 	}
 
 	// Set motion state to 0 (standby/ready)
 	// This activates the mode and prepares for manual teaching
+	x.logger.Info("Setting motion state to 0")
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return fmt.Errorf("failed to activate manual mode: %w", err)
+	}
+
+	// Disengage brakes to allow physical movement
+	// The brakes mechanically lock the joints - they must be released for manual movement
+	x.logger.Info("Disengaging brakes to allow movement")
+	if err := x.toggleBrake(ctx, true); err != nil {
+		return fmt.Errorf("failed to disengage brakes: %w", err)
+	}
+
+	// Disable servos to allow completely free movement
+	// The documentation suggests mode 2 should do this automatically,
+	// but in practice we may need to explicitly disable servos
+	x.logger.Info("Disabling servos to allow free movement")
+	if err := x.toggleServos(ctx, false); err != nil {
+		x.logger.Warnf("Failed to disable servos: %v (continuing anyway)", err)
 	}
 
 	// Update internal state
 	x.started.Store(int32(manualMode))
 
+	// Verify we're actually in manual mode
+	if inManual, err := x.isInManualMode(ctx); err == nil {
+		x.logger.Infof("Mode verification: isInManualMode = %v", inManual)
+		if !inManual {
+			x.logger.Warn("WARNING: Mode verification shows we're NOT in manual mode!")
+		}
+	} else {
+		x.logger.Warnf("Could not verify manual mode: %v", err)
+	}
+
+	// Also check the raw state
+	c := x.newCmd(regMap["GetState"])
+	if resp, err := x.send(ctx, c, false); err == nil && len(resp.params) >= 2 {
+		x.logger.Infof("Raw GetState response: params[0]=0x%02X, params[1]=0x%02X (mode should be 2)", 
+			resp.params[0], resp.params[1])
+	}
+
 	x.logger.Info("Manual mode enabled - arm should now be freely moveable by hand")
 	x.logger.Info("Note: Gravity compensation is active - arm should hold position when released")
+	x.logger.Info("If arm is still rigid, check logs above for mode verification")
 
 	return nil
 }
