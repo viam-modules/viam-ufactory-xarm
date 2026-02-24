@@ -31,3 +31,5 @@ bin/
 
 # Code editor settings
 .vscode
+reload-dist/
+.VIAM_RELOAD_ARCHIVE.tar.gz
