@@ -38,20 +38,19 @@ The following attributes are available:
 | `collision_sensitivity`| int | Optional | Collision sensitivity range from 1-5. The larger the value, the smaller the force required to trigger the collision protection emergency stop. The default is 3.
 | `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
 | `motion`| string | Optional | The Motion Service to use for MoveToPosition API calls. Defaults to the builtin motion service. |
-| `traj_gen` | object | Optional | Configuration for a [trajectory generator](#trajectory-generator) ML model service. When set, joint moves are planned by the service instead of the built-in interpolator. |
+| `trajectory_generator` | object | Optional | Configuration for a [trajectory generator](#trajectory-generator) ML model service. When set, joint moves are planned by the service instead of the built-in interpolator. |
 
 ### Trajectory Generator
 
-The `traj_gen` attribute connects the arm to an external ML model service (such as [trajex](https://github.com/viamrobotics/trajex)) that performs time-optimal trajectory generation. When configured, all `MoveThroughJointPositions` calls are routed through the service instead of the built-in interpolator.
+The `trajectory_generator` attribute connects the arm to an external service (such as [trajex](https://github.com/viamrobotics/trajex)) that performs time-optimal trajectory generation. When configured, all `MoveThroughJointPositions` calls are routed through the service instead of the built-in interpolator.
 
 The service receives the arm's current position prepended to the requested waypoints, and returns a densely-sampled trajectory that respects the arm's velocity and acceleration limits. If the arm is already at the goal (within the deduplication tolerance), the service returns an empty result and no motion is commanded.
 
 ```json
 {
-  "traj_gen": {
+  "trajectory_generator": {
     "service": "my-trajex-service",
-    "path_tolerance_delta_rads": 0.01,
-    "path_colinearization_ratio": 0.03,
+    "path_tolerance_delta_rads": 0.1,
     "waypoint_deduplication_tolerance_rads": 0.001
   }
 }
@@ -60,8 +59,8 @@ The service receives the arm's current position prepended to the requested waypo
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `service` | string | **Required** | Name of the ML model service to use for trajectory generation. |
-| `path_tolerance_delta_rads` | float64 | `0.01` | Maximum deviation from the straight-line path between waypoints, in radians. |
-| `path_colinearization_ratio` | float64 | `0.03` | Ratio used to merge nearly-collinear waypoints. Set to `0` to disable. |
+| `path_tolerance_delta_rads` | float64 | `0.1` | Maximum deviation from the straight-line path between waypoints, in radians. |
+| `path_colinearization_ratio` | float64 | `0` (disabled by default) | Ratio used to merge nearly-collinear waypoints. Set to `0` to disable. |
 | `waypoint_deduplication_tolerance_rads` | float64 | `0.001` | Waypoints closer than this value (in radians) are treated as duplicates and merged. |
 
 The trajectory is sampled at the arm's configured `move_hz` frequency (default 100 Hz).

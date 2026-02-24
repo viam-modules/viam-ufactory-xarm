@@ -535,17 +535,17 @@ func (x *xArm) createTrajGenSteps(
 		"path_tolerance_delta_rads": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{x.conf.TrajGen.PathToleranceDeltaRads}),
+			tensor.WithBacking([]float64{*x.conf.TrajGen.PathToleranceDeltaRads}),
 		),
 		"path_colinearization_ratio": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{x.conf.TrajGen.PathColinearizationRatio}),
+			tensor.WithBacking([]float64{*x.conf.TrajGen.PathColinearizationRatio}),
 		),
 		"waypoint_deduplication_tolerance_rads": tensor.New(
 			tensor.Of(tensor.Float64),
 			tensor.WithShape(1),
-			tensor.WithBacking([]float64{x.conf.TrajGen.WaypointDeduplicationToleranceRads}),
+			tensor.WithBacking([]float64{*x.conf.TrajGen.WaypointDeduplicationToleranceRads}),
 		),
 		"trajectory_sampling_freq_hz": tensor.New(
 			tensor.Of(tensor.Int64),

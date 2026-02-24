@@ -37,8 +37,7 @@ const (
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
-	defaultTrajGenPathToleranceDeltaRads             = 0.01
-	defaultTrajGenPathColinearizationRatio           = 0.03
+	defaultTrajGenPathToleranceDeltaRads             = 0.1
 	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
 
 	// DoCommand keys.
@@ -182,10 +181,10 @@ func register(model resource.Model) {
 
 // TrajGenConfig holds configuration for the trajectory generator ML model service.
 type TrajGenConfig struct {
-	Service                            string  `json:"service"`
-	PathToleranceDeltaRads             float64 `json:"path_tolerance_delta_rads,omitempty"`
-	PathColinearizationRatio           float64 `json:"path_colinearization_ratio,omitempty"`
-	WaypointDeduplicationToleranceRads float64 `json:"waypoint_deduplication_tolerance_rads,omitempty"`
+	Service                            string   `json:"service"`
+	PathToleranceDeltaRads             *float64 `json:"path_tolerance_delta_rads,omitempty"`
+	PathColinearizationRatio           *float64 `json:"path_colinearization_ratio,omitempty"`
+	WaypointDeduplicationToleranceRads *float64 `json:"waypoint_deduplication_tolerance_rads,omitempty"`
 }
 
 // Config is used for converting config attributes.
@@ -199,7 +198,7 @@ type Config struct {
 	BadJoints    []int          `json:"bad-joints"`
 	Motion       string         `json:"motion"`
 	UseURDFs     bool           `json:"use_urdfs,omitempty"`
-	TrajGen      *TrajGenConfig `json:"traj_gen,omitempty"`
+	TrajGen      *TrajGenConfig `json:"trajectory_generator,omitempty"`
 }
 
 // Validate validates the config.
@@ -387,14 +386,17 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if err != nil {
 			return nil, err
 		}
-		if newConf.TrajGen.PathToleranceDeltaRads == 0 {
-			newConf.TrajGen.PathToleranceDeltaRads = defaultTrajGenPathToleranceDeltaRads
+		if newConf.TrajGen.PathToleranceDeltaRads == nil {
+			v := defaultTrajGenPathToleranceDeltaRads
+			newConf.TrajGen.PathToleranceDeltaRads = &v
 		}
-		if newConf.TrajGen.PathColinearizationRatio == 0 {
-			newConf.TrajGen.PathColinearizationRatio = defaultTrajGenPathColinearizationRatio
+		if newConf.TrajGen.PathColinearizationRatio == nil {
+			v := 0.0
+			newConf.TrajGen.PathColinearizationRatio = &v
 		}
-		if newConf.TrajGen.WaypointDeduplicationToleranceRads == 0 {
-			newConf.TrajGen.WaypointDeduplicationToleranceRads = defaultTrajGenWaypointDeduplicationToleranceRads
+		if newConf.TrajGen.WaypointDeduplicationToleranceRads == nil {
+			v := defaultTrajGenWaypointDeduplicationToleranceRads
+			newConf.TrajGen.WaypointDeduplicationToleranceRads = &v
 		}
 	}
 
