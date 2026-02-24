@@ -367,6 +367,19 @@ func (x *xArm) setMotionMode(ctx context.Context, state byte) error {
 	return err
 }
 
+// toggleBrake toggles the brakes on or off.
+// True disengages brakes, false engages them.
+func (x *xArm) toggleBrake(ctx context.Context, disable bool) error {
+	c := x.newCmd(regMap["ToggleBrake"])
+	var enByte byte
+	if disable {
+		enByte = 1
+	}
+	c.params = append(c.params, 8, enByte)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
 // toggleServos toggles the servos on or off.
 // True enables servos and disengages brakes.
 // False disables servos without engaging brakes.
@@ -436,7 +449,13 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		return fmt.Errorf("failed to activate manual mode: %w", err)
 	}
 
-	// Disable servos to allow free movement and disengage brakes
+	// Disengage brakes to allow physical movement
+	x.logger.Info("Disengaging brakes to allow movement")
+	if err := x.toggleBrake(ctx, true); err != nil {
+		return fmt.Errorf("failed to disengage brakes: %w", err)
+	}
+
+	// Disable servos to allow completely free movement
 	x.logger.Info("Disabling servos to allow free movement")
 	if err := x.toggleServos(ctx, false); err != nil {
 		x.logger.Warnf("Failed to disable servos: %v (continuing anyway)", err)
