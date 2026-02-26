@@ -344,14 +344,13 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 		}
 		return map[string]any{"pos": pos}, nil
 	}
-	if pos, ok := cmd["set"].(int); ok {
-		_, err := g.arm.DoCommand(ctx, map[string]interface{}{
-			"move_gripper": pos,
-		})
+	if posF, ok := cmd["set"].(float64); ok {
+		pos := int(posF)
+		_, err := g.goToPosition(ctx, pos)
 		if err != nil {
 			return nil, err
 		}
-		pos, err := g.getPosition(ctx)
+		pos, err = g.getPosition(ctx)
 		if err != nil {
 			return nil, err
 		}
