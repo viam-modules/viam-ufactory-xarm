@@ -58,13 +58,13 @@ var armBoxErrorMap = map[byte]string{
 	0x01:             "xArm: Emergency Stop Button Pushed In",
 	0x02:             "xArm: Emergency IO Triggered",
 	0x03:             "xArm: Emergency Stop 3-State Switch Pressed",
-	0x0B:             "xArm: Power Cycle Required",
-	0x0C:             "xArm: Power Cycle Required",
-	0x0D:             "xArm: Power Cycle Required",
-	0x0E:             "xArm: Power Cycle Required",
-	0x0F:             "xArm: Power Cycle Required",
-	0x10:             "xArm: Power Cycle Required",
-	0x11:             "xArm: Power Cycle Required",
+	0x0B:             "xArm: Power Cycle Required (Servo Motor 1 Error)",
+	0x0C:             "xArm: Power Cycle Required (Servo Motor 2 Error)",
+	0x0D:             "xArm: Power Cycle Required (Servo Motor 3 Error)",
+	0x0E:             "xArm: Power Cycle Required (Servo Motor 4 Error)",
+	0x0F:             "xArm: Power Cycle Required (Servo Motor 5 Error)",
+	0x10:             "xArm: Power Cycle Required (Servo Motor 6 Error)",
+	0x11:             "xArm: Power Cycle Required (Servo Motor 7 Error)",
 	0x13:             "xArm: Gripper Communication Error",
 	0x15:             "xArm: Kinematic Error",
 	0x16:             "xArm: Self Collision Error",
@@ -185,6 +185,15 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 			if errCode == 0x25 {
 				return cmd{}, fmt.Errorf("arm is in manual mode: use DoCommand with 'exit_manual_mode' to return to normal operation")
 			}
+			// Servo motor errors (0x0B-0x11) require a power cycle.
+			// Best-effort query for per-servo details with a tight timeout.
+			if errCode >= 0x0B && errCode <= 0x11 {
+				servoCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+				if servoErr := x.CheckServoErrors(servoCtx); servoErr != nil {
+					x.logger.Debugf("servo error details: %v", servoErr)
+				}
+				cancel()
+			}
 			// Any other errors are cleared automatically by the driver.
 			return cmd{}, decodeError(params)
 		}
@@ -254,9 +263,15 @@ func (x *xArm) CheckServoErrors(ctx context.Context) error {
 	// xArm 6 has 6, xArm 7 has 7, and plus one in the xArm gripper
 	for i := 1; i < 9; i++ {
 		errCode := e.params[i*2]
+		// 0 means no active error for this servo.
+		if errCode == 0 {
+			continue
+		}
 		errMsg, isErr := servoErrorMap[errCode]
 		if isErr {
-			err = multierr.Append(err, errors.New(errMsg))
+			err = multierr.Append(err, fmt.Errorf("servo %d: %s", i, errMsg))
+		} else {
+			err = multierr.Append(err, fmt.Errorf("servo %d: unknown error (code 0x%02X)", i, errCode))
 		}
 	}
 	return err
