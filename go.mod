@@ -11,8 +11,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rhysd/actionlint v1.7.8
 	go.uber.org/multierr v1.11.0
-	go.viam.com/api v0.1.511
-	go.viam.com/rdk v0.110.0
+	go.viam.com/api v0.1.519
+	go.viam.com/rdk v0.115.0
 	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.4.3
 	gorgonia.org/tensor v0.9.24
