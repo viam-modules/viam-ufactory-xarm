@@ -1189,3 +1189,15 @@ func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity
 	_, err := x.send(ctx, c, true)
 	return err
 }
+
+// reboot sends a reboot command to the controller box and resets the
+// connection. The controller takes ~20-30s to come back up; the next
+// command will trigger reconnection automatically.
+func (x *xArm) reboot(ctx context.Context) error {
+	c := x.newCmd(regMap["Shutdown"])
+	c.params = append(c.params, 2) // 2 = reboot
+	_, err := x.send(ctx, c, false)
+	// Connection will drop; reset so the next call reconnects.
+	x.resetConnection()
+	return err
+}

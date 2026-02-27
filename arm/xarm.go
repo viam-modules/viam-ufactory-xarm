@@ -57,6 +57,7 @@ const (
 	gripperLiteActionKey     = "gripper_lite_action"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
+	rebootKey                = "reboot"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -777,6 +778,14 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp["status"] = "exited manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[rebootKey]; ok {
+		if err := x.reboot(ctx); err != nil {
+			return nil, err
+		}
+		resp["status"] = "rebooting"
 		validCommand = true
 	}
 
