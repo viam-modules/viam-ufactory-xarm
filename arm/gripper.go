@@ -40,12 +40,16 @@ const fullyOpenThreshold = 830
 type GripperConfig struct {
 	Arm            string
 	VacuumLengthMM float64 `json:"vacuum_length_mm"`
+	GripperSpeed   int     `json:"gripper_speed,omitempty"`
 }
 
 // Validate validates the config.
 func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "arm")
+	}
+	if cfg.GripperSpeed != 0 && (cfg.GripperSpeed < 1 || cfg.GripperSpeed > 5000) {
+		return nil, nil, fmt.Errorf("gripper_speed must be between 1 and 5000, got %d", cfg.GripperSpeed)
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -235,6 +239,14 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	if newConf.GripperSpeed != 0 {
+		if _, err := g.arm.DoCommand(ctx, map[string]any{
+			setGripperSpeedKey: float64(newConf.GripperSpeed),
+		}); err != nil {
+			return nil, fmt.Errorf("failed to set gripper speed: %w", err)
+		}
+	}
+
 	return g, nil
 }
 
@@ -355,6 +367,12 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 			return nil, err
 		}
 		return map[string]interface{}{"position": pos}, nil
+	}
+	if _, ok := cmd[setGripperSpeedKey]; ok {
+		return g.arm.DoCommand(ctx, cmd)
+	}
+	if _, ok := cmd[getGripperSpeedKey]; ok {
+		return g.arm.DoCommand(ctx, cmd)
 	}
 	return map[string]any{}, nil
 }

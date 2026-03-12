@@ -55,6 +55,9 @@ const (
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
 	gripperLiteActionKey     = "gripper_lite_action"
+	setGripperSpeedKey = "set_gripper_speed"
+	getGripperSpeedKey = "get_gripper_speed"
+	gripperSpeedKey    = "gripper_speed"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 
@@ -639,6 +642,36 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	resp := map[string]any{}
 	validCommand := false
+
+	if val, ok := cmd[setGripperSpeedKey]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
+		speed, err := utils.AssertType[float64](val)
+		if err != nil {
+			return nil, err
+		}
+		if speed <= 0 || speed > 5000 {
+			return nil, fmt.Errorf("gripper speed must be between 1 and 5000, got %v", val)
+		}
+		if err := x.setGripperSpeed(ctx, uint16(speed)); err != nil {
+			return nil, err
+		}
+		resp[gripperSpeedKey] = speed
+		validCommand = true
+	}
+
+	if _, ok := cmd[getGripperSpeedKey]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
+		speed, err := x.getGripperSpeed(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[gripperSpeedKey] = float64(speed)
+		validCommand = true
+	}
 
 	if val, ok := cmd[moveGripperKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {

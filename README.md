@@ -199,6 +199,32 @@ xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 })
 ```
 
+To get the current gripper position:
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "get_gripper": true,
+})
+// resp["gripper_position"] contains the position (0-850)
+```
+
+To set the gripper speed (range 1-5000):
+
+```go
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "set_gripper_speed": 2000,
+})
+```
+
+To get the current gripper speed:
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "get_gripper_speed": true,
+})
+// resp["gripper_speed"] contains the speed
+```
+
 ### Manual Mode (Teaching Mode)
 
 You can put the arm into manual mode, which allows you to physically move the arm by hand. This is useful for teaching positions or manually positioning the arm for maintenance/storage.
@@ -237,10 +263,33 @@ The below documents will be useful for developers looking to contribute to this 
 The arm itself runs xArm Studio. A developer should be able to use it through their web browser by going to the arm's IP address, port 18333.
 
 ## gripper
-```
+
+```jsonc
 {
-   "arm" : "arm"
+   "arm": "arm",           // required: name of the arm component
+   "gripper_speed": 2000   // optional: default speed (1-5000)
 }
+```
+
+| Name             | Type   | Inclusion    | Description                                                        |
+|------------------|--------|--------------|--------------------------------------------------------------------|
+| `arm`            | string | **Required** | The name of the arm component this gripper is attached to.         |
+| `gripper_speed`  | int    | Optional     | Default gripper speed (1-5000). Applied on startup. If omitted, the gripper uses its firmware default. |
+
+### DoCommand
+
+```go
+// Get the current position
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get": true})
+// resp["pos"] contains the position
+
+// Move to a specific position
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set": 500.0})
+// resp["position"] contains the final position
+
+// Set/get gripper speed (proxied to arm DoCommand)
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
 ```
 
 ## gripper lite
