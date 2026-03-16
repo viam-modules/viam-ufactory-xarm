@@ -31,7 +31,7 @@ func (x *xArm) startProxy(ctx context.Context) error {
 	}
 
 	x.proxyServer = &http.Server{
-		Addr:              fmt.Sprintf("[::]:%d", port),
+		Addr:              fmt.Sprintf("[::]:%d", port), // '[::]' listens on IPv4 and IPv6
 		Handler:           proxy,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
