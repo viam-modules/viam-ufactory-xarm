@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -141,14 +142,15 @@ type xArm struct {
 	started atomic.Int32 // -1 is off, >= 0 is mode
 	tid     uint16
 
-	name    resource.Name
-	conf    *Config
-	conn    net.Conn
-	closed  atomic.Bool
-	opMgr   *operation.SingleOperationManager
-	logger  logging.Logger
-	motion  motion.Service
-	trajGen mlmodel.Service
+	name        resource.Name
+	conf        *Config
+	conn        net.Conn
+	closed      atomic.Bool
+	opMgr       *operation.SingleOperationManager
+	logger      logging.Logger
+	motion      motion.Service
+	trajGen     mlmodel.Service
+	proxyServer *http.Server
 
 	// below is all configuration things
 	dof    int
@@ -204,6 +206,9 @@ type Config struct {
 	Motion       string         `json:"motion"`
 	UseURDFs     bool           `json:"use_urdfs,omitempty"`
 	TrajGen      *TrajGenConfig `json:"trajectory_generator,omitempty"`
+
+	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
+	StudioProxyPort int  `json:"ufactory-studio-proxy-port,omitempty"`
 }
 
 // Validate validates the config.
@@ -441,6 +446,12 @@ func NewXArm(ctx context.Context, name resource.Name,
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	if newConf.StudioProxy {
+		if err := x.startProxy(ctx); err != nil {
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 

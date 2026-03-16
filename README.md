@@ -39,6 +39,8 @@ The following attributes are available:
 | `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
 | `motion`| string | Optional | The Motion Service to use for MoveToPosition API calls. Defaults to the builtin motion service. |
 | `trajectory_generator` | object | Optional | Configuration for a [trajectory generator](#trajectory-generator) ML model service. When set, joint moves are planned by the service instead of the built-in interpolator. |
+| `ufactory-studio-proxy` | bool | Optional | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). Default is `false`. |
+| `ufactory-studio-proxy-port` | int | Optional | Local port for the Studio proxy. Default is `18333`. |
 
 ### Trajectory Generator
 
@@ -258,9 +260,24 @@ The below documents will be useful for developers looking to contribute to this 
 - [UFactory xArm Vacuum Gripper User Manual](https://static.generation-robots.com/media/xArm-Vacuum-Gripper-User-Manual-V1.6.1.pdf)
 
 
-## Note on xArm Studio
+## UFactory Studio Proxy
 
-The arm itself runs xArm Studio. A developer should be able to use it through their web browser by going to the arm's IP address, port 18333.
+The arm runs UFactory Studio, a web UI accessible at `http://<arm-ip>:18333`. When the machine running `viam-server` and the arm are on different subnets (e.g., arm on a direct Ethernet connection), the Studio UI may not be reachable from your browser.
+
+Enabling `ufactory-studio-proxy` starts a local reverse proxy on the `viam-server` host that forwards requests to the arm's Studio port. This lets you access Studio at `http://<viam-server-ip>:<proxy-port>` without direct network access to the arm.
+
+```json
+{
+  "host": "192.168.1.2",
+  "ufactory-studio-proxy": true,
+  "ufactory-studio-proxy-port": 18333
+}
+```
+
+The proxy port defaults to `18333`. If that port is unavailable on the host, set `ufactory-studio-proxy-port` to a different value.
+
+> [!CAUTION]
+> The proxy listens on **all network interfaces** with **no authentication**. Anyone who can reach the proxy port on the `viam-server` host has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or use firewall rules to restrict access to the proxy port.
 
 ## gripper
 
