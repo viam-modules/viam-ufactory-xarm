@@ -436,6 +436,17 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
+	if newConf.UseURDFs && len(newConf.MeshDecimationRatios) == 0 {
+		numJoints := 7
+		if modelName == ModelName6DOF || modelName == ModelNameLite {
+			numJoints = 6
+		}
+		newConf.MeshDecimationRatios = make([]float64, numJoints)
+		for i := range newConf.MeshDecimationRatios {
+			newConf.MeshDecimationRatios[i] = 0.1
+		}
+	}
+
 	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger)
 	if err != nil {
 		return nil, err
