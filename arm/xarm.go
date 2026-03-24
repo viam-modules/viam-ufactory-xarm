@@ -56,9 +56,9 @@ const (
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
 	gripperLiteActionKey     = "gripper_lite_action"
-	setGripperSpeedKey = "set_gripper_speed"
-	getGripperSpeedKey = "get_gripper_speed"
-	gripperSpeedKey    = "gripper_speed"
+	setGripperSpeedKey       = "set_gripper_speed"
+	getGripperSpeedKey       = "get_gripper_speed"
+	gripperSpeedKey          = "gripper_speed"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 
@@ -196,16 +196,17 @@ type TrajGenConfig struct {
 
 // Config is used for converting config attributes.
 type Config struct {
-	Host         string         `json:"host"`
-	Port         int            `json:"port,omitempty"`
-	Speed        float64        `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ       float64        `json:"move_hz,omitempty"`
-	Sensitivity  *int           `json:"collision_sensitivity,omitempty"`
-	BadJoints    []int          `json:"bad-joints"`
-	Motion       string         `json:"motion"`
-	UseURDFs     bool           `json:"use_urdfs,omitempty"`
-	TrajGen      *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	Host                 string         `json:"host"`
+	Port                 int            `json:"port,omitempty"`
+	Speed                float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration         float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ               float64        `json:"move_hz,omitempty"`
+	Sensitivity          *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints            []int          `json:"bad-joints"`
+	Motion               string         `json:"motion"`
+	UseURDFs             bool           `json:"use_urdfs,omitempty"`
+	TrajGen              *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	MeshDecimationRatios []float64      `json:"mesh_decimation_ratios,omitempty"`
 
 	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
 	StudioProxyPort int  `json:"ufactory-studio-proxy-port,omitempty"`
