@@ -191,16 +191,17 @@ type TrajGenConfig struct {
 
 // Config is used for converting config attributes.
 type Config struct {
-	Host         string         `json:"host"`
-	Port         int            `json:"port,omitempty"`
-	Speed        float64        `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ       float64        `json:"move_hz,omitempty"`
-	Sensitivity  *int           `json:"collision_sensitivity,omitempty"`
-	BadJoints    []int          `json:"bad-joints"`
-	Motion       string         `json:"motion"`
-	UseURDFs     bool           `json:"use_urdfs,omitempty"`
-	TrajGen      *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	Host               string         `json:"host"`
+	Port               int            `json:"port,omitempty"`
+	Speed              float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration       float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ             float64        `json:"move_hz,omitempty"`
+	Sensitivity        *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints          []int          `json:"bad-joints"`
+	Motion             string         `json:"motion"`
+	UseURDFs           bool           `json:"use_urdfs,omitempty"`
+	TrajGen            *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	MeshDecimationRatios []float64      `json:"mesh_decimation_ratios,omitempty"`
 }
 
 // Validate validates the config.
@@ -226,6 +227,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
 		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
+	}
+
+	for i, r := range cfg.MeshDecimationRatios {
+		if r <= 0 || r > 1 {
+			return nil, nil, fmt.Errorf("mesh_decimation_ratios[%d] must be in (0, 1], got %f", i, r)
+		}
 	}
 
 	deps := []string{}
@@ -299,11 +306,11 @@ func getModelJSON(modelName string) ([]byte, error) {
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
 func MakeModelFrame(
-	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, logger logging.Logger,
+	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, meshDecimationRatios []float64, logger logging.Logger,
 ) (referenceframe.Model, error) {
 	var cfg *referenceframe.ModelConfigJSON
 	if useURDFs {
-		parsed, err := makeModelFrameFromURDF(modelName)
+		parsed, err := makeModelFrameFromURDF(modelName, meshDecimationRatios)
 		if err != nil {
 			return nil, err
 		}
@@ -332,14 +339,14 @@ func MakeModelFrame(
 	return cfg.ParseConfig(modelName)
 }
 
-func makeModelFrameFromURDF(modelName string) (referenceframe.Model, error) {
+func makeModelFrameFromURDF(modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
 	urdfFile, ok := modelNameToURDFFile[modelName]
 	if !ok {
 		return nil, fmt.Errorf("no URDF file for xarm model %s", modelName)
 	}
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
 	path := fmt.Sprintf("%s/arm/%s", moduleRoot, urdfFile)
-	return referenceframe.ParseModelXMLFile(path, modelName)
+	return referenceframe.ParseModelXMLFile(path, modelName, meshDecimationRatios)
 }
 
 // newxArm returns a new xArm of the specified modelName.
@@ -421,7 +428,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, logger)
+	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger)
 	if err != nil {
 		return nil, err
 	}
