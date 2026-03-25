@@ -22,7 +22,6 @@ linters:
     - gochecknoglobals
     - gochecknoinits
     - gocyclo
-    - gomoddirectives
     - importas
     - interfacebloat
     - intrange # todo: re-enable at some point and update to new style

@@ -12,7 +12,7 @@ require (
 	github.com/rhysd/actionlint v1.7.8
 	go.uber.org/multierr v1.11.0
 	go.viam.com/api v0.1.530
-	go.viam.com/rdk v0.115.0
+	go.viam.com/rdk v0.118.1-0.20260325151446-9dd6d244f093
 	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.4.13
 	gorgonia.org/tensor v0.9.24
@@ -242,5 +242,3 @@ require (
 	gorgonia.org/vecf64 v0.9.0 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
 )
-
-replace go.viam.com/rdk => github.com/nfranczak/rdk v0.0.0-20260324200429-f9f241b6313f
