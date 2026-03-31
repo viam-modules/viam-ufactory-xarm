@@ -309,7 +309,7 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			x.logger.Debug("Arm is in manual mode, skipping motion ready check")
 			return nil
 		}
-		x.logger.Error("motion not ready will enbale it")
+		x.logger.Error("motion not ready will enable it")
 		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
 	}
 	return nil
