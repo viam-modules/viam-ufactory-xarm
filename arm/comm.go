@@ -951,11 +951,19 @@ func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 			return resp, nil
 		}
 		if attempt < gripperRetries-1 {
-			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, retrying", attempt+1, gripperRetries, err)
+			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, re-initializing gripper", attempt+1, gripperRetries, err)
+			// Clear the arm error state.
 			if clearErr := x.checkReadyState(ctx, false); clearErr != nil {
 				x.logger.Warnf("failed to clear error state during gripper retry: %v", clearErr)
 			}
-			time.Sleep(100 * time.Millisecond)
+			// Invalidate cached gripper state and re-enable the gripper.
+			// The xArm Python SDK does the same: on C19 it sets gripper_is_enabled=False
+			// so the next command re-runs enable + set_mode before the actual operation.
+			x.gripperSetup.Store(false)
+			if setupErr := x.setupGripper(ctx); setupErr != nil {
+				x.logger.Warnf("failed to re-initialize gripper during retry: %v", setupErr)
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
 	}
 	return resp, err
@@ -979,7 +987,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.gripperSend(ctx, c)
+	_, err := x.send(ctx, c, true)
 	return err
 }
 
@@ -993,7 +1001,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.gripperSend(ctx, c)
+	_, err := x.send(ctx, c, true)
 	return err
 }
 
