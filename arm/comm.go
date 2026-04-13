@@ -218,8 +218,12 @@ func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 	return x.responseInLock(ctx)
 }
 
-func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
-	buf, err := utils.ReadBytes(ctx, x.conn, 7)
+func (x *xArm) responseInLock(_ context.Context) (cmd, error) {
+	// Use a non-cancellable context for reading the response. Once a command has been
+	// written to the socket, we must read the response to keep the protocol in sync.
+	// The 5-second TCP deadline set in writeBytes provides timeout protection.
+	readCtx := context.WithoutCancel(context.Background())
+	buf, err := utils.ReadBytes(readCtx, x.conn, 7)
 	if err != nil {
 		x.resetConnection()
 		return cmd{}, err
@@ -229,7 +233,7 @@ func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
+	c.params, err = utils.ReadBytes(readCtx, x.conn, int(length-1))
 	if err != nil {
 		x.resetConnection()
 		return cmd{}, err
