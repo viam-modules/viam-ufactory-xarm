@@ -198,8 +198,12 @@ func (m *modbusConn) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 	return m.responseInLock(ctx)
 }
 
-func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
-	buf, err := utils.ReadBytes(ctx, m.conn, 7)
+func (m *modbusConn) responseInLock(_ context.Context) (cmd, error) {
+	// Use a non-cancellable context for reading the response. Once a command has been
+	// written to the socket, we must read the response to keep the protocol in sync.
+	// The 5-second TCP deadline set in writeBytes provides timeout protection.
+	readCtx := context.WithoutCancel(context.Background())
+	buf, err := utils.ReadBytes(readCtx, m.conn, 7)
 	if err != nil {
 		m.resetConnection()
 		return cmd{}, err
@@ -209,7 +213,7 @@ func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	c.params, err = utils.ReadBytes(ctx, m.conn, int(length-1))
+	c.params, err = utils.ReadBytes(readCtx, m.conn, int(length-1))
 	if err != nil {
 		m.resetConnection()
 		return cmd{}, err
