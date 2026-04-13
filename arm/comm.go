@@ -296,7 +296,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	if currentState[0]&errorState != 0 {
 		// we assume that if we run into an error we will need to restart the servos etc.
 		x.started.Store(-1)
-		x.gripperSetup.Store(false)
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
@@ -962,14 +961,32 @@ func (x *xArm) gripperPreamble(write bool) cmd {
 	return c
 }
 
-// gripperSend mirrors x.send but routes through gripperConn. checkError is
-// always true on this path — gripper Modbus failures should surface, never
-// be swallowed silently.
+const gripperRetries = 3
+
+// gripperSend mirrors x.send but routes through gripperConn, retrying a few
+// times on failure and clearing the arm's error state between attempts.
+// checkError is always true on this path — gripper Modbus failures should
+// surface, never be swallowed silently.
 func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
-	return x.gripperConn.send(ctx, c, true)
+	var resp cmd
+	var err error
+	for attempt := range gripperRetries {
+		resp, err = x.gripperConn.send(ctx, c, true)
+		if err == nil {
+			return resp, nil
+		}
+		if attempt < gripperRetries-1 {
+			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, retrying", attempt+1, gripperRetries, err)
+			if clearErr := x.checkReadyState(ctx, false); clearErr != nil {
+				x.logger.Warnf("failed to clear error state during gripper retry: %v", clearErr)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return resp, err
 }
 
 func (x *xArm) enableGripper(ctx context.Context) error {

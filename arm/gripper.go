@@ -318,7 +318,12 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 
 		pos, err := g.getPosition(ctx)
 		if err != nil {
-			return 0, err
+			// Retry once after a brief delay to handle transient C19 errors.
+			time.Sleep(100 * time.Millisecond)
+			pos, err = g.getPosition(ctx)
+			if err != nil {
+				return 0, err
+			}
 		}
 
 		if math.Abs(float64(pos-goal)) <= 6 {
