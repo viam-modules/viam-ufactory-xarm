@@ -275,7 +275,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	if currentState[0]&errorState != 0 {
 		// we assume that if we run into an error we will need to restart the servos etc.
 		x.started.Store(-1)
-		x.gripperSetup.Store(false)
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
@@ -941,6 +940,27 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
+const gripperRetries = 3
+
+func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
+	var resp cmd
+	var err error
+	for attempt := range gripperRetries {
+		resp, err = x.send(ctx, c, true)
+		if err == nil {
+			return resp, nil
+		}
+		if attempt < gripperRetries-1 {
+			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, retrying", attempt+1, gripperRetries, err)
+			if clearErr := x.checkReadyState(ctx, false); clearErr != nil {
+				x.logger.Warnf("failed to clear error state during gripper retry: %v", clearErr)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return resp, err
+}
+
 func (x *xArm) gripperPreamble(write bool) cmd {
 	c := x.newCmd(regMap["GripperControl"])
 	c.params = append(c.params, 0x09) // host id
@@ -959,7 +979,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -973,7 +993,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -986,7 +1006,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	binary.BigEndian.PutUint32(tmpBytes, position)
 	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -999,7 +1019,7 @@ func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
 	binary.BigEndian.PutUint16(tmpBytes, speed)
 	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -1007,7 +1027,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x03, 0x03)
 	c.params = append(c.params, 0x00, 0x01)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
@@ -1025,7 +1045,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
 	c.params = append(c.params, 0x00, 0x02)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
