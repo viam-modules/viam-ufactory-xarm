@@ -275,6 +275,7 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	if currentState[0]&errorState != 0 {
 		// we assume that if we run into an error we will need to restart the servos etc.
 		x.started.Store(-1)
+		x.gripperSetup.Store(false)
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
@@ -484,6 +485,7 @@ func (x *xArm) Close(ctx context.Context) error {
 
 	x.conn = nil
 	x.closed.Store(true)
+	x.gripperSetup.Store(false)
 
 	return err
 }
@@ -926,12 +928,16 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 }
 
 func (x *xArm) setupGripper(ctx context.Context) error {
+	if x.gripperSetup.Load() {
+		return nil
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
 	if err := x.setGripperMode(ctx, false); err != nil {
 		return err
 	}
+	x.gripperSetup.Store(true)
 	return nil
 }
 

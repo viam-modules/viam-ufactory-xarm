@@ -139,8 +139,9 @@ type xArm struct {
 	moveLock sync.Mutex
 
 	// state of movement things
-	started atomic.Int32 // -1 is off, >= 0 is mode
-	tid     uint16
+	started      atomic.Int32 // -1 is off, >= 0 is mode
+	gripperSetup atomic.Bool  // true if gripper has been enabled and mode set
+	tid          uint16
 
 	name        resource.Name
 	conf        *Config
@@ -587,6 +588,7 @@ func (x *xArm) resetConnection() {
 	}
 	x.conn = nil
 	x.started.Store(-1)
+	x.gripperSetup.Store(false)
 }
 
 func (x *xArm) connect(ctx context.Context) error {
