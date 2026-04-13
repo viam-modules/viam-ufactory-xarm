@@ -955,19 +955,21 @@ func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 			return resp, nil
 		}
 		if attempt < gripperRetries-1 {
-			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, re-initializing gripper", attempt+1, gripperRetries, err)
-			// Clear the arm error state.
-			if clearErr := x.checkReadyState(ctx, false); clearErr != nil {
-				x.logger.Warnf("failed to clear error state during gripper retry: %v", clearErr)
+			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, performing e-stop recovery", attempt+1, gripperRetries, err)
+			// Replicate the manual e-stop + re-enable cycle that reliably restores
+			// gripper communication. ClearError alone doesn't reset the TGPIO Modbus
+			// interface — setMotionState(4) ("restart system") does.
+			if stopErr := x.setMotionState(ctx, 4); stopErr != nil {
+				x.logger.Warnf("e-stop during gripper recovery failed: %v", stopErr)
 			}
-			// Invalidate cached gripper state and re-enable the gripper.
-			// The xArm Python SDK does the same: on C19 it sets gripper_is_enabled=False
-			// so the next command re-runs enable + set_mode before the actual operation.
+			time.Sleep(500 * time.Millisecond)
 			x.gripperSetup.Store(false)
-			if setupErr := x.setupGripper(ctx); setupErr != nil {
-				x.logger.Warnf("failed to re-initialize gripper during retry: %v", setupErr)
+			if startErr := x.start(ctx, false); startErr != nil {
+				x.logger.Warnf("re-enable during gripper recovery failed: %v", startErr)
 			}
-			time.Sleep(250 * time.Millisecond)
+			if setupErr := x.setupGripper(ctx); setupErr != nil {
+				x.logger.Warnf("gripper re-init during recovery failed: %v", setupErr)
+			}
 		}
 	}
 	return resp, err
