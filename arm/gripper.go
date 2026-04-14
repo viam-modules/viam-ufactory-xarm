@@ -364,7 +364,7 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 	if posF, ok := cmd["set"].(float64); ok {
 		pos := int(posF)
 		_, err := g.arm.DoCommand(ctx, map[string]any{
-			"move_gripper": float64(pos),
+			moveGripperFastKey: float64(pos),
 		})
 		if err != nil {
 			return nil, err

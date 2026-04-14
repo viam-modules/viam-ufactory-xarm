@@ -11,6 +11,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -44,6 +45,7 @@ const (
 	// DoCommand keys.
 	loadKey                  = "load"
 	moveGripperKey           = "move_gripper"
+	moveGripperFastKey       = "move_gripper_fast"
 	getGripperKey            = "get_gripper"
 	gripperPositionKey       = "gripper_position"
 	setAcckey                = "set_acceleration"
@@ -141,6 +143,7 @@ type xArm struct {
 	// state of movement things
 	started      atomic.Int32 // -1 is off, >= 0 is mode
 	gripperSetup atomic.Bool  // true if gripper has been enabled and mode set
+	lastGripperCmd time.Time  // last time a gripper Modbus command was sent
 	tid          uint16
 
 	name        resource.Name
@@ -713,6 +716,19 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, fmt.Errorf("must move gripper to an int between 0 and 840 %v", val)
 		}
 		if err := x.setGripperPosition(ctx, uint32(position)); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if val, ok := cmd[moveGripperFastKey]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
+		position, ok := val.(float64)
+		if !ok || position < -10 || position > 850 {
+			return nil, fmt.Errorf("must move gripper to an int between 0 and 840 %v", val)
+		}
+		if err := x.setGripperPositionFast(ctx, uint32(position)); err != nil {
 			return nil, err
 		}
 		validCommand = true

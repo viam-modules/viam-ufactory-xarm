@@ -934,6 +934,9 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	if x.gripperSetup.Load() {
 		return nil
 	}
+	if err := x.checkReadyState(ctx, false); err != nil {
+		return err
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
@@ -1011,7 +1014,9 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	return err
 }
 
-func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
+const minGripperInterval = 100 * time.Millisecond
+
+func (x *xArm) gripperPositionCmd(position uint32) cmd {
 	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x07, 0x00)
 	c.params = append(c.params, 0x00, 0x02)
@@ -1020,7 +1025,31 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	binary.BigEndian.PutUint32(tmpBytes, position)
 	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
+	return c
+}
+
+func (x *xArm) enforceGripperInterval() {
+	if elapsed := time.Since(x.lastGripperCmd); elapsed < minGripperInterval {
+		time.Sleep(minGripperInterval - elapsed)
+	}
+}
+
+func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
+	x.enforceGripperInterval()
+	defer func() { x.lastGripperCmd = time.Now() }()
+	c := x.gripperPositionCmd(position)
 	_, err := x.gripperSend(ctx, c)
+	return err
+}
+
+// setGripperPositionFast sends a gripper position command without e-stop recovery.
+// Intended for streaming position updates (e.g. teleop) where a failed command
+// will be superseded by the next tick and an e-stop would be catastrophic.
+func (x *xArm) setGripperPositionFast(ctx context.Context, position uint32) error {
+	x.enforceGripperInterval()
+	defer func() { x.lastGripperCmd = time.Now() }()
+	c := x.gripperPositionCmd(position)
+	_, err := x.send(ctx, c, true)
 	return err
 }
 
