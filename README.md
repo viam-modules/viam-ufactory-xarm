@@ -69,7 +69,7 @@ The service receives the arm's current position prepended to the requested waypo
 
 The trajectory is sampled at the arm's configured `move_hz` frequency (default 100 Hz).
 
-#### Connecting using macOS
+### Connecting using macOS
 The following steps can be followed when running viam-server on your mac.
 1. Connect an ethernet cable between the Arm's control box and a USB-C hub/adapter connected to your mac.
 1. Open "System Setting" -> "Network"
@@ -83,21 +83,34 @@ The following steps can be followed when running viam-server on your mac.
 1. Click OK to save the changes.
 1. Your mac should now be able to connect to the xArm, and you can verify with `ping <host>` to the arm's IP address. Note that the IP address setup in your mac's networking settings is not the ping address and should not be used in Viam configuration. It was only set to establish a network to talk to the arm on the IP address that is specified on the control box.
 
-#### Connecting using a Raspberry Pi
-The following steps may need to be followed when running viam-server on your pi.
+### Connecting using Linux
 
+When `viam-server` runs on Linux (Raspberry Pi, Ubuntu, Debian, Fedora/RHEL), the host needs a static IP on the arm's subnet (`192.168.1.0/24` by factory default) that persists across reboots. A helper script in this repo handles the full setup:
 
-1. Connect an Ethernet cable from the xArm's control box to the Pi.
-2. Open a terminal on the Pi.
-3. Assign the Pi an IP address on the same subnet as the arm. For example, if the xArm’s IP is `192.168.1.2`, you can use:
 ```bash
-sudo ip addr add 192.168.1.10/24 dev eth0
-sudo ip link set eth0 up
+curl -fsSL https://raw.githubusercontent.com/viam-modules/viam-ufactory-xarm/main/tools/setup-arm-link.sh \
+  | sudo bash
 ```
-4. Verify connectivity by pinging the xArm:
+
+With no arguments the script auto-detects the host's ethernet interface and assigns `192.168.1.10/24`. Override with flags if needed:
+
 ```bash
-ping 192.168.1.2
+curl -fsSL https://raw.githubusercontent.com/viam-modules/viam-ufactory-xarm/main/tools/setup-arm-link.sh \
+  | sudo bash -s -- --iface eth0 --host-ip 192.168.1.20
 ```
+
+Add `--dry-run` to preview without applying. The script supports NetworkManager (Ubuntu Desktop, Raspberry Pi OS Bookworm+, Fedora/RHEL, Debian Desktop) and netplan (Ubuntu Server), and binds the resulting profile to the NIC's MAC address so it survives if the interface is ever renamed.
+
+Verify reachability (replace with the IP on your control box sticker):
+
+```bash
+ping -c 3 192.168.1.203
+```
+
+To remove the profile later:
+
+- NetworkManager: `sudo nmcli connection delete xarm-link`
+- netplan: `sudo rm /etc/netplan/99-xarm-link.yaml && sudo netplan apply`
 
 ### Using within a Frame System
 
