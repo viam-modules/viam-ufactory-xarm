@@ -12,7 +12,7 @@ require (
 	github.com/rhysd/actionlint v1.7.8
 	go.uber.org/multierr v1.11.0
 	go.viam.com/api v0.1.543
-	go.viam.com/rdk v0.124.0
+	go.viam.com/rdk v0.124.1-0.20260430211244-63427d9d5675
 	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.4.19
 	gorgonia.org/tensor v0.9.24
@@ -242,5 +242,3 @@ require (
 	gorgonia.org/vecf64 v0.9.0 // indirect
 	nhooyr.io/websocket v1.8.7 // indirect
 )
-
-replace go.viam.com/rdk => github.com/biotinker/robotcore v0.0.0-20260430205140-a90999350b91
