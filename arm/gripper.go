@@ -2,14 +2,13 @@ package arm
 
 import (
 	"context"
-	"errors"
+	_ "embed"
 	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/logging"
@@ -17,6 +16,21 @@ import (
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/utils"
+)
+
+//go:embed gripper_kinematics.json
+var gripperModelJSON []byte
+
+//go:embed gripper_lite_kinematics.json
+var gripperLiteModelJSON []byte
+
+// xArm gripper device positions: -10 fully closed (paddles touching), 850 fully open (paddles 86mm apart).
+// The kinematic joint travels 0..gripperJointTravelMM mm and represents per-paddle displacement.
+const (
+	gripperPositionMin       = -10
+	gripperPositionMax       = 850
+	gripperJointTravelMM     = 43
+	gripperLiteJointTravelMM = 16
 )
 
 const (
@@ -41,6 +55,10 @@ type GripperConfig struct {
 	Arm            string
 	VacuumLengthMM float64 `json:"vacuum_length_mm"`
 	GripperSpeed   int     `json:"gripper_speed,omitempty"`
+	// KinematicsFile, if set, overrides the default kinematics. Useful for users who
+	// have replaced the paddles or otherwise modified the gripper geometry.
+	// Path must end in .json or .urdf.
+	KinematicsFile string `json:"kinematics_file,omitempty"`
 }
 
 // Validate validates the config.
@@ -69,13 +87,24 @@ func init() {
 		})
 }
 
+// loadGripperModel loads the default kinematics or the user-provided override.
+func loadGripperModel(modelName, customPath string, defaultJSON []byte) (referenceframe.Model, error) {
+	if customPath != "" {
+		return referenceframe.KinematicModelFromFile(customPath, modelName)
+	}
+	return referenceframe.UnmarshalModelJSON(defaultJSON, modelName)
+}
+
 type myGripperLite struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
+	mf   referenceframe.Model
 
 	arm      arm.Arm
 	isMoving atomic.Bool
+	// isOpen tracks the last commanded paddle state, used to report kinematic inputs.
+	isOpen atomic.Bool
 
 	logger logging.Logger
 }
@@ -86,11 +115,18 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
+	mf, err := loadGripperModel(ModelNameGripperLite, newConf.KinematicsFile, gripperLiteModelJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gripper_lite kinematics: %w", err)
+	}
+
 	g := &myGripperLite{
 		name:     config.ResourceName(),
+		mf:       mf,
 		logger:   logger,
 		isMoving: atomic.Bool{},
 	}
+	g.isOpen.Store(true)
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
@@ -108,6 +144,7 @@ func (g *myGripperLite) Grab(ctx context.Context, extra map[string]any) (bool, e
 	}); err != nil {
 		return false, err
 	}
+	g.isOpen.Store(false)
 	return true, nil
 }
 
@@ -117,6 +154,9 @@ func (g *myGripperLite) Open(ctx context.Context, extra map[string]any) error {
 	_, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionOpen,
 	})
+	if err == nil {
+		g.isOpen.Store(true)
+	}
 	return err
 }
 
@@ -156,6 +196,10 @@ func (g *myGripperLite) Name() resource.Name {
 	return g.name
 }
 
+func (g *myGripperLite) Status(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
 func (g *myGripperLite) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }
@@ -177,35 +221,49 @@ func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 }
 
 func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	inputs, err := g.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
+	gif, err := g.mf.Geometries(inputs)
 	if err != nil {
 		return nil, err
 	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return gif.Geometries(), nil
 }
 
 func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return nil, errors.ErrUnsupported
+	return g.mf, nil
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	return nil, errors.ErrUnsupported
+	dof := len(g.mf.DoF())
+	inputs := make([]referenceframe.Input, dof)
+	if dof > 0 && g.isOpen.Load() {
+		inputs[0] = gripperLiteJointTravelMM
+	}
+	return inputs, nil
 }
 
 func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	if len(g.mf.DoF()) == 0 {
+		return nil
+	}
+	for _, step := range inputs {
+		if len(step) == 0 {
+			continue
+		}
+		if step[0] >= gripperLiteJointTravelMM/2 {
+			if err := g.Open(ctx, nil); err != nil {
+				return err
+			}
+		} else {
+			if _, err := g.Grab(ctx, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type myGripper struct {
@@ -228,9 +286,14 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	mf, err := loadGripperModel(ModelNameGripper, newConf.KinematicsFile, gripperModelJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load gripper kinematics: %w", err)
+	}
+
 	g := &myGripper{
 		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
+		mf:     mf,
 		logger: logger,
 	}
 
@@ -344,6 +407,10 @@ func (g *myGripper) Name() resource.Name {
 	return g.name
 }
 
+func (g *myGripper) Status(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
 func (g *myGripper) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }
@@ -387,48 +454,69 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	inputs, err := g.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
-
-	if false {
-		// until geometries aren't cacheed or model frame works differently can't do this
-		pos, err := g.getPosition(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		if pos < 20 { // gripper is closed
-			clawSize.Y = 110
-			clawSize.Z = 130
-		}
-	}
-
-	g.logger.Debugf("clawSize: %v", clawSize)
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}), clawSize, "claws")
+	gif, err := g.mf.Geometries(inputs)
 	if err != nil {
 		return nil, err
 	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return gif.Geometries(), nil
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, fmt.Errorf("temp hack because of issues")
+	return g.mf, nil
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	return nil, errors.ErrUnsupported
+	dof := len(g.mf.DoF())
+	inputs := make([]referenceframe.Input, dof)
+	if dof == 0 {
+		return inputs, nil
+	}
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inputs[0] = gripperPositionToJointMM(pos)
+	return inputs, nil
 }
 
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	if len(g.mf.DoF()) == 0 {
+		return nil
+	}
+	for _, step := range inputs {
+		if len(step) == 0 {
+			continue
+		}
+		pos := jointMMToGripperPosition(step[0])
+		if _, err := g.goToPosition(ctx, pos); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// gripperPositionToJointMM maps the device position (gripperPositionMin..gripperPositionMax)
+// to the 0..gripperJointTravelMM prismatic joint range used by the kinematic model.
+func gripperPositionToJointMM(pos int) float64 {
+	if pos < gripperPositionMin {
+		pos = gripperPositionMin
+	}
+	if pos > gripperPositionMax {
+		pos = gripperPositionMax
+	}
+	return float64(pos-gripperPositionMin) * gripperJointTravelMM / float64(gripperPositionMax-gripperPositionMin)
+}
+
+func jointMMToGripperPosition(mm float64) int {
+	if mm < 0 {
+		mm = 0
+	}
+	if mm > gripperJointTravelMM {
+		mm = gripperJointTravelMM
+	}
+	return int(math.Round(mm*float64(gripperPositionMax-gripperPositionMin)/gripperJointTravelMM)) + gripperPositionMin
 }

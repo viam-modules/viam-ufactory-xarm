@@ -109,6 +109,10 @@ func (g *myVacuumGripper) Name() resource.Name {
 	return g.name
 }
 
+func (g *myVacuumGripper) Status(ctx context.Context) (map[string]interface{}, error) {
+	return map[string]interface{}{}, nil
+}
+
 func (g *myVacuumGripper) Close(ctx context.Context) error {
 	return g.Stop(ctx, nil)
 }

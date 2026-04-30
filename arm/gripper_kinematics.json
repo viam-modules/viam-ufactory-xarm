@@ -1,0 +1,66 @@
+{
+    "name": "xarm-gripper",
+    "kinematic_param_type": "SVA",
+    "output_frames": ["tcp"],
+    "links": [
+        {
+            "id": "case-gripper",
+            "parent": "world",
+            "translation": {"x": 0, "y": 0, "z": 0},
+            "geometry": {
+                "x": 50,
+                "y": 100,
+                "z": 110,
+                "translation": {"x": 0, "y": 0, "z": 50}
+            }
+        },
+        {
+            "id": "tcp",
+            "parent": "case-gripper",
+            "translation": {"x": 0, "y": 0, "z": 155}
+        },
+        {
+            "id": "left-paddle",
+            "parent": "left_joint",
+            "translation": {"x": 0, "y": 0, "z": 0},
+            "geometry": {
+                "x": 40,
+                "y": 20,
+                "z": 80,
+                "translation": {"x": 0, "y": 10.1, "z": 135}
+            }
+        },
+        {
+            "id": "right-paddle",
+            "parent": "right_joint",
+            "translation": {"x": 0, "y": 0, "z": 0},
+            "geometry": {
+                "x": 40,
+                "y": 20,
+                "z": 80,
+                "translation": {"x": 0, "y": -10.1, "z": 135}
+            }
+        }
+    ],
+    "joints": [
+        {
+            "id": "left_joint",
+            "type": "prismatic",
+            "parent": "case-gripper",
+            "axis": {"x": 0, "y": 1, "z": 0},
+            "min": 0,
+            "max": 43
+        },
+        {
+            "id": "right_joint",
+            "type": "prismatic",
+            "parent": "case-gripper",
+            "axis": {"x": 0, "y": -1, "z": 0},
+            "mimic": {
+                "joint": "left_joint",
+                "multiplier": 1,
+                "offset": 0
+            }
+        }
+    ]
+}
