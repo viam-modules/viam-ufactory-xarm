@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync/atomic"
 
 	"github.com/golang/geo/r3"
@@ -21,7 +20,6 @@ var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
 // VacuumGripperModelLite is the ufactory vacuum gripper commonly attached to the lite6.
 var VacuumGripperModelLite = family.WithModel("vacuum_gripper_lite")
-var models = []resource.Model{VacuumGripperModel, VacuumGripperModelLite}
 
 var caseBoxSize = r3.Vector{X: 70, Y: 93, Z: 117}
 var liteCaseBoxSize = r3.Vector{X: 51, Y: 51, Z: 54}
@@ -45,10 +43,6 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	newConf, err := resource.NativeConfig[*GripperConfig](config)
 	if err != nil {
 		return nil, err
-	}
-
-	if !slices.Contains(models, config.Model) {
-		return nil, fmt.Errorf("unsupported model: %s", config.Model.String())
 	}
 
 	g := &myVacuumGripper{

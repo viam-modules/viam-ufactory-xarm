@@ -328,3 +328,12 @@ The vacuum gripper only works if it has a wired connection to the not, not a con
 }
 ```
 
+## vacuum gripper lite
+The vacuum gripper commonly attached to the lite6.
+```
+{
+  "arm": "arm",
+  "vacuum_length_mm" : 48
+}
+```
+
