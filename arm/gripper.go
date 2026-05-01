@@ -3,12 +3,14 @@ package arm
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/logging"
@@ -21,16 +23,12 @@ import (
 //go:embed gripper_kinematics.json
 var gripperModelJSON []byte
 
-//go:embed gripper_lite_kinematics.json
-var gripperLiteModelJSON []byte
-
 // xArm gripper device positions: -10 fully closed (paddles touching), 850 fully open (paddles 86mm apart).
 // The kinematic joint travels 0..gripperJointTravelMM mm and represents per-paddle displacement.
 const (
-	gripperPositionMin       = -10
-	gripperPositionMax       = 850
-	gripperJointTravelMM     = 43
-	gripperLiteJointTravelMM = 16
+	gripperPositionMin   = -10
+	gripperPositionMax   = 850
+	gripperJointTravelMM = 43
 )
 
 const (
@@ -99,12 +97,9 @@ type myGripperLite struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
-	mf   referenceframe.Model
 
 	arm      arm.Arm
 	isMoving atomic.Bool
-	// isOpen tracks the last commanded paddle state, used to report kinematic inputs.
-	isOpen atomic.Bool
 
 	logger logging.Logger
 }
@@ -115,18 +110,11 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	mf, err := loadGripperModel(ModelNameGripperLite, newConf.KinematicsFile, gripperLiteModelJSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load gripper_lite kinematics: %w", err)
-	}
-
 	g := &myGripperLite{
 		name:     config.ResourceName(),
-		mf:       mf,
 		logger:   logger,
 		isMoving: atomic.Bool{},
 	}
-	g.isOpen.Store(true)
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
@@ -144,7 +132,6 @@ func (g *myGripperLite) Grab(ctx context.Context, extra map[string]any) (bool, e
 	}); err != nil {
 		return false, err
 	}
-	g.isOpen.Store(false)
 	return true, nil
 }
 
@@ -154,9 +141,6 @@ func (g *myGripperLite) Open(ctx context.Context, extra map[string]any) error {
 	_, err := g.arm.DoCommand(ctx, map[string]any{
 		gripperLiteActionKey: gripperLiteActionOpen,
 	})
-	if err == nil {
-		g.isOpen.Store(true)
-	}
 	return err
 }
 
@@ -221,49 +205,35 @@ func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 }
 
 func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	inputs, err := g.CurrentInputs(ctx)
+	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
+	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
 	if err != nil {
 		return nil, err
 	}
-	gif, err := g.mf.Geometries(inputs)
+
+	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
+
+	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
 	if err != nil {
 		return nil, err
 	}
-	return gif.Geometries(), nil
+
+	return []spatialmath.Geometry{
+		caseBox,
+		claws,
+	}, nil
 }
 
 func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, nil
+	return nil, errors.ErrUnsupported
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	dof := len(g.mf.DoF())
-	inputs := make([]referenceframe.Input, dof)
-	if dof > 0 && g.isOpen.Load() {
-		inputs[0] = gripperLiteJointTravelMM
-	}
-	return inputs, nil
+	return nil, errors.ErrUnsupported
 }
 
 func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	if len(g.mf.DoF()) == 0 {
-		return nil
-	}
-	for _, step := range inputs {
-		if len(step) == 0 {
-			continue
-		}
-		if step[0] >= gripperLiteJointTravelMM/2 {
-			if err := g.Open(ctx, nil); err != nil {
-				return err
-			}
-		} else {
-			if _, err := g.Grab(ctx, nil); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return errors.ErrUnsupported
 }
 
 type myGripper struct {
