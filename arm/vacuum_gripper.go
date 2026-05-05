@@ -3,6 +3,7 @@ package arm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/golang/geo/r3"
@@ -17,12 +18,22 @@ import (
 // VacuumGripperModel model for the ufactory vacuum gripper.
 var VacuumGripperModel = family.WithModel("vacuum_gripper")
 
+// VacuumGripperModelLite is the ufactory vacuum gripper commonly attached to the lite6.
+var VacuumGripperModelLite = family.WithModel("vacuum_gripper_lite")
+
 var caseBoxSize = r3.Vector{X: 70, Y: 93, Z: 117}
+var liteCaseBoxSize = r3.Vector{X: 51, Y: 51, Z: 54}
 
 func init() {
 	resource.RegisterComponent(
 		gripper.API,
 		VacuumGripperModel,
+		resource.Registration[gripper.Gripper, *GripperConfig]{
+			Constructor: newVacuumGripper,
+		})
+	resource.RegisterComponent(
+		gripper.API,
+		VacuumGripperModelLite,
 		resource.Registration[gripper.Gripper, *GripperConfig]{
 			Constructor: newVacuumGripper,
 		})
@@ -38,6 +49,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		name:   config.ResourceName(),
 		conf:   newConf,
 		logger: logger,
+		model:  config.Model,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -51,8 +63,9 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
-	name resource.Name
-	conf *GripperConfig
+	name  resource.Name
+	conf  *GripperConfig
+	model resource.Model
 
 	arm arm.Arm
 
@@ -127,17 +140,34 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
-		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
-		caseBoxSize,
-		"vacuum-gripper-box")
-	if err != nil {
-		return nil, err
+	var (
+		caseBox spatialmath.Geometry
+		err     error
+	)
+	switch g.model {
+	case VacuumGripperModel:
+		caseBox, err = spatialmath.NewBox(spatialmath.NewPoseFromPoint(
+			r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
+			caseBoxSize,
+			"vacuum-gripper-box")
+		if err != nil {
+			return nil, err
+		}
+	case VacuumGripperModelLite:
+		caseBox, err = spatialmath.NewBox(spatialmath.NewPoseFromPoint(
+			r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + liteCaseBoxSize.Z/2)}),
+			liteCaseBoxSize,
+			"vacuum-gripper-box")
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported model %s", g.model)
 	}
 
 	vacuum, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
 		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM / 2)}),
-		r3.Vector{5, 5, max(5, g.conf.VacuumLengthMM)},
+		r3.Vector{X: 5, Y: 5, Z: max(5, g.conf.VacuumLengthMM)},
 		"vacuum-gripper-tube")
 	if err != nil {
 		return nil, err

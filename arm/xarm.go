@@ -725,9 +725,6 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	}
 
 	if _, ok := cmd[loadKey]; ok {
-		if err := x.setupGripper(ctx); err != nil {
-			return nil, err
-		}
 		loadInformation, err := x.getLoad(ctx)
 		if err != nil {
 			return nil, err
