@@ -208,6 +208,10 @@ func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referencefra
 	return errors.ErrUnsupported
 }
 
+func (g *myGripperLite) Status(_ context.Context) (map[string]any, error) {
+	return map[string]any{}, nil
+}
+
 type myGripper struct {
 	resource.AlwaysRebuild
 
@@ -431,4 +435,8 @@ func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, 
 
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
 	return errors.ErrUnsupported
+}
+
+func (g *myGripper) Status(_ context.Context) (map[string]any, error) {
+	return map[string]any{}, nil
 }
