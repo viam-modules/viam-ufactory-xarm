@@ -229,6 +229,23 @@ resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{
 // resp["gripper_speed"] contains the speed
 ```
 
+To set the gripper force (G2 only, range 1-100):
+
+```go
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "set_gripper_force": 50,
+})
+```
+
+To get the current gripper force (G2 only):
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "get_gripper_force": true,
+})
+// resp["gripper_force"] contains the force
+```
+
 ### Manual Mode (Teaching Mode)
 
 You can put the arm into manual mode, which allows you to physically move the arm by hand. This is useful for teaching positions or manually positioning the arm for maintenance/storage.
@@ -295,6 +312,8 @@ The proxy port defaults to `18333`. If that port is unavailable on the host, set
 | `arm`            | string | **Required** | The name of the arm component this gripper is attached to.         |
 | `gripper_speed`  | int    | Optional     | Default gripper speed (1-5000). Applied on startup. If omitted, the gripper uses its firmware default. |
 
+Firmware default note: legacy G1 firmware default speed is `1500 r/min`. To avoid firmware/version differences, prefer setting `gripper_speed` explicitly.
+
 ### DoCommand
 
 ```go
@@ -309,6 +328,40 @@ resp, err := gripperComponent.DoCommand(context.Background(), map[string]interfa
 // Set/get gripper speed (proxied to arm DoCommand)
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+```
+
+## gripper g2
+
+```jsonc
+{
+   "arm": "arm",            // required: name of the arm component
+   "gripper_speed": 2000,   // optional: default speed (1-5000)
+   "gripper_force": 50      // optional: default force (1-100)
+}
+```
+
+| Name             | Type   | Inclusion    | Description                                                        |
+|------------------|--------|--------------|--------------------------------------------------------------------|
+| `arm`            | string | **Required** | The name of the arm component this gripper is attached to.         |
+| `gripper_speed`  | int    | Optional     | Default gripper speed (1-5000). Applied on startup.                |
+| `gripper_force`  | int    | Optional     | Default gripper force (1-100). Applied on startup.                 |
+
+Firmware default note: G2 firmware default speed is `2000 r/min`. Prefer setting `gripper_speed` and `gripper_force` explicitly.
+
+### DoCommand
+
+```go
+// Get/move position (same as G1)
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get": true})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set": 500.0})
+
+// Set/get speed
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+
+// Set/get force
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_force": 50})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_force": true})
 ```
 
 ## gripper lite
