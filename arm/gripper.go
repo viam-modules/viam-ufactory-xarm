@@ -313,7 +313,9 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 			return pos, nil
 		}
 
-		if old >= 0 && math.Abs(float64(pos-old)) <= 2 {
+		// if the gripper has stopped moving, return
+		// might be grabbing something
+		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
 			return pos, nil
 		}
 
