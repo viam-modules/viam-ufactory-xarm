@@ -302,7 +302,7 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	start := time.Now()
 
 	for {
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(30 * time.Millisecond)
 
 		pos, err := g.getPosition(ctx)
 		if err != nil {
