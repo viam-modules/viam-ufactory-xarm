@@ -424,6 +424,17 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		x.logger.Warnf("Could not fully clear ready state: %v", err)
 	}
 
+	// It appears that the xArm controller cannot transition from mode 1 (servoJ)
+	// to mode 2 (teach mode)
+	// As a work around we transition the controller to mode 0 (position) then
+	// to teach mode preventing having to call enterManualMode twice
+	if err := x.setMotionMode(ctx, 0); err != nil {
+		return fmt.Errorf("failed to set position mode before manual: %w", err)
+	}
+	if err := x.setMotionState(ctx, 0); err != nil {
+		return fmt.Errorf("failed to activate position mode before manual: %w", err)
+	}
+
 	// Set motion mode to 2 (manual/teaching mode)
 	// The firmware keeps servos active with only gravity-compensating torque,
 	// so the arm holds position but can be freely moved by hand.
