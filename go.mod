@@ -12,7 +12,7 @@ require (
 	github.com/rhysd/actionlint v1.7.8
 	go.uber.org/multierr v1.11.0
 	go.viam.com/api v0.1.545
-	go.viam.com/rdk v0.125.1-0.20260505144342-63bc5e546736
+	go.viam.com/rdk v0.126.0
 	go.viam.com/test v1.2.4
 	go.viam.com/utils v0.4.19
 	gorgonia.org/tensor v0.9.24
