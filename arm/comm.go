@@ -957,12 +957,14 @@ func (x *xArm) gripperPreamble(write bool) cmd {
 	return c
 }
 
-// gripperSend mirrors x.send but routes through gripperConn.
-func (x *xArm) gripperSend(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+// gripperSend mirrors x.send but routes through gripperConn. checkError is
+// always true on this path — gripper Modbus failures should surface, never
+// be swallowed silently.
+func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
-	return x.gripperConn.send(ctx, c, checkError)
+	return x.gripperConn.send(ctx, c, true)
 }
 
 func (x *xArm) enableGripper(ctx context.Context) error {
@@ -971,7 +973,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.gripperSend(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -985,7 +987,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.gripperSend(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -998,7 +1000,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	binary.BigEndian.PutUint32(tmpBytes, position)
 	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.gripperSend(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -1011,7 +1013,7 @@ func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
 	binary.BigEndian.PutUint16(tmpBytes, speed)
 	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.gripperSend(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -1019,7 +1021,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x03, 0x03)
 	c.params = append(c.params, 0x00, 0x01)
-	res, err := x.gripperSend(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
@@ -1037,7 +1039,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
 	c.params = append(c.params, 0x00, 0x02)
-	res, err := x.gripperSend(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
