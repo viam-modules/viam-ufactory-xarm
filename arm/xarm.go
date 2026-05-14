@@ -417,6 +417,8 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
+	warnIfArmSubnetUnreachable(logger, newConf.Host)
+
 	err = x.connect(ctx)
 	if err != nil {
 		return nil, err
