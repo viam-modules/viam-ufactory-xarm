@@ -839,3 +839,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 func (x *xArm) Name() resource.Name {
 	return x.name
 }
+
+func (x *xArm) Status(_ context.Context) (map[string]any, error) {
+	return map[string]any{}, nil
+}

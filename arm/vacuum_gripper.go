@@ -189,3 +189,7 @@ func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.I
 func (g *myVacuumGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
 	return errors.ErrUnsupported
 }
+
+func (g *myVacuumGripper) Status(_ context.Context) (map[string]any, error) {
+	return map[string]any{}, nil
+}
