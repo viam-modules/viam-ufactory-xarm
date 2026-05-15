@@ -277,7 +277,7 @@ func (g *myGripper) IsHoldingSomething(
 		return gripper.HoldingStatus{}, err
 	}
 
-	isHoldingSomething := !((pos <= fullyClosedThreshold) || (pos >= fullyOpenThreshold))
+	isHoldingSomething := pos > fullyClosedThreshold && pos < fullyOpenThreshold
 
 	return gripper.HoldingStatus{
 		IsHoldingSomething: isHoldingSomething,

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"sync"
 	"time"
 
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/ml"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/services/motion"
@@ -81,17 +84,65 @@ func (c *cmd) bytes() []byte {
 	return bin
 }
 
-func (x *xArm) newCmd(reg byte) cmd {
-	x.tid++
-	return cmd{tid: x.tid, prot: 2, reg: reg}
+// modbusConn encapsulates a single TCP connection to the xArm controller.
+// Each instance owns its own lock and Transaction ID counter so that distinct
+// instances (e.g. a separate gripper-bus connection on port 503) can run truly
+// in parallel against the controller without contending on a shared mutex.
+type modbusConn struct {
+	addr    string // host:port
+	logger  logging.Logger
+	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.started)
+
+	lock sync.Mutex
+	conn net.Conn
+	tid  uint16
 }
 
-func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	if x.closed.Load() {
-		return cmd{}, errors.New("closed")
-	}
+func newModbusConn(addr string, logger logging.Logger, onReset func()) *modbusConn {
+	return &modbusConn{addr: addr, logger: logger, onReset: onReset}
+}
 
-	resp, err := x.writeBytes(ctx, c)
+func (m *modbusConn) connect(ctx context.Context) error {
+	m.resetConnection()
+
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "tcp", m.addr)
+	if err != nil {
+		return err
+	}
+	m.conn = c
+	return nil
+}
+
+// close shuts down the socket. Safe to call multiple times.
+func (m *modbusConn) close() error {
+	if m.conn == nil {
+		return nil
+	}
+	err := m.conn.Close()
+	m.conn = nil
+	return err
+}
+
+func (m *modbusConn) resetConnection() {
+	if m.conn != nil {
+		if err := m.conn.Close(); err != nil {
+			m.logger.Infof("error closing old socket %s: %v", m.addr, err)
+		}
+		m.conn = nil
+	}
+	if m.onReset != nil {
+		m.onReset()
+	}
+}
+
+func (m *modbusConn) newCmd(reg byte) cmd {
+	m.tid++
+	return cmd{tid: m.tid, prot: 2, reg: reg}
+}
+
+func (m *modbusConn) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+	resp, err := m.writeBytes(ctx, c)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -102,7 +153,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		// the 2nd and 3rd MSB in state byte indicate if there
 		// is an error or warning respectively.
 		if state&(errorState|warningState) != 0 {
-			params, err := x.getErrorParams(ctx)
+			params, err := m.getErrorParams(ctx)
 			if err != nil {
 				return cmd{}, err
 			}
@@ -123,36 +174,34 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	return resp, err
 }
 
-func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
+func (m *modbusConn) writeBytes(ctx context.Context, c cmd) (cmd, error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 
-	if x.conn == nil { // THIS HAS TO BE DONE INSIDE THE LOCK
-		err := x.connect(ctx)
-		if err != nil {
-			x.resetConnection()
+	if m.conn == nil { // THIS HAS TO BE DONE INSIDE THE LOCK
+		if err := m.connect(ctx); err != nil {
+			m.resetConnection()
 			return cmd{}, err
 		}
 	}
 
 	b := c.bytes()
 	// add deadline so we aren't waiting forever
-	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		x.resetConnection()
+	if err := m.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		m.resetConnection()
 		return cmd{}, err
 	}
-	_, err := x.conn.Write(b)
-	if err != nil {
-		x.resetConnection()
+	if _, err := m.conn.Write(b); err != nil {
+		m.resetConnection()
 		return cmd{}, err
 	}
-	return x.responseInLock(ctx)
+	return m.responseInLock(ctx)
 }
 
-func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
-	buf, err := utils.ReadBytes(ctx, x.conn, 7)
+func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
+	buf, err := utils.ReadBytes(ctx, m.conn, 7)
 	if err != nil {
-		x.resetConnection()
+		m.resetConnection()
 		return cmd{}, err
 	}
 	c := cmd{}
@@ -160,12 +209,53 @@ func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
+	c.params, err = utils.ReadBytes(ctx, m.conn, int(length-1))
 	if err != nil {
-		x.resetConnection()
+		m.resetConnection()
 		return cmd{}, err
 	}
 	return c, err
+}
+
+// getErrorParams queries the GetError register on this connection. Used by
+// send() when the response state byte indicates a fault. Lives on modbusConn
+// because the error-clear sequence must run on the same socket as the failed
+// command.
+func (m *modbusConn) getErrorParams(ctx context.Context) ([]byte, error) {
+	c := m.newCmd(regMap["GetError"])
+	resp, err := m.writeBytes(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.params) < 3 {
+		return nil, errors.New("bad arm error query response")
+	}
+	return resp.params, nil
+}
+
+// Thin xArm-level wrappers that route to the command connection (port 502)
+// by default. Most existing callers stay unchanged. Gripper-bus helpers
+// (those using GripperControl/RS485_RTU) call x.gripperConn.send directly via
+// gripperPreamble so they pick up the port 503 connection when it's
+// available.
+
+func (x *xArm) newCmd(reg byte) cmd {
+	return x.cmdConn.newCmd(reg)
+}
+
+func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+	if x.closed.Load() {
+		return cmd{}, errors.New("closed")
+	}
+	return x.cmdConn.send(ctx, c, checkError)
+}
+
+func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
+	return x.cmdConn.getErrorParams(ctx)
+}
+
+func (x *xArm) connect(ctx context.Context) error {
+	return x.cmdConn.connect(ctx)
 }
 
 // checkServoErrors will query the individual servos for any servo-specific
@@ -244,20 +334,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
 	}
 	return nil
-}
-
-func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
-	c := x.newCmd(regMap["GetError"])
-	resp, err := x.writeBytes(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(resp.params) < 3 {
-		return nil, errors.New("bad arm error query response")
-	}
-
-	return resp.params, nil
 }
 
 // setMotionState sets the motion state of the arm.
@@ -395,21 +471,23 @@ func (x *xArm) Close(ctx context.Context) error {
 		x.stopProxy()
 	}
 
-	if x.conn == nil {
+	if x.cmdConn == nil || x.cmdConn.conn == nil {
 		x.closed.Store(true)
 		return nil
 	}
 
-	err := multierr.Combine(
-		x.setMotionState(ctx, 3),
-		x.conn.Close(),
-	)
+	stopErr := x.setMotionState(ctx, 3)
+	closeErr := x.cmdConn.close()
+	var gripperCloseErr error
+	if x.gripperConn != nil && x.gripperConn != x.cmdConn {
+		gripperCloseErr = x.gripperConn.close()
+	}
+	err := multierr.Combine(stopErr, closeErr, gripperCloseErr)
 
 	if err != nil {
 		x.logger.Warnf("closing connection failed: %v", err)
 	}
 
-	x.conn = nil
 	x.closed.Store(true)
 
 	return err
@@ -862,8 +940,12 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
+// gripperPreamble routes through gripperConn so that gripper-bus traffic
+// uses the dedicated port-503 socket when available. If port 503 wasn't
+// reachable at boot, gripperConn aliases cmdConn and behavior collapses to
+// the shared-socket case.
 func (x *xArm) gripperPreamble(write bool) cmd {
-	c := x.newCmd(regMap["GripperControl"])
+	c := x.gripperConn.newCmd(regMap["GripperControl"])
 	c.params = append(c.params, 0x09) // host id
 	c.params = append(c.params, 0x08) // gripper id
 	if write {
@@ -874,13 +956,23 @@ func (x *xArm) gripperPreamble(write bool) cmd {
 	return c
 }
 
+// gripperSend mirrors x.send but routes through gripperConn. checkError is
+// always true on this path — gripper Modbus failures should surface, never
+// be swallowed silently.
+func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
+	if x.closed.Load() {
+		return cmd{}, errors.New("closed")
+	}
+	return x.gripperConn.send(ctx, c, true)
+}
+
 func (x *xArm) enableGripper(ctx context.Context) error {
 	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x00)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -894,7 +986,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -907,7 +999,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	binary.BigEndian.PutUint32(tmpBytes, position)
 	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -920,7 +1012,7 @@ func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
 	binary.BigEndian.PutUint16(tmpBytes, speed)
 	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -928,7 +1020,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x03, 0x03)
 	c.params = append(c.params, 0x00, 0x01)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
@@ -946,7 +1038,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
 	c.params = append(c.params, 0x00, 0x02)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
