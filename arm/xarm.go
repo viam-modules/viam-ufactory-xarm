@@ -30,11 +30,11 @@ const (
 	minSpeed = 3.    // degrees per second
 	maxAccel = 1145. // degrees per second per second
 
-	defaultSpeed  = maxSpeed / 3 // degrees per second
-	defaultAccel  = maxAccel / 3 // degrees per second per second
+	defaultSpeed       = maxSpeed / 3 // degrees per second
+	defaultAccel       = maxAccel / 3 // degrees per second per second
 	defaultPort        = 502
 	defaultGripperPort = 503
-	defaultMoveHz = 100. // Don't change this
+	defaultMoveHz      = 100. // Don't change this
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
@@ -593,8 +593,6 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOpti
 
 	return o
 }
-
-// resetConnection and connect are thin wrappers on x.cmdConn; see arm/comm.go.
 
 func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")

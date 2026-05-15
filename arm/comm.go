@@ -336,7 +336,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	return nil
 }
 
-
 // setMotionState sets the motion state of the arm.
 // Useful states:
 // 0: Servo motion mode
