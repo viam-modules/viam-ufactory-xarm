@@ -1027,11 +1027,42 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 
 	x.logger.Debugf("getGripperSpeed: %v %v", res, res.params)
 
-	if len(res.params) != 7 {
-		return 0, fmt.Errorf("unexpected length for getGripperSpeed response: %d %v", len(res.params), res.params)
+	return parseGripperUint16Response(res.params, "getGripperSpeed")
+}
+
+func (x *xArm) setGripperForce(ctx context.Context, force uint16) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x05, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	c.params = append(c.params, 0x02)
+	tmpBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(tmpBytes, force)
+	x.logger.Debugf("setGripperForce bytes: %v", tmpBytes)
+	c.params = append(c.params, tmpBytes...)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+func (x *xArm) getGripperForce(ctx context.Context) (uint16, error) {
+	c := x.gripperPreamble(false)
+	c.params = append(c.params, 0x05, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	res, err := x.send(ctx, c, true)
+	if err != nil {
+		return 0, err
 	}
 
-	return binary.BigEndian.Uint16(res.params[5:]), nil
+	x.logger.Debugf("getGripperForce: %v %v", res, res.params)
+
+	return parseGripperUint16Response(res.params, "getGripperForce")
+}
+
+func parseGripperUint16Response(params []byte, command string) (uint16, error) {
+	if len(params) != 7 {
+		return 0, fmt.Errorf("unexpected length for %s response: %d %v", command, len(params), params)
+	}
+
+	return binary.BigEndian.Uint16(params[5:]), nil
 }
 
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {

@@ -59,6 +59,9 @@ const (
 	setGripperSpeedKey       = "set_gripper_speed"
 	getGripperSpeedKey       = "get_gripper_speed"
 	gripperSpeedKey          = "gripper_speed"
+	setGripperForceKey       = "set_gripper_force"
+	getGripperForceKey       = "get_gripper_force"
+	gripperForceKey          = "gripper_force"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 
@@ -688,6 +691,36 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[gripperSpeedKey] = float64(speed)
+		validCommand = true
+	}
+
+	if val, ok := cmd[setGripperForceKey]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
+		force, err := utils.AssertType[float64](val)
+		if err != nil {
+			return nil, err
+		}
+		if force <= 0 || force > 100 {
+			return nil, fmt.Errorf("gripper force must be between 1 and 100, got %v", val)
+		}
+		if err := x.setGripperForce(ctx, uint16(force)); err != nil {
+			return nil, err
+		}
+		resp[gripperForceKey] = force
+		validCommand = true
+	}
+
+	if _, ok := cmd[getGripperForceKey]; ok {
+		if err := x.setupGripper(ctx); err != nil {
+			return nil, err
+		}
+		force, err := x.getGripperForce(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[gripperForceKey] = float64(force)
 		validCommand = true
 	}
 

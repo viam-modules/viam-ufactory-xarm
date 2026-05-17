@@ -37,6 +37,12 @@
     },
     {
       "api": "rdk:component:gripper",
+      "model": "viam:ufactory:gripper_g2",
+      "markdown_link": "README.md#gripper-g2",
+      "short_description": "gripper component driver for the ufactory gripper g2"
+    },
+    {
+      "api": "rdk:component:gripper",
       "model": "viam:ufactory:vacuum_gripper",
       "markdown_link": "README.md#vacuum-gripper",
       "short_description": "vacuum gripper component driver for the ufactory vacuum gripper"
