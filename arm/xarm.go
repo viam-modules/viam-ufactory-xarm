@@ -6,7 +6,6 @@ import (
 	_ "embed" // for embedding model file.
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -31,10 +30,11 @@ const (
 	minSpeed = 3.    // degrees per second
 	maxAccel = 1145. // degrees per second per second
 
-	defaultSpeed  = maxSpeed / 3 // degrees per second
-	defaultAccel  = maxAccel / 3 // degrees per second per second
-	defaultPort   = 502
-	defaultMoveHz = 100. // Don't change this
+	defaultSpeed       = maxSpeed / 3 // degrees per second
+	defaultAccel       = maxAccel / 3 // degrees per second per second
+	defaultPort        = 502
+	defaultGripperPort = 503
+	defaultMoveHz      = 100. // Don't change this
 
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
@@ -136,15 +136,17 @@ var armTo3DModelParts = map[string][]string{
 type xArm struct {
 	resource.AlwaysRebuild
 
-	moveLock sync.Mutex
+	// cmdConn carries arm motion, state queries, and direct TGPIO writes
+	// (port 502). gripperConn carries gripper Modbus passthrough traffic
+	// (port 503 when reachable, otherwise aliased to cmdConn).
+	cmdConn     *modbusConn
+	gripperConn *modbusConn
 
 	// state of movement things
 	started atomic.Int32 // -1 is off, >= 0 is mode
-	tid     uint16
 
 	name        resource.Name
 	conf        *Config
-	conn        net.Conn
 	closed      atomic.Bool
 	opMgr       *operation.SingleOperationManager
 	logger      logging.Logger
@@ -374,7 +376,6 @@ func NewXArm(ctx context.Context, name resource.Name,
 	x := xArm{
 		name:   name,
 		conf:   newConf,
-		tid:    0,
 		moveHZ: newConf.moveHZ(),
 		opMgr:  operation.NewSingleOperationManager(),
 		logger: logger,
@@ -382,6 +383,8 @@ func NewXArm(ctx context.Context, name resource.Name,
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
+	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
+	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
 
 	if newConf.Motion != "" {
 		if deps == nil {
@@ -420,6 +423,21 @@ func NewXArm(ctx context.Context, name resource.Name,
 	err = x.connect(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Try to open a dedicated socket on port 503 for gripper-bus Modbus
+	// traffic. The xArm controller serves this as a sibling of port 502
+	// specifically so gripper writes don't contend with arm motion on the
+	// main socket. Falls back to the shared port-502 connection if 503 is
+	// not reachable — behavior then matches a single-socket build.
+	gripperAddr := fmt.Sprintf("%s:%d", newConf.Host, defaultGripperPort)
+	gripperConn := newModbusConn(gripperAddr, logger, nil)
+	if err := gripperConn.connect(ctx); err != nil {
+		logger.Warnf("could not open port %d for gripper Modbus, falling back to shared port %d (gripper writes will contend with arm traffic): %v",
+			defaultGripperPort, defaultPort, err)
+	} else {
+		x.gripperConn = gripperConn
+		logger.Infof("gripper Modbus traffic routed through dedicated port %d", defaultGripperPort)
 	}
 
 	err = x.start(ctx, false)
@@ -576,35 +594,6 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOpti
 	return o
 }
 
-func (x *xArm) resetConnection() {
-	if x.conn == nil {
-		return
-	}
-
-	err := x.conn.Close()
-	if err != nil {
-		x.logger.Infof("error closing old socket: %v", err)
-	}
-	x.conn = nil
-	x.started.Store(-1)
-}
-
-func (x *xArm) connect(ctx context.Context) error {
-	x.resetConnection()
-
-	var d net.Dialer
-	var err error
-
-	x.started.Store(-1)
-
-	x.conn, err = d.DialContext(ctx, "tcp", x.conf.host())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
 	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
@@ -725,9 +714,6 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	}
 
 	if _, ok := cmd[loadKey]; ok {
-		if err := x.setupGripper(ctx); err != nil {
-			return nil, err
-		}
 		loadInformation, err := x.getLoad(ctx)
 		if err != nil {
 			return nil, err
@@ -850,4 +836,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 
 func (x *xArm) Name() resource.Name {
 	return x.name
+}
+
+func (x *xArm) Status(_ context.Context) (map[string]any, error) {
+	return map[string]any{}, nil
 }

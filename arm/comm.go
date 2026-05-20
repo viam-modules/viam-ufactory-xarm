@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
+	"sync"
 	"time"
 
 	"go.uber.org/multierr"
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/ml"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/services/motion"
@@ -19,80 +22,11 @@ import (
 	"gorgonia.org/tensor"
 )
 
-const errCodeCollision = 0x1F
 const servoMotionMode = 1
 const manualMode = 2
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
-
-var servoErrorMap = map[byte]string{
-	0x00: "xArm Servo: Joint Communication Error",
-	0x0A: "xArm Servo: Current Detection Error",
-	0x0B: "xArm Servo: Joint Overcurrent",
-	0x0C: "xArm Servo: Joint Overspeed",
-	0x0E: "xArm Servo: Position Command Overlimit",
-	0x0F: "xArm Servo: Joints Overheat",
-	0x10: "xArm Servo: Encoder Initialization Error",
-	0x11: "xArm Servo: Single-turn Encoder Error",
-	0x12: "xArm Servo: Multi-turn Encoder Error",
-	0x13: "xArm Servo: Low Battery Voltage",
-	0x14: "xArm Servo: Driver IC Hardware Error",
-	0x15: "xArm Servo: Driver IC Init Error",
-	0x16: "xArm Servo: Encoder Config Error",
-	0x17: "xArm Servo: Large Motor Position Deviation",
-	0x1A: "xArm Servo: Joint N Positive Overrun",
-	0x1B: "xArm Servo: Joint N Negative Overrun",
-	0x1C: "xArm Servo: Joint Commands Error",
-	0x21: "xArm Servo: Drive Overloaded",
-	0x22: "xArm Servo: Motor Overload",
-	0x23: "xArm Servo: Motor Type Error",
-	0x24: "xArm Servo: Driver Type Error",
-	0x27: "xArm Servo: Joint Overvoltage",
-	0x28: "xArm Servo: Joint Undervoltage",
-	0x31: "xArm Servo: EEPROM RW Error",
-	0x34: "xArm Servo: Initialization of Motor Angle Error",
-}
-
-var armBoxErrorMap = map[byte]string{
-	0x01:             "xArm: Emergency Stop Button Pushed In",
-	0x02:             "xArm: Emergency IO Triggered",
-	0x03:             "xArm: Emergency Stop 3-State Switch Pressed",
-	0x0B:             "xArm: Power Cycle Required",
-	0x0C:             "xArm: Power Cycle Required",
-	0x0D:             "xArm: Power Cycle Required",
-	0x0E:             "xArm: Power Cycle Required",
-	0x0F:             "xArm: Power Cycle Required",
-	0x10:             "xArm: Power Cycle Required",
-	0x11:             "xArm: Power Cycle Required",
-	0x13:             "xArm: Gripper Communication Error",
-	0x15:             "xArm: Kinematic Error",
-	0x16:             "xArm: Self Collision Error",
-	0x17:             "xArm: Joint Angle Exceeds Limit",
-	0x18:             "xArm: Speed Exceeds Limit",
-	0x19:             "xArm: Planning Error",
-	0x1A:             "xArm: Linux RT Error",
-	0x1B:             "xArm: Command Reply Error",
-	0x1C:             "xArm: End Module Communication Error",
-	0x1D:             "xArm: Other Errors",
-	0x1E:             "xArm: Feedback Speed Exceeds Limit",
-	errCodeCollision: "xArm: Collision Caused Abnormal Current",
-	0x20:             "xArm: Three-point Drawing Circle Calculation Error",
-	0x21:             "xArm: Abnormal Arm Current",
-	0x22:             "xArm: Recording Timeout",
-	0x23:             "xArm: Safety Boundary Limit",
-	0x24:             "xArm: Delay Command Limit Exceeded",
-	0x25:             "xArm: Abnormal Motion in Manual Mode",
-	0x26:             "xArm: Abnormal Joint Angle",
-	0x27:             "xArm: Abnormal Communication Between Power Boards",
-}
-
-var armBoxWarnMap = map[byte]string{
-	0x0B: "xArm Warning: Buffer Overflow",
-	0x0C: "xArm Warning: Command Parameter Abnormal",
-	0x0D: "xArm Warning: Unknown Command",
-	0x0E: "xArm Warning: Command No Solution",
-}
 
 var regMap = map[string]byte{
 	"Version":        0x01,
@@ -150,17 +84,65 @@ func (c *cmd) bytes() []byte {
 	return bin
 }
 
-func (x *xArm) newCmd(reg byte) cmd {
-	x.tid++
-	return cmd{tid: x.tid, prot: 2, reg: reg}
+// modbusConn encapsulates a single TCP connection to the xArm controller.
+// Each instance owns its own lock and Transaction ID counter so that distinct
+// instances (e.g. a separate gripper-bus connection on port 503) can run truly
+// in parallel against the controller without contending on a shared mutex.
+type modbusConn struct {
+	addr    string // host:port
+	logger  logging.Logger
+	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.started)
+
+	lock sync.Mutex
+	conn net.Conn
+	tid  uint16
 }
 
-func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
-	if x.closed.Load() {
-		return cmd{}, errors.New("closed")
-	}
+func newModbusConn(addr string, logger logging.Logger, onReset func()) *modbusConn {
+	return &modbusConn{addr: addr, logger: logger, onReset: onReset}
+}
 
-	resp, err := x.writeBytes(ctx, c)
+func (m *modbusConn) connect(ctx context.Context) error {
+	m.resetConnection()
+
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "tcp", m.addr)
+	if err != nil {
+		return err
+	}
+	m.conn = c
+	return nil
+}
+
+// close shuts down the socket. Safe to call multiple times.
+func (m *modbusConn) close() error {
+	if m.conn == nil {
+		return nil
+	}
+	err := m.conn.Close()
+	m.conn = nil
+	return err
+}
+
+func (m *modbusConn) resetConnection() {
+	if m.conn != nil {
+		if err := m.conn.Close(); err != nil {
+			m.logger.Infof("error closing old socket %s: %v", m.addr, err)
+		}
+		m.conn = nil
+	}
+	if m.onReset != nil {
+		m.onReset()
+	}
+}
+
+func (m *modbusConn) newCmd(reg byte) cmd {
+	m.tid++
+	return cmd{tid: m.tid, prot: 2, reg: reg}
+}
+
+func (m *modbusConn) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+	resp, err := m.writeBytes(ctx, c)
 	if err != nil {
 		return cmd{}, err
 	}
@@ -171,7 +153,7 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 		// the 2nd and 3rd MSB in state byte indicate if there
 		// is an error or warning respectively.
 		if state&(errorState|warningState) != 0 {
-			params, err := x.getErrorParams(ctx)
+			params, err := m.getErrorParams(ctx)
 			if err != nil {
 				return cmd{}, err
 			}
@@ -192,36 +174,34 @@ func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
 	return resp, err
 }
 
-func (x *xArm) writeBytes(ctx context.Context, c cmd) (cmd, error) {
-	x.moveLock.Lock()
-	defer x.moveLock.Unlock()
+func (m *modbusConn) writeBytes(ctx context.Context, c cmd) (cmd, error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
 
-	if x.conn == nil { // THIS HAS TO BE DONE INSIDE THE LOCK
-		err := x.connect(ctx)
-		if err != nil {
-			x.resetConnection()
+	if m.conn == nil { // THIS HAS TO BE DONE INSIDE THE LOCK
+		if err := m.connect(ctx); err != nil {
+			m.resetConnection()
 			return cmd{}, err
 		}
 	}
 
 	b := c.bytes()
 	// add deadline so we aren't waiting forever
-	if err := x.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		x.resetConnection()
+	if err := m.conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		m.resetConnection()
 		return cmd{}, err
 	}
-	_, err := x.conn.Write(b)
-	if err != nil {
-		x.resetConnection()
+	if _, err := m.conn.Write(b); err != nil {
+		m.resetConnection()
 		return cmd{}, err
 	}
-	return x.responseInLock(ctx)
+	return m.responseInLock(ctx)
 }
 
-func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
-	buf, err := utils.ReadBytes(ctx, x.conn, 7)
+func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
+	buf, err := utils.ReadBytes(ctx, m.conn, 7)
 	if err != nil {
-		x.resetConnection()
+		m.resetConnection()
 		return cmd{}, err
 	}
 	c := cmd{}
@@ -229,12 +209,53 @@ func (x *xArm) responseInLock(ctx context.Context) (cmd, error) {
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	c.params, err = utils.ReadBytes(ctx, x.conn, int(length-1))
+	c.params, err = utils.ReadBytes(ctx, m.conn, int(length-1))
 	if err != nil {
-		x.resetConnection()
+		m.resetConnection()
 		return cmd{}, err
 	}
 	return c, err
+}
+
+// getErrorParams queries the GetError register on this connection. Used by
+// send() when the response state byte indicates a fault. Lives on modbusConn
+// because the error-clear sequence must run on the same socket as the failed
+// command.
+func (m *modbusConn) getErrorParams(ctx context.Context) ([]byte, error) {
+	c := m.newCmd(regMap["GetError"])
+	resp, err := m.writeBytes(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.params) < 3 {
+		return nil, errors.New("bad arm error query response")
+	}
+	return resp.params, nil
+}
+
+// Thin xArm-level wrappers that route to the command connection (port 502)
+// by default. Most existing callers stay unchanged. Gripper-bus helpers
+// (those using GripperControl/RS485_RTU) call x.gripperConn.send directly via
+// gripperPreamble so they pick up the port 503 connection when it's
+// available.
+
+func (x *xArm) newCmd(reg byte) cmd {
+	return x.cmdConn.newCmd(reg)
+}
+
+func (x *xArm) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
+	if x.closed.Load() {
+		return cmd{}, errors.New("closed")
+	}
+	return x.cmdConn.send(ctx, c, checkError)
+}
+
+func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
+	return x.cmdConn.getErrorParams(ctx)
+}
+
+func (x *xArm) connect(ctx context.Context) error {
+	return x.cmdConn.connect(ctx)
 }
 
 // checkServoErrors will query the individual servos for any servo-specific
@@ -313,35 +334,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
 	}
 	return nil
-}
-
-func (x *xArm) getErrorParams(ctx context.Context) ([]byte, error) {
-	c := x.newCmd(regMap["GetError"])
-	resp, err := x.writeBytes(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(resp.params) < 3 {
-		return nil, errors.New("bad arm error query response")
-	}
-
-	return resp.params, nil
-}
-
-func decodeError(params []byte) error {
-	errCode := params[1]
-	warnCode := params[2]
-	errMsg, isErr := armBoxErrorMap[errCode]
-	warnMsg, isWarn := armBoxWarnMap[warnCode]
-	if isErr || isWarn {
-		return multierr.Combine(errors.New(errMsg),
-			errors.New(warnMsg))
-	}
-
-	// Commands are returning error codes that are not mentioned in the
-	// developer manual
-	return errors.New("xArm: UNKNOWN ERROR")
 }
 
 // setMotionState sets the motion state of the arm.
@@ -424,6 +416,17 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		x.logger.Warnf("Could not fully clear ready state: %v", err)
 	}
 
+	// It appears that the xArm controller cannot transition from mode 1 (servoJ)
+	// to mode 2 (teach mode)
+	// As a work around we transition the controller to mode 0 (position) then
+	// to teach mode preventing having to call enterManualMode twice
+	if err := x.setMotionMode(ctx, 0); err != nil {
+		return fmt.Errorf("failed to set position mode before manual: %w", err)
+	}
+	if err := x.setMotionState(ctx, 0); err != nil {
+		return fmt.Errorf("failed to activate position mode before manual: %w", err)
+	}
+
 	// Set motion mode to 2 (manual/teaching mode)
 	// The firmware keeps servos active with only gravity-compensating torque,
 	// so the arm holds position but can be freely moved by hand.
@@ -468,21 +471,23 @@ func (x *xArm) Close(ctx context.Context) error {
 		x.stopProxy()
 	}
 
-	if x.conn == nil {
+	if x.cmdConn == nil || x.cmdConn.conn == nil {
 		x.closed.Store(true)
 		return nil
 	}
 
-	err := multierr.Combine(
-		x.setMotionState(ctx, 3),
-		x.conn.Close(),
-	)
+	stopErr := x.setMotionState(ctx, 3)
+	closeErr := x.cmdConn.close()
+	var gripperCloseErr error
+	if x.gripperConn != nil && x.gripperConn != x.cmdConn {
+		gripperCloseErr = x.gripperConn.close()
+	}
+	err := multierr.Combine(stopErr, closeErr, gripperCloseErr)
 
 	if err != nil {
 		x.logger.Warnf("closing connection failed: %v", err)
 	}
 
-	x.conn = nil
 	x.closed.Store(true)
 
 	return err
@@ -935,8 +940,12 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
+// gripperPreamble routes through gripperConn so that gripper-bus traffic
+// uses the dedicated port-503 socket when available. If port 503 wasn't
+// reachable at boot, gripperConn aliases cmdConn and behavior collapses to
+// the shared-socket case.
 func (x *xArm) gripperPreamble(write bool) cmd {
-	c := x.newCmd(regMap["GripperControl"])
+	c := x.gripperConn.newCmd(regMap["GripperControl"])
 	c.params = append(c.params, 0x09) // host id
 	c.params = append(c.params, 0x08) // gripper id
 	if write {
@@ -947,13 +956,23 @@ func (x *xArm) gripperPreamble(write bool) cmd {
 	return c
 }
 
+// gripperSend mirrors x.send but routes through gripperConn. checkError is
+// always true on this path — gripper Modbus failures should surface, never
+// be swallowed silently.
+func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
+	if x.closed.Load() {
+		return cmd{}, errors.New("closed")
+	}
+	return x.gripperConn.send(ctx, c, true)
+}
+
 func (x *xArm) enableGripper(ctx context.Context) error {
 	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x01, 0x00)
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -967,7 +986,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -980,7 +999,7 @@ func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	binary.BigEndian.PutUint32(tmpBytes, position)
 	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -993,7 +1012,7 @@ func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
 	binary.BigEndian.PutUint16(tmpBytes, speed)
 	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.gripperSend(ctx, c)
 	return err
 }
 
@@ -1001,7 +1020,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x03, 0x03)
 	c.params = append(c.params, 0x00, 0x01)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
@@ -1019,7 +1038,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
 	c.params = append(c.params, 0x00, 0x02)
-	res, err := x.send(ctx, c, true)
+	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return 0, err
 	}
