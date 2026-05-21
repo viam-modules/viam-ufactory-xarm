@@ -62,6 +62,7 @@ const (
 	setGripperTorqueKey      = "set_gripper_torque"
 	getGripperTorqueKey      = "get_gripper_torque"
 	gripperTorqueKey         = "gripper_torque"
+	grabWithTorqueKey        = "grab_with_torque"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 
@@ -709,6 +710,38 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[gripperTorqueKey] = torque
+		validCommand = true
+	}
+
+	if val, ok := cmd[grabWithTorqueKey]; ok {
+		params, ok := val.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a map with keys position, speed, torque; got %T", grabWithTorqueKey, val)
+		}
+		positionF, err := utils.AssertType[float64](params["position"])
+		if err != nil {
+			return nil, fmt.Errorf("grasp.position: %w", err)
+		}
+		if positionF < 0 || positionF > 850 {
+			return nil, fmt.Errorf("grasp.position must be between 0 and 850, got %v", positionF)
+		}
+		speedF, err := utils.AssertType[float64](params["speed"])
+		if err != nil {
+			return nil, fmt.Errorf("grasp.speed: %w", err)
+		}
+		if speedF <= 0 || speedF > 5000 {
+			return nil, fmt.Errorf("grasp.speed must be between 1 and 5000, got %v", speedF)
+		}
+		torqueF, err := utils.AssertType[float64](params["torque"])
+		if err != nil {
+			return nil, fmt.Errorf("grasp.torque: %w", err)
+		}
+		if torqueF < 0 || torqueF > 100 {
+			return nil, fmt.Errorf("grasp.torque must be between 0 and 100, got %v", torqueF)
+		}
+		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF)); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 

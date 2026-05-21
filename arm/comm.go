@@ -1067,6 +1067,32 @@ func (x *xArm) getGripperTorque(ctx context.Context) (uint16, error) {
 	return binary.BigEndian.Uint16(res.params[5:]), nil
 }
 
+// graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
+// applies the requested grasp current/torque atomically with the position move. See section 4.2 of
+// the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
+func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x05)
+	c.params = append(c.params, 0x0A)
+
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, 1) // FnC00 enable
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, speed) // FnC01
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, torque) // FnC02
+	c.params = append(c.params, buf...)
+
+	posBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
+	c.params = append(c.params, posBytes...)
+
+	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d", speed, torque, position)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)

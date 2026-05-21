@@ -386,6 +386,11 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 	if _, ok := cmd[getGripperTorqueKey]; ok {
 		return g.arm.DoCommand(ctx, cmd)
 	}
+	if _, ok := cmd[grabWithTorqueKey]; ok {
+		g.isMoving.Store(true)
+		defer g.isMoving.Store(false)
+		return g.arm.DoCommand(ctx, cmd)
+	}
 	return map[string]any{}, nil
 }
 
