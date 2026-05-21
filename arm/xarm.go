@@ -720,24 +720,24 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		}
 		positionF, err := utils.AssertType[float64](params["position"])
 		if err != nil {
-			return nil, fmt.Errorf("grasp.position: %w", err)
+			return nil, fmt.Errorf("grab_with_torque.position: %w", err)
 		}
 		if positionF < 0 || positionF > 850 {
-			return nil, fmt.Errorf("grasp.position must be between 0 and 850, got %v", positionF)
+			return nil, fmt.Errorf("grab_with_torque.position must be between 0 and 850, got %v", positionF)
 		}
 		speedF, err := utils.AssertType[float64](params["speed"])
 		if err != nil {
-			return nil, fmt.Errorf("grasp.speed: %w", err)
+			return nil, fmt.Errorf("grab_with_torque.speed: %w", err)
 		}
 		if speedF <= 0 || speedF > 5000 {
-			return nil, fmt.Errorf("grasp.speed must be between 1 and 5000, got %v", speedF)
+			return nil, fmt.Errorf("grab_with_torque.speed must be between 1 and 5000, got %v", speedF)
 		}
 		torqueF, err := utils.AssertType[float64](params["torque"])
 		if err != nil {
-			return nil, fmt.Errorf("grasp.torque: %w", err)
+			return nil, fmt.Errorf("grab_with_torque.torque: %w", err)
 		}
 		if torqueF < 0 || torqueF > 100 {
-			return nil, fmt.Errorf("grasp.torque must be between 0 and 100, got %v", torqueF)
+			return nil, fmt.Errorf("grab_with_torque.torque must be between 0 and 100, got %v", torqueF)
 		}
 		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF)); err != nil {
 			return nil, err

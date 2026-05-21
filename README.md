@@ -229,6 +229,35 @@ resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{
 // resp["gripper_speed"] contains the speed
 ```
 
+To set the gripper grasp/torque (range 0-100, controls how hard the gripper squeezes during a grasp):
+
+```go
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "set_gripper_torque": 50,
+})
+```
+
+To get the current gripper torque setting:
+
+```go
+resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "get_gripper_torque": true,
+})
+// resp["gripper_torque"] contains the torque
+```
+
+To grab to a specific position while applying a torque/force:
+
+```go
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+    "grab_with_torque": map[string]interface{}{
+        "position": 100, // 0-850 (0 = fully closed, 850 = fully open)
+        "speed":    3000, // 1-5000
+        "torque":   100,  // 0-100 (% of max grasp current)
+    },
+})
+```
+
 ### Manual Mode (Teaching Mode)
 
 You can put the arm into manual mode, which allows you to physically move the arm by hand. This is useful for teaching positions or manually positioning the arm for maintenance/storage.
@@ -309,6 +338,19 @@ resp, err := gripperComponent.DoCommand(context.Background(), map[string]interfa
 // Set/get gripper speed (proxied to arm DoCommand)
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+
+// Set/get the grasp current/torque (0-100). Affects how hard the gripper squeezes.
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_torque": 50})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_torque": true})
+
+// Close to a position with a force limit
+gripperComponent.DoCommand(context.Background(), map[string]interface{}{
+    "grab_with_torque": map[string]interface{}{
+        "position": 100,  // 0-850
+        "speed":    3000, // 1-5000
+        "torque":   100,  // 0-100
+    },
+})
 ```
 
 ## gripper lite
