@@ -229,6 +229,9 @@ resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{
 // resp["gripper_speed"] contains the speed
 ```
 
+> [!NOTE]
+> The torque commands below (`set_gripper_torque`, `get_gripper_torque`, `grab_with_torque`) are only available on the UFactory xArm Gripper G2.
+
 To set the gripper grasp/torque (range 0-100, controls how hard the gripper squeezes during a grasp):
 
 ```go
@@ -339,11 +342,11 @@ resp, err := gripperComponent.DoCommand(context.Background(), map[string]interfa
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
 
-// Set/get the grasp current/torque (0-100). Affects how hard the gripper squeezes.
+// G2 gripper only — set/get the grasp current/torque (0-100). Affects how hard the gripper squeezes.
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_torque": 50})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_torque": true})
 
-// Close to a position with a force limit
+// G2 gripper only — close to a position with a force limit
 gripperComponent.DoCommand(context.Background(), map[string]interface{}{
     "grab_with_torque": map[string]interface{}{
         "position": 100,  // 0-850
