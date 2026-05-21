@@ -1034,6 +1034,39 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	return binary.BigEndian.Uint16(res.params[5:]), nil
 }
 
+// setGripperTorque writes the grasp current/torque command (Fn500, register 0x0500) on the G2 gripper.
+// Valid range per the manual is 0-100.
+func (x *xArm) setGripperTorque(ctx context.Context, torque uint16) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x05, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	c.params = append(c.params, 0x02)
+	tmpBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(tmpBytes, torque)
+	x.logger.Debugf("setGripperTorque bytes: %v", tmpBytes)
+	c.params = append(c.params, tmpBytes...)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+func (x *xArm) getGripperTorque(ctx context.Context) (uint16, error) {
+	c := x.gripperPreamble(false)
+	c.params = append(c.params, 0x05, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	res, err := x.send(ctx, c, true)
+	if err != nil {
+		return 0, err
+	}
+
+	x.logger.Debugf("getGripperTorque: %v %v", res, res.params)
+
+	if len(res.params) != 7 {
+		return 0, fmt.Errorf("unexpected length for getGripperTorque response: %d %v", len(res.params), res.params)
+	}
+
+	return binary.BigEndian.Uint16(res.params[5:]), nil
+}
+
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)

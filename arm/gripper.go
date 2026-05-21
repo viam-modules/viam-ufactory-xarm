@@ -380,6 +380,12 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 	if _, ok := cmd[getGripperSpeedKey]; ok {
 		return g.arm.DoCommand(ctx, cmd)
 	}
+	if _, ok := cmd[setGripperTorqueKey]; ok {
+		return g.arm.DoCommand(ctx, cmd)
+	}
+	if _, ok := cmd[getGripperTorqueKey]; ok {
+		return g.arm.DoCommand(ctx, cmd)
+	}
 	return map[string]any{}, nil
 }
 
