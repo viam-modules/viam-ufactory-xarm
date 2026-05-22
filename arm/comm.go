@@ -931,6 +931,9 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 }
 
 func (x *xArm) setupGripper(ctx context.Context) error {
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
@@ -938,6 +941,20 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by graspWithTorque.
+// FnC00 enables the FnCxx block-write control mode (speed+torque+position); when left enabled,
+// subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
+func (x *xArm) disableGripperControlMode(ctx context.Context) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	c.params = append(c.params, 0x02)
+	c.params = append(c.params, 0x00, 0x00)
+	x.logger.Debugf("disableGripperControlMode")
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 // gripperPreamble routes through gripperConn so that gripper-bus traffic
@@ -1038,6 +1055,12 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 // applies the requested grasp current/torque atomically with the position move. See section 4.2 of
 // the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
 func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32) error {
+	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
+	// otherwise back-to-back grasp commands may be ignored while a hold is active.
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
+
 	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x0C, 0x00)
 	c.params = append(c.params, 0x00, 0x05)
