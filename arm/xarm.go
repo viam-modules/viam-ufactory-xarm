@@ -59,9 +59,6 @@ const (
 	setGripperSpeedKey       = "set_gripper_speed"
 	getGripperSpeedKey       = "get_gripper_speed"
 	gripperSpeedKey          = "gripper_speed"
-	setGripperTorqueKey      = "set_gripper_torque"
-	getGripperTorqueKey      = "get_gripper_torque"
-	gripperTorqueKey         = "gripper_torque"
 	grabWithTorqueKey        = "grab_with_torque"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
@@ -695,24 +692,6 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		validCommand = true
 	}
 
-	if val, ok := cmd[setGripperTorqueKey]; ok {
-		if err := x.setupGripper(ctx); err != nil {
-			return nil, err
-		}
-		torque, err := utils.AssertType[float64](val)
-		if err != nil {
-			return nil, err
-		}
-		if torque < 0 || torque > 100 {
-			return nil, fmt.Errorf("gripper torque must be between 0 and 100, got %v", val)
-		}
-		if err := x.setGripperTorque(ctx, uint16(torque)); err != nil {
-			return nil, err
-		}
-		resp[gripperTorqueKey] = torque
-		validCommand = true
-	}
-
 	if val, ok := cmd[grabWithTorqueKey]; ok {
 		params, ok := val.(map[string]any)
 		if !ok {
@@ -745,17 +724,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		validCommand = true
 	}
 
-	if _, ok := cmd[getGripperTorqueKey]; ok {
-		if err := x.setupGripper(ctx); err != nil {
-			return nil, err
-		}
-		torque, err := x.getGripperTorque(ctx)
-		if err != nil {
-			return nil, err
-		}
-		resp[gripperTorqueKey] = float64(torque)
-		validCommand = true
-	}
+
 
 	if val, ok := cmd[moveGripperKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {
