@@ -7,7 +7,7 @@ This is a [Viam module](https://docs.viam.com/how-tos/create-module/) for [UFact
 
 This viam-xarm module is particularly useful in applications that require an xArm to be operated in conjunction with other resources (such as cameras, sensors, actuators, CV) offered by the [Viam Platform](https://www.viam.com/) and/or separate through your own code.
 
-Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](https://app.viam.com/). Click the **+** icon next to your machine part in the left-hand menu and select **Configuration block**. Select the `arm` type, then search for and select the `arm / ufactory:xArm6`, `arm / ufactory:xArm7`, or `arm / ufactory:lite6` model, depending on your hardware model. Click **Add module**, then enter a name or use the suggested name for your arm and click **Create**.
+Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](https://app.viam.com/). Click the **+** icon next to your machine part in the left-hand menu and select **Configuration block**. Search for and select the `arm / ufactory:xArm6`, `arm / ufactory:xArm7`, `arm / ufactory:xArm850`, or `arm / ufactory:lite6` model, depending on your hardware model. Click **Add module**, then enter a name or use the suggested name for your arm and click **Create**.
 
 > [!NOTE]
 > Before configuring your xArm, you must [add a machine](https://docs.viam.com/fleet/machines/#add-a-new-machine).
