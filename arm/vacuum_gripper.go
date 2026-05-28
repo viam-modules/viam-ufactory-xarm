@@ -57,6 +57,8 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
+	g.detected = probeGripper(ctx, g.arm, GripperKindVacuum, logger)
+
 	return g, nil
 }
 
@@ -70,6 +72,8 @@ type myVacuumGripper struct {
 	arm arm.Arm
 
 	isMoving atomic.Bool
+
+	detected DetectedGripper
 
 	logger logging.Logger
 }
