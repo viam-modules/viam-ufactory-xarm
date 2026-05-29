@@ -68,7 +68,7 @@ Copy and paste the following attributes into your JSON configuration:
 
 1. Connect an Ethernet cable between the arm's control box and a USB-C hub connected to your Mac.
 2. Open **System Settings** → **Network**.
-3. Click the USB-C device under "Other services." Ensure it shows a yellow indicator (not red/disconnected).
+3. Click the USB-C device under "Other services." Ensure it shows a green indicator (not red/disconnected).
 4. Click **Details...** → **TCP/IP**.
 5. Set **Configure IPv4** to **Manually**.
 6. Set the IP address to any address on the same subnet as the arm (e.g., if the arm is `192.168.1.2`, use `192.168.1.10`).
