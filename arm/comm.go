@@ -562,13 +562,9 @@ func (x *xArm) createTrajGenSteps(
 ) ([][]referenceframe.Input, error) {
 	nWaypoints := len(positions) + 1
 	waypoints := make([]float64, 0, nWaypoints*x.dof)
-	for _, inp := range curPos {
-		waypoints = append(waypoints, inp)
-	}
+	waypoints = append(waypoints, curPos...)
 	for _, wp := range positions {
-		for _, inp := range wp {
-			waypoints = append(waypoints, inp)
-		}
+		waypoints = append(waypoints, wp...)
 	}
 
 	x.confLock.Lock()

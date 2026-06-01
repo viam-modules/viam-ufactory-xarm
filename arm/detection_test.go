@@ -111,11 +111,11 @@ func TestVacuumGripperSubmodel(t *testing.T) {
 		arm  DetectedArm
 		want string
 	}{
-		{"lite6", DetectedArm{Model: ArmModelLite6}, "lite"},
-		{"850", DetectedArm{Model: ArmModelXArm850}, "v2"},
-		{"xArm6 XI1305", DetectedArm{Model: ArmModelXArm6, ArmTypeCode: 1305}, "v2"},
-		{"xArm6 XI1304", DetectedArm{Model: ArmModelXArm6, ArmTypeCode: 1304}, "v1"},
-		{"xArm7 no submodel info", DetectedArm{Model: ArmModelXArm7}, "v1"},
+		{"lite6", DetectedArm{Model: HardwareModelLite6}, "lite"},
+		{"850", DetectedArm{Model: HardwareModelXArm850}, "v2"},
+		{"xArm6 XI1305", DetectedArm{Model: HardwareModelXArm6, ArmTypeCode: 1305}, "v2"},
+		{"xArm6 XI1304", DetectedArm{Model: HardwareModelXArm6, ArmTypeCode: 1304}, "v1"},
+		{"xArm7 no submodel info", DetectedArm{Model: HardwareModelXArm7}, "v1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,22 +124,22 @@ func TestVacuumGripperSubmodel(t *testing.T) {
 	}
 }
 
-func TestArmModelFromSNPrefix(t *testing.T) {
+func TestHardwareModelFromSNPrefix(t *testing.T) {
 	tests := []struct {
 		name       string
 		armTypeStr string
-		wantModel  ArmModel
+		wantModel  HardwareModel
 		wantAxis   byte
 	}{
-		{"xArm5 (XF)", "XF1300_2021Sx0001", ArmModelXArm5, 5},
-		{"xArm6 (XI)", "XI1305_2021Sx0001", ArmModelXArm6, 6},
-		{"xArm7 (XS)", "XS1300_2021Sx0001", ArmModelXArm7, 7},
-		{"xArm7T (CS)", "CS1300_2021Sx0001", ArmModelXArm7T, 7},
-		{"lite6 (LI)", "LI1100_2021Sx0001", ArmModelLite6, 6},
-		{"xArm850 (FX)", "FX1200_2021Sx0001", ArmModelXArm850, 6},
-		{"unknown prefix", "ZZ1300_2021Sx0001", ArmModelUnknown, 0},
-		{"empty", "", ArmModelUnknown, 0},
-		{"too short", "X", ArmModelUnknown, 0},
+		{"xArm5 (XF)", "XF1300_2021Sx0001", HardwareModelXArm5, 5},
+		{"xArm6 (XI)", "XI1305_2021Sx0001", HardwareModelXArm6, 6},
+		{"xArm7 (XS)", "XS1300_2021Sx0001", HardwareModelXArm7, 7},
+		{"xArm7T (CS)", "CS1300_2021Sx0001", HardwareModelXArm7T, 7},
+		{"lite6 (LI)", "LI1100_2021Sx0001", HardwareModelLite6, 6},
+		{"xArm850 (FX)", "FX1200_2021Sx0001", HardwareModelXArm850, 6},
+		{"unknown prefix", "ZZ1300_2021Sx0001", HardwareModelUnknown, 0},
+		{"empty", "", HardwareModelUnknown, 0},
+		{"too short", "X", HardwareModelUnknown, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,27 +150,27 @@ func TestArmModelFromSNPrefix(t *testing.T) {
 	}
 }
 
-func TestDecodeArmModel(t *testing.T) {
+func TestDecodeHardwareModel(t *testing.T) {
 	tests := []struct {
 		name       string
 		deviceType byte
 		axis       byte
-		want       ArmModel
+		want       HardwareModel
 	}{
-		{"xArm5", 5, 5, ArmModelXArm5},
-		{"xArm6", 6, 6, ArmModelXArm6},
-		{"xArm7", 3, 7, ArmModelXArm7},
-		{"xArm7T", 13, 7, ArmModelXArm7T},
-		{"lite6", 9, 6, ArmModelLite6},
-		{"xArm850", 12, 6, ArmModelXArm850},
-		{"lite6 wrong axis falls back", 9, 7, ArmModelUnknown},
-		{"xArm850 wrong axis falls back", 12, 7, ArmModelUnknown},
-		{"unknown device_type", 99, 6, ArmModelUnknown},
-		{"zero values", 0, 0, ArmModelUnknown},
+		{"xArm5", 5, 5, HardwareModelXArm5},
+		{"xArm6", 6, 6, HardwareModelXArm6},
+		{"xArm7", 3, 7, HardwareModelXArm7},
+		{"xArm7T", 13, 7, HardwareModelXArm7T},
+		{"lite6", 9, 6, HardwareModelLite6},
+		{"xArm850", 12, 6, HardwareModelXArm850},
+		{"lite6 wrong axis falls back", 9, 7, HardwareModelUnknown},
+		{"xArm850 wrong axis falls back", 12, 7, HardwareModelUnknown},
+		{"unknown device_type", 99, 6, HardwareModelUnknown},
+		{"zero values", 0, 0, HardwareModelUnknown},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := decodeArmModel(tc.deviceType, tc.axis)
+			got := decodeHardwareModel(tc.deviceType, tc.axis)
 			test.That(t, got, test.ShouldEqual, tc.want)
 		})
 	}

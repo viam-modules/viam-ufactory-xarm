@@ -12,20 +12,24 @@ import (
 	"go.viam.com/rdk/logging"
 )
 
-type ArmModel string
+// HardwareModel identifies an xArm hardware family.
+type HardwareModel string
 
+// Known HardwareModel values.
 const (
-	ArmModelUnknown ArmModel = "unknown"
-	ArmModelXArm5   ArmModel = "xArm5"
-	ArmModelXArm6   ArmModel = "xArm6"
-	ArmModelXArm7   ArmModel = "xArm7"
-	ArmModelXArm7T  ArmModel = "xArm7T"
-	ArmModelLite6   ArmModel = "lite6"
-	ArmModelXArm850 ArmModel = "xArm850"
+	HardwareModelUnknown HardwareModel = "unknown"
+	HardwareModelXArm5   HardwareModel = "xArm5"
+	HardwareModelXArm6   HardwareModel = "xArm6"
+	HardwareModelXArm7   HardwareModel = "xArm7"
+	HardwareModelXArm7T  HardwareModel = "xArm7T"
+	HardwareModelLite6   HardwareModel = "lite6"
+	HardwareModelXArm850 HardwareModel = "xArm850"
 )
 
+// GripperKind identifies a gripper hardware family.
 type GripperKind string
 
+// Known GripperKind values.
 const (
 	GripperKindUnknown  GripperKind = "unknown"
 	GripperKindStandard GripperKind = "standard"
@@ -33,8 +37,9 @@ const (
 	GripperKindVacuum   GripperKind = "vacuum"
 )
 
+// DetectedArm is the result of an arm-model probe.
 type DetectedArm struct {
-	Model           ArmModel
+	Model           HardwareModel
 	DeviceType      byte
 	Axis            byte
 	Submodel        string
@@ -43,63 +48,64 @@ type DetectedArm struct {
 	FirmwareVersion string
 }
 
+// DetectedGripper is the result of a gripper-hardware probe.
 type DetectedGripper struct {
 	Kind     GripperKind
 	Version  string
 	Submodel string
 }
 
-func decodeArmModel(deviceType, axis byte) ArmModel {
+func decodeHardwareModel(deviceType, axis byte) HardwareModel {
 	switch deviceType {
 	case 3:
-		return ArmModelXArm7
+		return HardwareModelXArm7
 	case 5:
-		return ArmModelXArm5
+		return HardwareModelXArm5
 	case 6:
-		return ArmModelXArm6
+		return HardwareModelXArm6
 	case 13:
-		return ArmModelXArm7T
+		return HardwareModelXArm7T
 	case 9:
 		if axis == 6 {
-			return ArmModelLite6
+			return HardwareModelLite6
 		}
 	case 12:
 		if axis == 6 {
-			return ArmModelXArm850
+			return HardwareModelXArm850
 		}
 	}
-	return ArmModelUnknown
+	return HardwareModelUnknown
 }
 
 // armModelFromSNPrefix is the authoritative model signal. GET_HD_TYPES is
 // harmonic-drive debug data (xarm-python-sdk doc/api/xarm_api.md:1757) and
 // the banner's leading "axis" digit is "1" on firmware 2.x; the SN prefix
 // from xarm.py:1841-1844 is what the SDKs actually trust.
-func armModelFromSNPrefix(armTypeStr string) (ArmModel, byte) {
+func armModelFromSNPrefix(armTypeStr string) (HardwareModel, byte) {
 	if len(armTypeStr) < 2 {
-		return ArmModelUnknown, 0
+		return HardwareModelUnknown, 0
 	}
 	switch armTypeStr[:2] {
 	case "XF":
-		return ArmModelXArm5, 5
+		return HardwareModelXArm5, 5
 	case "XI":
-		return ArmModelXArm6, 6
+		return HardwareModelXArm6, 6
 	case "XS":
-		return ArmModelXArm7, 7
+		return HardwareModelXArm7, 7
 	case "CS":
-		return ArmModelXArm7T, 7
+		return HardwareModelXArm7T, 7
 	case "LI":
-		return ArmModelLite6, 6
+		return HardwareModelLite6, 6
 	case "FX":
-		return ArmModelXArm850, 6
+		return HardwareModelXArm850, 6
 	}
-	return ArmModelUnknown, 0
+	return HardwareModelUnknown, 0
 }
 
 func (x *xArm) detectArm(ctx context.Context) (DetectedArm, error) {
 	v, err := x.detectVersion(ctx)
 	if err != nil {
-		return DetectedArm{Model: ArmModelUnknown}, err
+		return DetectedArm{Model: HardwareModelUnknown}, err
 	}
 	d := DetectedArm{
 		DeviceType:      byte(v.deviceType),
@@ -135,15 +141,23 @@ func parseVersionBanner(banner string) (versionInfo, bool) {
 		controlTypeStr:  m[4],
 		firmwareVersion: fmt.Sprintf("%s.%s.%s", m[5], m[6], m[7]),
 	}
-	v.axis, _ = strconv.Atoi(m[1])
-	v.deviceType, _ = strconv.Atoi(m[2])
+	v.axis = atoiOrZero(m[1])
+	v.deviceType = atoiOrZero(m[2])
 	if len(v.armTypeStr) >= 6 {
-		v.armTypeCode, _ = strconv.Atoi(v.armTypeStr[2:6])
+		v.armTypeCode = atoiOrZero(v.armTypeStr[2:6])
 	}
 	if len(v.controlTypeStr) >= 6 {
-		v.controlTypeCode, _ = strconv.Atoi(v.controlTypeStr[2:6])
+		v.controlTypeCode = atoiOrZero(v.controlTypeStr[2:6])
 	}
 	return v, true
+}
+
+func atoiOrZero(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
@@ -153,7 +167,7 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 		return versionInfo{}, err
 	}
 	if len(resp.params) < 2 {
-		return versionInfo{}, fmt.Errorf("Version response too short: %d (%v)", len(resp.params), resp.params)
+		return versionInfo{}, fmt.Errorf("version response too short: %d (%v)", len(resp.params), resp.params)
 	}
 	banner := strings.TrimRight(string(resp.params[1:]), "\x00 ")
 	v, ok := parseVersionBanner(banner)
@@ -254,8 +268,10 @@ func probeGripper(ctx context.Context, a arm.Arm, kind GripperKind, logger loggi
 		d, err = x.detectBioGripper(ctx)
 	case GripperKindVacuum:
 		d, err = x.detectVacuumGripper(ctx)
+	case GripperKindUnknown:
+		return DetectedGripper{Kind: GripperKindUnknown}
 	default:
-		logger.Warnf("gripper detection skipped: unknown kind %q", kind)
+		logger.Warnf("gripper detection skipped: unrecognized kind %q", kind)
 		return DetectedGripper{Kind: GripperKindUnknown}
 	}
 	if err != nil {
@@ -288,9 +304,9 @@ func (x *xArm) detectVacuumGripper(ctx context.Context) (DetectedGripper, error)
 // submodel >= 1305; older xArms use TGPIO 0/1 (v1); Lite 6 has its own bus.
 func vacuumGripperSubmodel(arm DetectedArm) string {
 	switch {
-	case arm.Model == ArmModelLite6:
+	case arm.Model == HardwareModelLite6:
 		return "lite"
-	case arm.Model == ArmModelXArm850:
+	case arm.Model == HardwareModelXArm850:
 		return "v2"
 	case arm.ArmTypeCode >= 1305:
 		return "v2"
