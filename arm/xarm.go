@@ -164,7 +164,7 @@ type xArm struct {
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
 
-	detectedArm DetectedArm
+	detectedArm detectedArm
 }
 
 func init() {

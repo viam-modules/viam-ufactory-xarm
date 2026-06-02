@@ -12,34 +12,34 @@ import (
 	"go.viam.com/rdk/logging"
 )
 
-// HardwareModel identifies an xArm hardware family.
-type HardwareModel string
+// hardwareModel identifies an xArm hardware family.
+type hardwareModel string
 
-// Known HardwareModel values.
+// Known hardwareModel values.
 const (
-	HardwareModelUnknown HardwareModel = "unknown"
-	HardwareModelXArm5   HardwareModel = "xArm5"
-	HardwareModelXArm6   HardwareModel = "xArm6"
-	HardwareModelXArm7   HardwareModel = "xArm7"
-	HardwareModelXArm7T  HardwareModel = "xArm7T"
-	HardwareModelLite6   HardwareModel = "lite6"
-	HardwareModelXArm850 HardwareModel = "xArm850"
+	hardwareModelUnknown hardwareModel = "unknown"
+	hardwareModelXArm5   hardwareModel = "xArm5"
+	hardwareModelXArm6   hardwareModel = "xArm6"
+	hardwareModelXArm7   hardwareModel = "xArm7"
+	hardwareModelXArm7T  hardwareModel = "xArm7T"
+	hardwareModelLite6   hardwareModel = "lite6"
+	hardwareModelXArm850 hardwareModel = "xArm850"
 )
 
-// GripperKind identifies a gripper hardware family.
-type GripperKind string
+// gripperKind identifies a gripper hardware family.
+type gripperKind string
 
-// Known GripperKind values.
+// Known gripperKind values.
 const (
-	GripperKindUnknown  GripperKind = "unknown"
-	GripperKindStandard GripperKind = "standard"
-	GripperKindBio      GripperKind = "bio"
-	GripperKindVacuum   GripperKind = "vacuum"
+	gripperKindUnknown  gripperKind = "unknown"
+	gripperKindStandard gripperKind = "standard"
+	gripperKindBio      gripperKind = "bio"
+	gripperKindVacuum   gripperKind = "vacuum"
 )
 
-// DetectedArm is the result of an arm-model probe.
-type DetectedArm struct {
-	Model           HardwareModel
+// detectedArm is the result of an arm-model probe.
+type detectedArm struct {
+	Model           hardwareModel
 	DeviceType      byte
 	Axis            byte
 	Submodel        string
@@ -48,66 +48,66 @@ type DetectedArm struct {
 	FirmwareVersion string
 }
 
-// DetectedGripper is the result of a gripper-hardware probe.
-type DetectedGripper struct {
-	Kind     GripperKind
+// detectedGripper is the result of a gripper-hardware probe.
+type detectedGripper struct {
+	Kind     gripperKind
 	Version  string
 	Submodel string
 }
 
-func decodeHardwareModel(deviceType, axis byte) HardwareModel {
+func decodeHardwareModel(deviceType, axis byte) hardwareModel {
 	switch deviceType {
 	case 3:
-		return HardwareModelXArm7
+		return hardwareModelXArm7
 	case 5:
-		return HardwareModelXArm5
+		return hardwareModelXArm5
 	case 6:
-		return HardwareModelXArm6
+		return hardwareModelXArm6
 	case 13:
-		return HardwareModelXArm7T
+		return hardwareModelXArm7T
 	case 9:
 		if axis == 6 {
-			return HardwareModelLite6
+			return hardwareModelLite6
 		}
 	case 12:
 		if axis == 6 {
-			return HardwareModelXArm850
+			return hardwareModelXArm850
 		}
 	}
-	return HardwareModelUnknown
+	return hardwareModelUnknown
 }
 
 // armModelFromSNPrefix is the authoritative model signal. GET_HD_TYPES is
 // harmonic-drive debug data (xarm-python-sdk doc/api/xarm_api.md:1757) and
 // the banner's leading "axis" digit is "1" on firmware 2.x; the SN prefix
 // from xarm.py:1841-1844 is what the SDKs actually trust.
-func armModelFromSNPrefix(armTypeStr string) (HardwareModel, byte) {
+func armModelFromSNPrefix(armTypeStr string) (hardwareModel, byte) {
 	if len(armTypeStr) < 2 {
-		return HardwareModelUnknown, 0
+		return hardwareModelUnknown, 0
 	}
 	switch armTypeStr[:2] {
 	case "XF":
-		return HardwareModelXArm5, 5
+		return hardwareModelXArm5, 5
 	case "XI":
-		return HardwareModelXArm6, 6
+		return hardwareModelXArm6, 6
 	case "XS":
-		return HardwareModelXArm7, 7
+		return hardwareModelXArm7, 7
 	case "CS":
-		return HardwareModelXArm7T, 7
+		return hardwareModelXArm7T, 7
 	case "LI":
-		return HardwareModelLite6, 6
+		return hardwareModelLite6, 6
 	case "FX":
-		return HardwareModelXArm850, 6
+		return hardwareModelXArm850, 6
 	}
-	return HardwareModelUnknown, 0
+	return hardwareModelUnknown, 0
 }
 
-func (x *xArm) detectArm(ctx context.Context) (DetectedArm, error) {
+func (x *xArm) detectArm(ctx context.Context) (detectedArm, error) {
 	v, err := x.detectVersion(ctx)
 	if err != nil {
-		return DetectedArm{Model: HardwareModelUnknown}, err
+		return detectedArm{Model: hardwareModelUnknown}, err
 	}
-	d := DetectedArm{
+	d := detectedArm{
 		DeviceType:      byte(v.deviceType),
 		Submodel:        v.armTypeStr,
 		ArmTypeCode:     v.armTypeCode,
@@ -177,27 +177,27 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 	return v, nil
 }
 
-func (x *xArm) detectStandardGripper(ctx context.Context) (DetectedGripper, error) {
+func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, error) {
 	const numRegs = 3
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x08, 0x01)
 	c.params = append(c.params, 0x00, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
-		return DetectedGripper{Kind: GripperKindUnknown}, err
+		return detectedGripper{Kind: gripperKindUnknown}, err
 	}
 	const headerLen = 5
 	wantLen := headerLen + 2*numRegs
 	if len(res.params) < wantLen {
-		return DetectedGripper{Kind: GripperKindUnknown},
+		return detectedGripper{Kind: gripperKindUnknown},
 			fmt.Errorf("standard gripper version response too short: got %d, want %d (%v)", len(res.params), wantLen, res.params)
 	}
 	data := res.params[headerLen : headerLen+2*numRegs]
 	major := binary.BigEndian.Uint16(data[0:2])
 	minor := binary.BigEndian.Uint16(data[2:4])
 	patch := binary.BigEndian.Uint16(data[4:6])
-	return DetectedGripper{
-		Kind:     GripperKindStandard,
+	return detectedGripper{
+		Kind:     gripperKindStandard,
 		Version:  fmt.Sprintf("%d.%d.%d", major, minor, patch),
 		Submodel: standardGripperSubmodel(major, minor, patch),
 	}, nil
@@ -220,59 +220,59 @@ func standardGripperSubmodel(major, minor, patch uint16) string {
 
 // detectBioGripper: byteCount==2 means v1 (single-register response), 2*numRegs
 // means v2 (full SN). Matches xarm_bio.cc:_get_bio_gripper_sn.
-func (x *xArm) detectBioGripper(ctx context.Context) (DetectedGripper, error) {
+func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 	const numRegs = 16
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x0B, 0x10)
 	c.params = append(c.params, 0x00, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
-		return DetectedGripper{Kind: GripperKindUnknown}, err
+		return detectedGripper{Kind: gripperKindUnknown}, err
 	}
 	const headerLen = 5
 	if len(res.params) < headerLen {
-		return DetectedGripper{Kind: GripperKindUnknown},
+		return detectedGripper{Kind: gripperKindUnknown},
 			fmt.Errorf("bio gripper response too short: %d (%v)", len(res.params), res.params)
 	}
 	byteCount := res.params[headerLen-1]
 	switch byteCount {
 	case 2:
-		return DetectedGripper{Kind: GripperKindBio, Version: "1"}, nil
+		return detectedGripper{Kind: gripperKindBio, Version: "1"}, nil
 	case 2 * numRegs:
 		if len(res.params) < headerLen+int(byteCount) {
-			return DetectedGripper{Kind: GripperKindUnknown},
+			return detectedGripper{Kind: gripperKindUnknown},
 				fmt.Errorf("bio gripper response truncated: got %d, want %d", len(res.params), headerLen+int(byteCount))
 		}
 		sn := strings.TrimRight(string(res.params[headerLen:headerLen+int(byteCount)]), "\x00 ")
-		return DetectedGripper{Kind: GripperKindBio, Version: "2 sn=" + sn}, nil
+		return detectedGripper{Kind: gripperKindBio, Version: "2 sn=" + sn}, nil
 	default:
-		return DetectedGripper{Kind: GripperKindUnknown},
+		return detectedGripper{Kind: gripperKindUnknown},
 			fmt.Errorf("bio gripper unexpected byte count: %d (%v)", byteCount, res.params)
 	}
 }
 
-func probeGripper(ctx context.Context, a arm.Arm, kind GripperKind, logger logging.Logger) DetectedGripper {
+func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger logging.Logger) detectedGripper {
 	x, ok := a.(*xArm)
 	if !ok {
 		logger.Warnf("%s gripper detection skipped: arm dependency is not a *xArm (got %T)", kind, a)
-		return DetectedGripper{Kind: GripperKindUnknown}
+		return detectedGripper{Kind: gripperKindUnknown}
 	}
 	var (
-		d   DetectedGripper
+		d   detectedGripper
 		err error
 	)
 	switch kind {
-	case GripperKindStandard:
+	case gripperKindStandard:
 		d, err = x.detectStandardGripper(ctx)
-	case GripperKindBio:
+	case gripperKindBio:
 		d, err = x.detectBioGripper(ctx)
-	case GripperKindVacuum:
+	case gripperKindVacuum:
 		d, err = x.detectVacuumGripper(ctx)
-	case GripperKindUnknown:
-		return DetectedGripper{Kind: GripperKindUnknown}
+	case gripperKindUnknown:
+		return detectedGripper{Kind: gripperKindUnknown}
 	default:
 		logger.Warnf("gripper detection skipped: unrecognized kind %q", kind)
-		return DetectedGripper{Kind: GripperKindUnknown}
+		return detectedGripper{Kind: gripperKindUnknown}
 	}
 	if err != nil {
 		logger.Warnf("%s gripper detection failed: %v", kind, err)
@@ -282,19 +282,19 @@ func probeGripper(ctx context.Context, a arm.Arm, kind GripperKind, logger loggi
 	return d
 }
 
-func (x *xArm) detectVacuumGripper(ctx context.Context) (DetectedGripper, error) {
+func (x *xArm) detectVacuumGripper(ctx context.Context) (detectedGripper, error) {
 	c := x.newCmd(regMap["VacuumState"])
 	c.params = append(c.params, 0x09, 0x0A, 0x18)
 	resp, err := x.send(ctx, c, true)
 	if err != nil {
-		return DetectedGripper{Kind: GripperKindUnknown}, err
+		return detectedGripper{Kind: gripperKindUnknown}, err
 	}
 	if len(resp.params) < 5 {
-		return DetectedGripper{Kind: GripperKindUnknown},
+		return detectedGripper{Kind: gripperKindUnknown},
 			fmt.Errorf("vacuum gripper response too short: %d (%v)", len(resp.params), resp.params)
 	}
-	return DetectedGripper{
-		Kind:     GripperKindVacuum,
+	return detectedGripper{
+		Kind:     gripperKindVacuum,
 		Submodel: vacuumGripperSubmodel(x.detectedArm),
 	}, nil
 }
@@ -302,11 +302,11 @@ func (x *xArm) detectVacuumGripper(ctx context.Context) (DetectedGripper, error)
 // vacuumGripperSubmodel infers hardware revision from the arm: xarm-python-sdk
 // gpio.py:117 uses TGPIO outputs 3/4 (v2) for 850 and for xArm6/7 with
 // submodel >= 1305; older xArms use TGPIO 0/1 (v1); Lite 6 has its own bus.
-func vacuumGripperSubmodel(arm DetectedArm) string {
+func vacuumGripperSubmodel(arm detectedArm) string {
 	switch {
-	case arm.Model == HardwareModelLite6:
+	case arm.Model == hardwareModelLite6:
 		return "lite"
-	case arm.Model == HardwareModelXArm850:
+	case arm.Model == hardwareModelXArm850:
 		return "v2"
 	case arm.ArmTypeCode >= 1305:
 		return "v2"

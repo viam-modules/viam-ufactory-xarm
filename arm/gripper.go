@@ -77,7 +77,7 @@ type myGripperLite struct {
 	arm      arm.Arm
 	isMoving atomic.Bool
 
-	detected DetectedGripper
+	detected detectedGripper
 
 	logger logging.Logger
 }
@@ -99,7 +99,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	g.detected = probeGripper(ctx, g.arm, GripperKindBio, logger)
+	g.detected = probeGripper(ctx, g.arm, gripperKindBio, logger)
 
 	return g, nil
 }
@@ -227,7 +227,7 @@ type myGripper struct {
 	goToPositionLock sync.Mutex
 	isMoving         atomic.Bool
 
-	detected DetectedGripper
+	detected detectedGripper
 
 	logger logging.Logger
 }
@@ -249,7 +249,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
-	g.detected = probeGripper(ctx, g.arm, GripperKindStandard, logger)
+	g.detected = probeGripper(ctx, g.arm, gripperKindStandard, logger)
 
 	if newConf.GripperSpeed != 0 {
 		if _, err := g.arm.DoCommand(ctx, map[string]any{
