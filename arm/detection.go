@@ -10,6 +10,7 @@ import (
 
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/utils"
 )
 
 // hardwareModel identifies an xArm hardware family.
@@ -281,15 +282,12 @@ func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 }
 
 func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger logging.Logger) detectedGripper {
-	x, ok := a.(*xArm)
-	if !ok {
-		logger.Warnf("%s gripper detection skipped: arm dependency is not a *xArm (got %T)", kind, a)
+	x, err := utils.AssertType[*xArm](a)
+	if err != nil {
+		logger.Warnf("%s gripper detection skipped: %v", kind, err)
 		return detectedGripper{Kind: gripperKindUnknown}
 	}
-	var (
-		d   detectedGripper
-		err error
-	)
+	var d detectedGripper
 	switch kind {
 	case gripperKindStandard:
 		d, err = x.detectStandardGripper(ctx)
