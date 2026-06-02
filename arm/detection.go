@@ -181,11 +181,17 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 	return v, nil
 }
 
+// Modbus register start addresses used by gripper probes.
+const (
+	standardGripperVersionReg uint16 = 0x0801 // SOFT_VER, 3 consecutive regs: major.minor.patch
+	bioGripperSNReg           uint16 = 0x0B10 // BIO serial-number block, up to 16 regs
+)
+
 func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, error) {
 	const numRegs = 3
 	c := x.gripperPreamble(false)
-	c.params = append(c.params, 0x08, 0x01)
-	c.params = append(c.params, 0x00, numRegs)
+	c.params = binary.BigEndian.AppendUint16(c.params, standardGripperVersionReg)
+	c.params = binary.BigEndian.AppendUint16(c.params, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return detectedGripper{Kind: gripperKindUnknown}, err
@@ -227,8 +233,8 @@ func standardGripperSubmodel(major, minor, patch uint16) string {
 func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 	const numRegs = 16
 	c := x.gripperPreamble(false)
-	c.params = append(c.params, 0x0B, 0x10)
-	c.params = append(c.params, 0x00, numRegs)
+	c.params = binary.BigEndian.AppendUint16(c.params, bioGripperSNReg)
+	c.params = binary.BigEndian.AppendUint16(c.params, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
 		return detectedGripper{Kind: gripperKindUnknown}, err
