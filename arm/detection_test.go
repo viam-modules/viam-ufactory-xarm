@@ -3,6 +3,7 @@ package arm
 import (
 	"testing"
 
+	"go.viam.com/rdk/logging"
 	"go.viam.com/test"
 )
 
@@ -65,7 +66,7 @@ func TestParseVersionBanner(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := parseVersionBanner(tc.banner)
+			got, ok := parseVersionBanner(tc.banner, logging.NewTestLogger(t))
 			test.That(t, ok, test.ShouldEqual, tc.wantOK)
 			if !tc.wantOK {
 				return

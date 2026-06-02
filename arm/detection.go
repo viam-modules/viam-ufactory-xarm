@@ -78,9 +78,8 @@ func decodeHardwareModel(deviceType, axis byte) hardwareModel {
 }
 
 // armModelFromSNPrefix is the authoritative model signal. GET_HD_TYPES is
-// harmonic-drive debug data (xarm-python-sdk doc/api/xarm_api.md:1757) and
-// the banner's leading "axis" digit is "1" on firmware 2.x; the SN prefix
-// from xarm.py:1841-1844 is what the SDKs actually trust.
+// harmonic-drive debug data, and the banner's leading "axis" digit is "1" on
+// firmware 2.x; the two-letter SN prefix is what UFactory's SDKs actually trust.
 func armModelFromSNPrefix(armTypeStr string) (hardwareModel, byte) {
 	if len(armTypeStr) < 2 {
 		return hardwareModelUnknown, 0
@@ -128,10 +127,10 @@ type versionInfo struct {
 	firmwareVersion string
 }
 
-// [^,]+ instead of the C++ SDK's greedy .* — RE2 doesn't backtrack the same way.
+// [^,]+ instead of a greedy .* — RE2 doesn't backtrack the same way.
 var versionBannerRE = regexp.MustCompile(`(\d+),(\d+),([^,]+),([^,]+),.*?[vV]?(\d+)\.(\d+)\.(\d+)`)
 
-func parseVersionBanner(banner string) (versionInfo, bool) {
+func parseVersionBanner(banner string, logger logging.Logger) (versionInfo, bool) {
 	m := versionBannerRE.FindStringSubmatch(banner)
 	if m == nil {
 		return versionInfo{}, false
@@ -141,23 +140,28 @@ func parseVersionBanner(banner string) (versionInfo, bool) {
 		controlTypeStr:  m[4],
 		firmwareVersion: fmt.Sprintf("%s.%s.%s", m[5], m[6], m[7]),
 	}
-	v.axis = atoiOrZero(m[1])
-	v.deviceType = atoiOrZero(m[2])
-	if len(v.armTypeStr) >= 6 {
-		v.armTypeCode = atoiOrZero(v.armTypeStr[2:6])
-	}
-	if len(v.controlTypeStr) >= 6 {
-		v.controlTypeCode = atoiOrZero(v.controlTypeStr[2:6])
-	}
+	// axis and deviceType come from regex group \d+ — Atoi can only fail on overflow,
+	// which is unreachable for these single-digit banner fields.
+	v.axis, _ = strconv.Atoi(m[1])
+	v.deviceType, _ = strconv.Atoi(m[2])
+	v.armTypeCode = parseSubmodelCode(v.armTypeStr, "arm", logger)
+	v.controlTypeCode = parseSubmodelCode(v.controlTypeStr, "control", logger)
 	return v, true
 }
 
-func atoiOrZero(s string) int {
-	n, err := strconv.Atoi(s)
-	if err != nil {
+// parseSubmodelCode extracts the 4-digit numeric code from SN positions [2:6]. A
+// non-digit value means UFactory shipped a SN format we don't recognize — log and
+// fall back to 0 so detection can still proceed using the 2-char prefix.
+func parseSubmodelCode(s, kind string, logger logging.Logger) int {
+	if len(s) < 6 {
 		return 0
 	}
-	return n
+	code, err := strconv.Atoi(s[2:6])
+	if err != nil {
+		logger.Warnf("could not parse %s submodel code from SN %q: %v", kind, s, err)
+		return 0
+	}
+	return code
 }
 
 func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
@@ -170,7 +174,7 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 		return versionInfo{}, fmt.Errorf("version response too short: %d (%v)", len(resp.params), resp.params)
 	}
 	banner := strings.TrimRight(string(resp.params[1:]), "\x00 ")
-	v, ok := parseVersionBanner(banner)
+	v, ok := parseVersionBanner(banner, x.logger)
 	if !ok {
 		return versionInfo{}, fmt.Errorf("could not parse version banner: %q", banner)
 	}
@@ -203,8 +207,8 @@ func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, erro
 	}, nil
 }
 
-// standardGripperSubmodel splits at firmware >= 3.4.3, the gate the Python
-// SDK uses for status-reporting support (gripper.py:83-85).
+// standardGripperSubmodel splits at firmware >= 3.4.3, the gate for
+// status-register (0x0000) support on the standard gripper.
 func standardGripperSubmodel(major, minor, patch uint16) string {
 	switch {
 	case major > 3:
@@ -219,7 +223,7 @@ func standardGripperSubmodel(major, minor, patch uint16) string {
 }
 
 // detectBioGripper: byteCount==2 means v1 (single-register response), 2*numRegs
-// means v2 (full SN). Matches xarm_bio.cc:_get_bio_gripper_sn.
+// means v2 (full SN).
 func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 	const numRegs = 16
 	c := x.gripperPreamble(false)
@@ -299,9 +303,9 @@ func (x *xArm) detectVacuumGripper(ctx context.Context) (detectedGripper, error)
 	}, nil
 }
 
-// vacuumGripperSubmodel infers hardware revision from the arm: xarm-python-sdk
-// gpio.py:117 uses TGPIO outputs 3/4 (v2) for 850 and for xArm6/7 with
-// submodel >= 1305; older xArms use TGPIO 0/1 (v1); Lite 6 has its own bus.
+// vacuumGripperSubmodel infers hardware revision from the arm: TGPIO outputs
+// 3/4 (v2) drive the 850 and xArm6/7 with submodel >= 1305; older xArms use
+// TGPIO 0/1 (v1); Lite 6 has its own bus.
 func vacuumGripperSubmodel(arm detectedArm) string {
 	switch {
 	case arm.Model == hardwareModelLite6:
