@@ -78,7 +78,7 @@ type detectedGripper struct {
 // unknownGripper returns a detectedGripper whose Kind is gripperKindUnknown. Use
 // this instead of detectedGripper{} so the default carries the explicit label.
 func unknownGripper() detectedGripper {
-	return unknownGripper()
+	return detectedGripper{Kind: gripperKindUnknown}
 }
 
 func decodeHardwareModel(deviceType, axis byte) hardwareModel {
@@ -156,23 +156,26 @@ type versionInfo struct {
 // [^,]+ instead of a greedy .* — RE2 doesn't backtrack the same way.
 var versionBannerRE = regexp.MustCompile(`(\d+),(\d+),([^,]+),([^,]+),.*?[vV]?(\d+)\.(\d+)\.(\d+)`)
 
-func parseVersionBanner(banner string, logger logging.Logger) (versionInfo, bool) {
+func parseVersionBanner(banner string, logger logging.Logger) (versionInfo, error) {
 	m := versionBannerRE.FindStringSubmatch(banner)
 	if m == nil {
-		return versionInfo{}, false
+		return versionInfo{}, fmt.Errorf("could not parse version banner: %q", banner)
 	}
 	v := versionInfo{
 		armTypeStr:      m[3],
 		controlTypeStr:  m[4],
 		firmwareVersion: fmt.Sprintf("%s.%s.%s", m[5], m[6], m[7]),
 	}
-	// axis and deviceType come from regex group \d+ — Atoi can only fail on overflow,
-	// which is unreachable for these single-digit banner fields.
-	v.axis, _ = strconv.Atoi(m[1])
-	v.deviceType, _ = strconv.Atoi(m[2])
+	var err error
+	if v.axis, err = strconv.Atoi(m[1]); err != nil {
+		return versionInfo{}, fmt.Errorf("invalid axis %q in banner %q: %w", m[1], banner, err)
+	}
+	if v.deviceType, err = strconv.Atoi(m[2]); err != nil {
+		return versionInfo{}, fmt.Errorf("invalid device_type %q in banner %q: %w", m[2], banner, err)
+	}
 	v.armTypeCode = parseSubmodelCode(v.armTypeStr, "arm", logger)
 	v.controlTypeCode = parseSubmodelCode(v.controlTypeStr, "control", logger)
-	return v, true
+	return v, nil
 }
 
 // parseSubmodelCode extracts the 4-digit numeric code from SN positions [2:6]. A
@@ -200,11 +203,7 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 		return versionInfo{}, fmt.Errorf("version response too short: %d (%v)", len(resp.params), resp.params)
 	}
 	banner := strings.TrimRight(string(resp.params[1:]), "\x00 ")
-	v, ok := parseVersionBanner(banner, x.logger)
-	if !ok {
-		return versionInfo{}, fmt.Errorf("could not parse version banner: %q", banner)
-	}
-	return v, nil
+	return parseVersionBanner(banner, x.logger)
 }
 
 // Modbus register start addresses used by gripper probes.
@@ -293,7 +292,7 @@ func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger loggi
 		logger.Warnf("%s gripper detection skipped: %v", kind, err)
 		return unknownGripper()
 	}
-	d := unknownGripper()
+	var d detectedGripper
 	switch kind {
 	case gripperKindStandard:
 		d, err = x.detectStandardGripper(ctx)

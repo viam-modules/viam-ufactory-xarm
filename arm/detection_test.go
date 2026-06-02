@@ -66,11 +66,12 @@ func TestParseVersionBanner(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := parseVersionBanner(tc.banner, logging.NewTestLogger(t))
-			test.That(t, ok, test.ShouldEqual, tc.wantOK)
+			got, err := parseVersionBanner(tc.banner, logging.NewTestLogger(t))
 			if !tc.wantOK {
+				test.That(t, err, test.ShouldNotBeNil)
 				return
 			}
+			test.That(t, err, test.ShouldBeNil)
 			if tc.wantAxis != 0 {
 				test.That(t, got.axis, test.ShouldEqual, tc.wantAxis)
 			}
