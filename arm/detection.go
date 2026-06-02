@@ -37,6 +37,25 @@ const (
 	gripperKindVacuum   gripperKind = "vacuum"
 )
 
+// Submodel labels reported in detectedGripper.Submodel.
+const (
+	submodelV1   = "v1"
+	submodelV2   = "v2"
+	submodelLite = "lite"
+)
+
+// Two-letter SN prefixes UFactory burns into the controller banner. These are
+// the authoritative model signal — numeric device_type drifts across firmware
+// versions, but the prefix does not.
+const (
+	snPrefixXArm5   = "XF"
+	snPrefixXArm6   = "XI"
+	snPrefixXArm7   = "XS"
+	snPrefixXArm7T  = "CS"
+	snPrefixLite6   = "LI"
+	snPrefixXArm850 = "FX"
+)
+
 // detectedArm is the result of an arm-model probe.
 type detectedArm struct {
 	Model           hardwareModel
@@ -85,17 +104,17 @@ func armModelFromSNPrefix(armTypeStr string) (hardwareModel, byte) {
 		return hardwareModelUnknown, 0
 	}
 	switch armTypeStr[:2] {
-	case "XF":
+	case snPrefixXArm5:
 		return hardwareModelXArm5, 5
-	case "XI":
+	case snPrefixXArm6:
 		return hardwareModelXArm6, 6
-	case "XS":
+	case snPrefixXArm7:
 		return hardwareModelXArm7, 7
-	case "CS":
+	case snPrefixXArm7T:
 		return hardwareModelXArm7T, 7
-	case "LI":
+	case snPrefixLite6:
 		return hardwareModelLite6, 6
-	case "FX":
+	case snPrefixXArm850:
 		return hardwareModelXArm850, 6
 	}
 	return hardwareModelUnknown, 0
@@ -218,13 +237,13 @@ func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, erro
 func standardGripperSubmodel(major, minor, patch uint16) string {
 	switch {
 	case major > 3:
-		return "v2"
+		return submodelV2
 	case major == 3 && minor > 4:
-		return "v2"
+		return submodelV2
 	case major == 3 && minor == 4 && patch >= 3:
-		return "v2"
+		return submodelV2
 	default:
-		return "v1"
+		return submodelV1
 	}
 }
 
@@ -315,12 +334,12 @@ func (x *xArm) detectVacuumGripper(ctx context.Context) (detectedGripper, error)
 func vacuumGripperSubmodel(arm detectedArm) string {
 	switch {
 	case arm.Model == hardwareModelLite6:
-		return "lite"
+		return submodelLite
 	case arm.Model == hardwareModelXArm850:
-		return "v2"
+		return submodelV2
 	case arm.ArmTypeCode >= 1305:
-		return "v2"
+		return submodelV2
 	default:
-		return "v1"
+		return submodelV1
 	}
 }
