@@ -75,6 +75,12 @@ type detectedGripper struct {
 	Submodel string
 }
 
+// unknownGripper returns a detectedGripper whose Kind is gripperKindUnknown. Use
+// this instead of detectedGripper{} so the default carries the explicit label.
+func unknownGripper() detectedGripper {
+	return unknownGripper()
+}
+
 func decodeHardwareModel(deviceType, axis byte) hardwareModel {
 	switch deviceType {
 	case 3:
@@ -214,12 +220,12 @@ func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, erro
 	c.params = binary.BigEndian.AppendUint16(c.params, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
-		return detectedGripper{Kind: gripperKindUnknown}, err
+		return unknownGripper(), err
 	}
 	const headerLen = 5
 	wantLen := headerLen + 2*numRegs
 	if len(res.params) < wantLen {
-		return detectedGripper{Kind: gripperKindUnknown},
+		return unknownGripper(),
 			fmt.Errorf("standard gripper version response too short: got %d, want %d (%v)", len(res.params), wantLen, res.params)
 	}
 	data := res.params[headerLen : headerLen+2*numRegs]
@@ -257,11 +263,11 @@ func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 	c.params = binary.BigEndian.AppendUint16(c.params, numRegs)
 	res, err := x.gripperSend(ctx, c)
 	if err != nil {
-		return detectedGripper{Kind: gripperKindUnknown}, err
+		return unknownGripper(), err
 	}
 	const headerLen = 5
 	if len(res.params) < headerLen {
-		return detectedGripper{Kind: gripperKindUnknown},
+		return unknownGripper(),
 			fmt.Errorf("bio gripper response too short: %d (%v)", len(res.params), res.params)
 	}
 	byteCount := res.params[headerLen-1]
@@ -270,13 +276,13 @@ func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 		return detectedGripper{Kind: gripperKindBio, Version: "1"}, nil
 	case 2 * numRegs:
 		if len(res.params) < headerLen+int(byteCount) {
-			return detectedGripper{Kind: gripperKindUnknown},
+			return unknownGripper(),
 				fmt.Errorf("bio gripper response truncated: got %d, want %d", len(res.params), headerLen+int(byteCount))
 		}
 		sn := strings.TrimRight(string(res.params[headerLen:headerLen+int(byteCount)]), "\x00 ")
 		return detectedGripper{Kind: gripperKindBio, Version: "2 sn=" + sn}, nil
 	default:
-		return detectedGripper{Kind: gripperKindUnknown},
+		return unknownGripper(),
 			fmt.Errorf("bio gripper unexpected byte count: %d (%v)", byteCount, res.params)
 	}
 }
@@ -285,9 +291,9 @@ func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger loggi
 	x, err := utils.AssertType[*xArm](a)
 	if err != nil {
 		logger.Warnf("%s gripper detection skipped: %v", kind, err)
-		return detectedGripper{Kind: gripperKindUnknown}
+		return unknownGripper()
 	}
-	var d detectedGripper
+	d := unknownGripper()
 	switch kind {
 	case gripperKindStandard:
 		d, err = x.detectStandardGripper(ctx)
@@ -296,10 +302,10 @@ func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger loggi
 	case gripperKindVacuum:
 		d, err = x.detectVacuumGripper(ctx)
 	case gripperKindUnknown:
-		return detectedGripper{Kind: gripperKindUnknown}
+		return unknownGripper()
 	default:
 		logger.Warnf("gripper detection skipped: unrecognized kind %q", kind)
-		return detectedGripper{Kind: gripperKindUnknown}
+		return unknownGripper()
 	}
 	if err != nil {
 		logger.Warnf("%s gripper detection failed: %v", kind, err)
@@ -314,10 +320,10 @@ func (x *xArm) detectVacuumGripper(ctx context.Context) (detectedGripper, error)
 	c.params = append(c.params, 0x09, 0x0A, 0x18)
 	resp, err := x.send(ctx, c, true)
 	if err != nil {
-		return detectedGripper{Kind: gripperKindUnknown}, err
+		return unknownGripper(), err
 	}
 	if len(resp.params) < 5 {
-		return detectedGripper{Kind: gripperKindUnknown},
+		return unknownGripper(),
 			fmt.Errorf("vacuum gripper response too short: %d (%v)", len(resp.params), resp.params)
 	}
 	return detectedGripper{
