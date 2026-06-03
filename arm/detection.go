@@ -153,7 +153,7 @@ type versionInfo struct {
 	firmwareVersion string
 }
 
-// [^,]+ instead of a greedy .* — RE2 doesn't backtrack the same way.
+// regex to parse xArm serial number format
 var versionBannerRE = regexp.MustCompile(`(\d+),(\d+),([^,]+),([^,]+),.*?[vV]?(\d+)\.(\d+)\.(\d+)`)
 
 func parseVersionBanner(banner string, logger logging.Logger) (versionInfo, error) {
