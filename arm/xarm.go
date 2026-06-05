@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -718,7 +719,18 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if torqueF < 0 || torqueF > 100 {
 			return nil, fmt.Errorf("grab_with_torque.torque must be between 0 and 100, got %v", torqueF)
 		}
-		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF)); err != nil {
+		timeout := 10 * time.Second
+		if raw, ok := params["timeout_seconds"]; ok {
+			timeoutF, err := utils.AssertType[float64](raw)
+			if err != nil {
+				return nil, fmt.Errorf("grab_with_torque.timeout_seconds: %w", err)
+			}
+			if timeoutF <= 0 {
+				return nil, fmt.Errorf("grab_with_torque.timeout_seconds must be > 0, got %v", timeoutF)
+			}
+			timeout = time.Duration(timeoutF * float64(time.Second))
+		}
+		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF), timeout); err != nil {
 			return nil, err
 		}
 		validCommand = true

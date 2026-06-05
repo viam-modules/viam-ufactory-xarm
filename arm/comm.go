@@ -1054,7 +1054,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 // graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
 // applies the requested grasp current/torque atomically with the position move. See section 4.2 of
 // the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
-func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32) error {
+func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, timeout time.Duration) error {
 	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
 	// otherwise back-to-back grasp commands may be ignored while a hold is active.
 	if err := x.disableGripperControlMode(ctx); err != nil {
@@ -1078,19 +1078,19 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
 	c.params = append(c.params, posBytes...)
 
-	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d", speed, torque, position)
+	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d timeout=%s", speed, torque, position, timeout)
 	if _, err := x.send(ctx, c, true); err != nil {
 		return err
 	}
 
-	return x.waitForGripper(ctx, int(position)) //nolint:gosec
+	return x.waitForGripper(ctx, int(position), timeout) //nolint:gosec
 }
 
 // waitForGripper polls gripper position until it reaches goal (within 6), stalls
-// (no movement >1 for >1s), or 10s elapses. Mirrors the polling logic in
+// (no movement >1 for >1s), or timeout elapses. Mirrors the polling logic in
 // myGripper.goToPosition so graspWithTorque blocks until motion has actually
 // completed instead of being fire-and-forget at the Modbus layer.
-func (x *xArm) waitForGripper(ctx context.Context, goal int) error {
+func (x *xArm) waitForGripper(ctx context.Context, goal int, timeout time.Duration) error {
 	const pollInterval = 30
 	start := time.Now()
 	old := -1
@@ -1119,7 +1119,7 @@ func (x *xArm) waitForGripper(ctx context.Context, goal int) error {
 		}
 		old = pos
 
-		if time.Since(start) > 10*time.Second {
+		if time.Since(start) > timeout {
 			return nil
 		}
 	}
