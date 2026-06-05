@@ -41,7 +41,7 @@ func TestParseSensitivityOverride(t *testing.T) {
 	test.That(t, level, test.ShouldEqual, 0)
 
 	// Nil extra behaves like absent.
-	level, ok, err = parseSensitivityOverride(nil)
+	_, ok, err = parseSensitivityOverride(nil)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, ok, test.ShouldBeFalse)
 
