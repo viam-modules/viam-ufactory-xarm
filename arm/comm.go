@@ -1054,7 +1054,7 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 // graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
 // applies the requested grasp current/torque atomically with the position move. See section 4.2 of
 // the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
-func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, timeout time.Duration) error {
+func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, stall time.Duration) error {
 	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
 	// otherwise back-to-back grasp commands may be ignored while a hold is active.
 	if err := x.disableGripperControlMode(ctx); err != nil {
@@ -1078,20 +1078,23 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
 	c.params = append(c.params, posBytes...)
 
-	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d timeout=%s", speed, torque, position, timeout)
+	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
 	if _, err := x.send(ctx, c, true); err != nil {
 		return err
 	}
 
-	return x.waitForGripper(ctx, int(position), timeout) //nolint:gosec
+	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
 }
 
-// waitForGripper polls gripper position until it reaches goal (within 6), stalls
-// (no movement >1 for >1s), or timeout elapses. Mirrors the polling logic in
-// myGripper.goToPosition so graspWithTorque blocks until motion has actually
-// completed instead of being fire-and-forget at the Modbus layer.
-func (x *xArm) waitForGripper(ctx context.Context, goal int, timeout time.Duration) error {
+// waitForGripper polls gripper position until it reaches goal (within 6),
+// stalls (no movement >1 for >stall), or 10s elapses as an overall backstop.
+// Caller controls the stall window: a long stall (e.g. 1s) confirms the gripper
+// really stopped; a short stall (e.g. 200ms) returns quickly for callers that
+// expect immediate resistance like squeeze loops.
+func (x *xArm) waitForGripper(ctx context.Context, goal int, stall time.Duration) error {
 	const pollInterval = 30
+	const overallTimeout = 10 * time.Second
+	stallMs := int(stall / time.Millisecond)
 	start := time.Now()
 	old := -1
 	msSinceStuck := -1
@@ -1111,7 +1114,7 @@ func (x *xArm) waitForGripper(ctx context.Context, goal int, timeout time.Durati
 
 		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
 			msSinceStuck += pollInterval
-			if msSinceStuck > 1000 {
+			if msSinceStuck > stallMs {
 				return nil
 			}
 		} else {
@@ -1119,7 +1122,7 @@ func (x *xArm) waitForGripper(ctx context.Context, goal int, timeout time.Durati
 		}
 		old = pos
 
-		if time.Since(start) > timeout {
+		if time.Since(start) > overallTimeout {
 			return nil
 		}
 	}
