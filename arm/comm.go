@@ -493,12 +493,24 @@ func (x *xArm) Close(ctx context.Context) error {
 	return err
 }
 
+// MoveThroughJointPositions moves the arm through the given joint waypoints.
+//
+// Like MoveToPosition, a "collision_sensitivity" value in extra overrides the
+// arm's hardware collision detection for the duration of the move and is
+// restored afterwards. This also covers MoveToJointPositions, which delegates
+// here. See applyCollisionSensitivityOverride.
 func (x *xArm) MoveThroughJointPositions(
 	ctx context.Context,
 	positions [][]referenceframe.Input,
 	opts *arm.MoveOptions,
 	extra map[string]any,
-) error {
+) (err error) {
+	restore, err := x.applyCollisionSensitivityOverride(ctx, extra)
+	if err != nil {
+		return err
+	}
+	defer restore(&err)
+
 	mo := x.moveOptions(opts, extra)
 	return x.internalMoveThroughJointPositions(ctx, positions, mo)
 }
@@ -868,12 +880,23 @@ func (x *xArm) EndPosition(ctx context.Context, extra map[string]any) (spatialma
 }
 
 // MoveToPosition moves the arm to the specified cartesian position.
-func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]any) error {
+//
+// When extra contains a "collision_sensitivity" value (integer 0-5), the arm's
+// hardware collision detection is set to that level for the duration of the
+// move and restored to the configured baseline once the move completes. See
+// applyCollisionSensitivityOverride.
+func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra map[string]any) (err error) {
 	if x.motion == nil {
 		return fmt.Errorf("xarm cannot do MoveToPosition without speficying a motion service")
 	}
 
-	_, err := x.motion.Move(
+	restore, err := x.applyCollisionSensitivityOverride(ctx, extra)
+	if err != nil {
+		return err
+	}
+	defer restore(&err)
+
+	_, err = x.motion.Move(
 		ctx,
 		motion.MoveReq{
 			ComponentName: x.Name().Name,
@@ -881,6 +904,78 @@ func (x *xArm) MoveToPosition(ctx context.Context, pos spatialmath.Pose, extra m
 		},
 	)
 	return err
+}
+
+// collisionSensitivityKey is the extra attribute carrying a per-move collision
+// sensitivity override for the MoveTo* functions.
+const collisionSensitivityKey = "collision_sensitivity"
+
+// defaultCollisionSensitivity is the xArm firmware default, used as the restore
+// baseline when no collision_sensitivity is set in the component configuration.
+const defaultCollisionSensitivity = 3
+
+// applyCollisionSensitivityOverride reads an optional per-move collision
+// sensitivity override from extra and, if present, applies it to the arm. It
+// returns a restore function (always non-nil, safe to defer) that resets the
+// arm to the configured baseline once the move finishes; when no override was
+// present the restore is a no-op. The restore appends any failure to the error
+// it is given, so callers defer it with a pointer to their named return value.
+func (x *xArm) applyCollisionSensitivityOverride(ctx context.Context, extra map[string]any) (func(*error), error) {
+	noop := func(*error) {}
+
+	override, hasOverride, err := parseSensitivityOverride(extra)
+	if err != nil {
+		return noop, err
+	}
+	if !hasOverride {
+		return noop, nil
+	}
+	if err := x.setCollisionDetectionSensitivity(ctx, override); err != nil {
+		return noop, fmt.Errorf("failed to apply collision sensitivity override %d: %w", override, err)
+	}
+
+	return func(errp *error) {
+		// If the move's context was cancelled we still need a live context to
+		// issue the restore, so fall back to a short-lived one.
+		restoreCtx := ctx
+		if restoreCtx.Err() != nil {
+			var cancel context.CancelFunc
+			restoreCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+		}
+		baseline := x.baselineCollisionSensitivity()
+		if rErr := x.setCollisionDetectionSensitivity(restoreCtx, baseline); rErr != nil {
+			*errp = multierr.Append(*errp, fmt.Errorf("failed to restore collision sensitivity to %d: %w", baseline, rErr))
+		}
+	}, nil
+}
+
+// parseSensitivityOverride reads an optional "collision_sensitivity" override
+// from a move's extra map. It returns the level, whether one was present, and
+// an error if the value is malformed. Values must be whole numbers in [0, 5].
+func parseSensitivityOverride(extra map[string]any) (int, bool, error) {
+	raw, ok := extra[collisionSensitivityKey]
+	if !ok {
+		return 0, false, nil
+	}
+	f, ok := raw.(float64)
+	if !ok {
+		return 0, false, fmt.Errorf("%s must be a number, got %T", collisionSensitivityKey, raw)
+	}
+	level := int(f)
+	if float64(level) != f || level < 0 || level > 5 {
+		return 0, false, fmt.Errorf("%s must be an integer between 0 and 5, got %v", collisionSensitivityKey, raw)
+	}
+	return level, true, nil
+}
+
+// baselineCollisionSensitivity is the level restored after a per-move override:
+// the configured value if set, otherwise the firmware default.
+func (x *xArm) baselineCollisionSensitivity() int {
+	if x.conf != nil && x.conf.Sensitivity != nil {
+		return *x.conf.Sensitivity
+	}
+	return defaultCollisionSensitivity
 }
 
 // JointPositions returns the current positions of all joints.
