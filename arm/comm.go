@@ -1079,8 +1079,50 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 	c.params = append(c.params, posBytes...)
 
 	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d", speed, torque, position)
-	_, err := x.send(ctx, c, true)
-	return err
+	if _, err := x.send(ctx, c, true); err != nil {
+		return err
+	}
+
+	return x.waitForGripper(ctx, int(position)) //nolint:gosec
+}
+
+// waitForGripper polls gripper position until it reaches goal (within 6), stalls
+// (no movement >1 for >1s), or 10s elapses. Mirrors the polling logic in
+// myGripper.goToPosition so graspWithTorque blocks until motion has actually
+// completed instead of being fire-and-forget at the Modbus layer.
+func (x *xArm) waitForGripper(ctx context.Context, goal int) error {
+	const pollInterval = 30
+	start := time.Now()
+	old := -1
+	msSinceStuck := -1
+
+	for {
+		time.Sleep(time.Duration(pollInterval) * time.Millisecond)
+
+		pos32, err := x.getGripperPosition(ctx)
+		if err != nil {
+			return err
+		}
+		pos := int(pos32)
+
+		if math.Abs(float64(pos-goal)) <= 6 {
+			return nil
+		}
+
+		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
+			msSinceStuck += pollInterval
+			if msSinceStuck > 1000 {
+				return nil
+			}
+		} else {
+			msSinceStuck = 0
+		}
+		old = pos
+
+		if time.Since(start) > 10*time.Second {
+			return nil
+		}
+	}
 }
 
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
