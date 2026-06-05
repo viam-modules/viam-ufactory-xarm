@@ -198,6 +198,34 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{
 await arm.do_command({"set_speed": 50.0, "set_acceleration": 100.0})
 ```
 
+### Collision Sensitivity
+
+Adjusts the arm's hardware collision detection at runtime, overriding the `collision_sensitivity`
+config value for the rest of the session. The value must be an integer from `0` (detection off) to
+`5` (most sensitive); higher values trigger the emergency stop with less force.
+
+This is useful when some moves deliberately make contact (for example pressing a physical button)
+while others should stop on any unexpected contact: lower the sensitivity (or set `0`) before a
+contact move, and raise it before a free-space move.
+
+The command returns an error if the arm is currently moving — set the sensitivity between moves, not
+during one. The setting is not persisted; the configured `collision_sensitivity` is restored on the
+next restart.
+
+**Go:**
+```go
+// Disable collision detection before a move that intentionally makes contact.
+xArmComponent.DoCommand(ctx, map[string]interface{}{"set_collision_sensitivity": 0})
+
+// Re-enable it before a free-space move.
+xArmComponent.DoCommand(ctx, map[string]interface{}{"set_collision_sensitivity": 3})
+```
+
+**Python:**
+```python
+await arm.do_command({"set_collision_sensitivity": 0})
+```
+
 ### Joint Torques
 
 ```go
