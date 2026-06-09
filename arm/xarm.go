@@ -163,6 +163,8 @@ type xArm struct {
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
+
+	detectedArm detectedArm
 }
 
 func init() {
@@ -438,6 +440,21 @@ func NewXArm(ctx context.Context, name resource.Name,
 	} else {
 		x.gripperConn = gripperConn
 		logger.Infof("gripper Modbus traffic routed through dedicated port %d", defaultGripperPort)
+	}
+
+	if d, err := x.detectArm(ctx); err != nil {
+		logger.Warnf("xArm hardware detection failed: %v", err)
+	} else {
+		x.detectedArm = d
+		if d.armTypeCode != 0 {
+			logger.Infof(
+				"xArm hardware detected: model=%s axis=%d device_type=%d submodel=%s arm_type=%d control_type=%d fw=%s (configured as %s)",
+				d.model, d.axis, d.deviceType, d.submodel, d.armTypeCode, d.controlTypeCode, d.firmwareVersion, modelName,
+			)
+		} else {
+			logger.Infof("xArm hardware detected: model=%s axis=%d device_type=%d (configured as %s)",
+				d.model, d.axis, d.deviceType, modelName)
+		}
 	}
 
 	err = x.start(ctx, false)

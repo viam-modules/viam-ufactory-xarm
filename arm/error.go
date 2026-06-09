@@ -38,8 +38,7 @@ var servoErrorMap = map[byte]string{
 }
 
 // armBoxErrorMap maps controller error codes (decimal in UFactory docs, hex
-// on the wire) to human-readable descriptions. Source:
-// https://github.com/xArm-Developer/xArm-Python-SDK/blob/master/doc/api/xarm_api_code.md
+// on the wire) to human-readable descriptions.
 var armBoxErrorMap = map[byte]string{
 	0x01:             "xArm: Emergency Stop Button Pushed In",
 	0x02:             "xArm: Emergency IO Triggered",
@@ -84,8 +83,7 @@ var armBoxErrorMap = map[byte]string{
 }
 
 // armBoxWarnMap maps controller warning codes (decimal in UFactory docs, hex
-// on the wire) to human-readable descriptions. Source:
-// https://github.com/xArm-Developer/xArm-Python-SDK/blob/master/doc/api/xarm_api_code.md
+// on the wire) to human-readable descriptions.
 var armBoxWarnMap = map[byte]string{
 	0x0B: "xArm Warning: Buffer Overflow",
 	0x0C: "xArm Warning: Command Parameter Abnormal",
