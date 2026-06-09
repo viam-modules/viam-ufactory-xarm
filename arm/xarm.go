@@ -446,14 +446,14 @@ func NewXArm(ctx context.Context, name resource.Name,
 		logger.Warnf("xArm hardware detection failed: %v", err)
 	} else {
 		x.detectedArm = d
-		if d.ArmTypeCode != 0 {
+		if d.armTypeCode != 0 {
 			logger.Infof(
 				"xArm hardware detected: model=%s axis=%d device_type=%d submodel=%s arm_type=%d control_type=%d fw=%s (configured as %s)",
-				d.Model, d.Axis, d.DeviceType, d.Submodel, d.ArmTypeCode, d.ControlTypeCode, d.FirmwareVersion, modelName,
+				d.model, d.axis, d.deviceType, d.submodel, d.armTypeCode, d.controlTypeCode, d.firmwareVersion, modelName,
 			)
 		} else {
 			logger.Infof("xArm hardware detected: model=%s axis=%d device_type=%d (configured as %s)",
-				d.Model, d.Axis, d.DeviceType, modelName)
+				d.model, d.axis, d.deviceType, modelName)
 		}
 	}
 

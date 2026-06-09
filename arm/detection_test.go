@@ -113,11 +113,11 @@ func TestVacuumGripperSubmodel(t *testing.T) {
 		arm  detectedArm
 		want string
 	}{
-		{"lite6", detectedArm{Model: hardwareModelLite6}, "lite"},
-		{"850", detectedArm{Model: hardwareModelXArm850}, "v2"},
-		{"xArm6 XI1305", detectedArm{Model: hardwareModelXArm6, ArmTypeCode: 1305}, "v2"},
-		{"xArm6 XI1304", detectedArm{Model: hardwareModelXArm6, ArmTypeCode: 1304}, "v1"},
-		{"xArm7 no submodel info", detectedArm{Model: hardwareModelXArm7}, "v1"},
+		{"lite6", detectedArm{model: hardwareModelLite6}, "lite"},
+		{"850", detectedArm{model: hardwareModelXArm850}, "v2"},
+		{"xArm6 XI1305", detectedArm{model: hardwareModelXArm6, armTypeCode: 1305}, "v2"},
+		{"xArm6 XI1304", detectedArm{model: hardwareModelXArm6, armTypeCode: 1304}, "v1"},
+		{"xArm7 no submodel info", detectedArm{model: hardwareModelXArm7}, "v1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
