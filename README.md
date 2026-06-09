@@ -1,18 +1,38 @@
+
 # Viam UFactory xArm Module
 
-This is a [Viam module](https://docs.viam.com/how-tos/create-module/) for [UFactory's](https://www.ufactory.cc/) X-ARM 6, X-ARM 7, X-ARM850, and LITE 6 collaborative arms.
+This is a [Viam module](https://docs.viam.com/how-tos/create-module/) for [UFactory's](https://www.ufactory.cc/) xArm 6, xArm 7, xArm 850, and Lite 6 collaborative arms.
 
 > [!NOTE]
 > For more information on modules, see [Modular Resources](https://docs.viam.com/registry/#modular-resources).
 
-This viam-xarm module is particularly useful in applications that require an xArm to be operated in conjunction with other resources (such as cameras, sensors, actuators, CV) offered by the [Viam Platform](https://www.viam.com/) and/or separate through your own code.
+This module is particularly useful in applications that require an xArm to be operated alongside other resources (cameras, sensors, actuators, CV pipelines) offered by the [Viam Platform](https://www.viam.com/).
 
+## Contents
 
-Navigate to the **CONFIGURE** tab of your machine’s page in [the Viam app](https://app.viam.com/). Click the **+** icon next to your machine part in the left-hand menu and select **Configuration block**. Search for and select the `arm / ufactory:xArm6`, `arm / ufactory:xArm7`, `arm / ufactory:xArm850`, or `arm / ufactory:lite6` model, depending on your hardware model. Click **Add to machine**, then enter a name or use the suggested name for your arm and click **Add to machine**.
+- [Getting Started](#getting-started)
+- [Configure your xArm](#configure-your-xarm)
+  - [Attributes](#attributes)
+  - [Networking](#networking)
+  - [Trajectory Generator](#trajectory-generator)
+  - [Using within a Frame System](#using-within-a-frame-system)
+- [Error Handling](#error-handling)
+- [DoCommand Reference](#docommand-reference)
+- [UFactory Studio Proxy](#ufactory-studio-proxy)
+- [Gripper](#gripper)
+- [Gripper Lite](#gripper-lite)
+- [Vacuum Gripper](#vacuum-gripper)
+- [Vacuum Gripper Lite](#vacuum-gripper-lite)
+- [UFactory xArm Resources](#ufactory-xarm-resources)
 
+## Getting Started
 
-> [!NOTE]
-> Before configuring your xArm, you must [add a machine](https://docs.viam.com/fleet/machines/#add-a-new-machine).
+1. [Add a machine](https://docs.viam.com/set-up-a-machine/first-machine/) in the Viam app.
+2. Navigate to the **CONFIGURE** tab of your machine's page.
+3. Click the **+** icon next to your machine part and select **Configuration block**.
+4. Search for and select `ufactory/xArm6`, `ufactory/xArm7`, `ufactory/xArm850`, or `ufactory/lite6`.
+5. Click **Add to machine**, enter a name for your arm and click **Add to machine** once more.
+6. Set the `host` attribute to your arm's IP address (found on the sticker on the control box).
 
 ## Configure your xArm
 
@@ -25,32 +45,55 @@ Copy and paste the following attributes into your JSON configuration:
 }
 ```
 
-Edit the attributes as applicable.
-
 ### Attributes
 
-The following attributes are available:
+| Name | Type | Inclusion | Default | Description |
+|------|------|-----------|---------|-------------|
+| `host` | string | **Required** | — | IP address of the xArm. Found on the sticker on the control box. See [Networking](#networking) below. |
+| `port` | int | Optional | `502` | TCP port for the arm's Modbus interface. |
+| `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `3` and `180`. |
+| `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
+| `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
+| `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
+| `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
+| `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. |
+| `mesh_decimation_ratios` | []float64 | Optional | `0.1` per link | Per-link mesh simplification ratios when `use_urdfs` is `true`. Each value must be in `[0, 1]`; `0.5` reduces a link to 50% of its original triangle count. List length must match the number of joints (6 for xArm6/Lite6, 7 for xArm7/xArm850). |
+| `trajectory_generator` | object | Optional | — | Configuration for an external [trajectory generator](#trajectory-generator) ML model service. |
+| `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
+| `ufactory-studio-proxy-port` | int | Optional | `18333` | Local port for the Studio proxy. |
 
-| Name                                | Type    | Inclusion    | Description                                                                                                      |
-|-------------------------------------|---------|--------------|------------------------------------------------------------------------------------------------------------------|
-| `host`                              | string  | **Required** | The IP address of the xArm. There is usually a sticker on the control box specifying the IP address. See below for detailed networking instructions.                                                                                      |
-| `port`                              | string  | Optional     | The port at which the IP address accesses the xArm. The default is 502.                                          |
-| `speed_degs_per_sec`                | float32 | Optional     | The rotational speed of the joints (must be greater than 3 and less than 180). The default is 50 degrees/second. |
-| `acceleration_degs_per_sec_per_sec` | float32 | Optional     | The acceleration of joints in radians per second increase per second. The default is 100 degrees/second^2        |
-| `collision_sensitivity`| int | Optional | Collision sensitivity range from 1-5. The larger the value, the smaller the force required to trigger the collision protection emergency stop. The default is 3.
-| `bad-joints`                        | []int   | Optional     | Joints that cannot move                                                                                          |
-| `motion`| string | Optional | The Motion Service to use for MoveToPosition API calls. Defaults to the builtin motion service. |
-| `use_urdfs` | bool | Optional | When `true`, the arm's kinematic model is built from its URDF file instead of the default JSON kinematics. This attaches mesh-based collision geometries to each link, enabling more accurate collision checking. Default is `false`. |
-| `mesh_decimation_ratios` | []float64 | Optional | Per-link mesh decimation ratios used when `use_urdfs` is `true`. Each value must be in the range [0, 1]. A value of 0.5 reduces a link's mesh to 50% of its original triangle count; lower values produce simpler (faster) collision geometries. The list length must match the number of joints (6 for xArm6/lite6, 7 for xArm7/uf850). If omitted when `use_urdfs` is `true`, defaults to 0.1 for every link. |
-| `trajectory_generator` | object | Optional | Configuration for a [trajectory generator](#trajectory-generator) ML model service. When set, joint moves are planned by the service instead of the built-in interpolator. |
-| `ufactory-studio-proxy` | bool | Optional | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). Default is `false`. |
-| `ufactory-studio-proxy-port` | int | Optional | Local port for the Studio proxy. Default is `18333`. |
+### Networking
+
+#### Connecting using macOS
+
+1. Connect an Ethernet cable between the arm's control box and a USB-C hub connected to your Mac.
+2. Open **System Settings** → **Network**.
+3. Click the USB-C device under "Other services." Ensure it shows a green indicator (not red/disconnected).
+4. Click **Details...** → **TCP/IP**.
+5. Set **Configure IPv4** to **Manually**.
+6. Set the IP address to any address on the same subnet as the arm (e.g., if the arm is `192.168.1.2`, use `192.168.1.10`).
+7. Set the Subnet Mask to `255.255.255.0` and click OK.
+8. Verify with `ping <arm-ip>`. Use the arm's IP (from the control box sticker) in your Viam config — not the address you assigned to your Mac.
+
+#### Connecting using Linux
+
+1. Connect an Ethernet cable from the arm's control box to your machine.
+2. Assign your machine an IP address on the same subnet as the arm:
+```bash
+sudo ip addr add 192.168.1.10/24 dev eth0
+sudo ip link set eth0 up
+```
+3. Verify connectivity:
+```bash
+ping 192.168.1.2
+```
+
+> [!NOTE]
+> Replace `eth0` with your actual Ethernet interface name (find it with `ip link show`) and replace `192.168.1.10`/`192.168.1.2` with addresses appropriate for your arm's subnet.
 
 ### Trajectory Generator
 
-The `trajectory_generator` attribute connects the arm to an external service (such as [trajex](https://github.com/viamrobotics/trajex)) that performs time-optimal trajectory generation. When configured, all `MoveThroughJointPositions` calls are routed through the service instead of the built-in interpolator.
-
-The service receives the arm's current position prepended to the requested waypoints, and returns a densely-sampled trajectory that respects the arm's velocity and acceleration limits. If the arm is already at the goal (within the deduplication tolerance), the service returns an empty result and no motion is commanded.
+The `trajectory_generator` attribute connects the arm to an external ML model service (such as [trajex](https://github.com/viamrobotics/trajex)) for time-optimal trajectory generation. When configured, all `MoveThroughJointPositions` calls are routed through the service instead of the built-in interpolator.
 
 ```json
 {
@@ -63,47 +106,15 @@ The service receives the arm's current position prepended to the requested waypo
 ```
 
 | Field | Type | Default | Description |
-|---|---|---|---|
-| `service` | string | **Required** | Name of the ML model service to use for trajectory generation. |
+|-------|------|---------|-------------|
+| `service` | string | **Required** | Name of the ML model service. |
 | `path_tolerance_delta_rads` | float64 | `0.1` | Maximum deviation from the straight-line path between waypoints, in radians. |
-| `path_colinearization_ratio` | float64 | `0` (disabled by default) | Ratio used to merge nearly-collinear waypoints. Set to `0` to disable. |
+| `path_colinearization_ratio` | float64 | `0` (disabled) | Ratio used to merge nearly-collinear waypoints. |
 | `waypoint_deduplication_tolerance_rads` | float64 | `0.001` | Waypoints closer than this value (in radians) are treated as duplicates and merged. |
-
-The trajectory is sampled at the arm's configured `move_hz` frequency (default 100 Hz).
-
-#### Connecting using macOS
-The following steps can be followed when running viam-server on your mac.
-1. Connect an ethernet cable between the Arm's control box and a USB-C hub/adapter connected to your mac.
-1. Open "System Setting" -> "Network"
-1. Click on the USB-C device within the "Other services" list
-1. Ensure the device does not show "not connected", "not configured", or any status with a red indicator. If this is the case, there is a connection issue with the USB-C device, the ethernet cable, or the state of the Arm's control box. As soon as there is a yellow indicator, proceed with networking configuration below.
-1. Click on "Details..."
-1. Click on "TCP/IP"
-1. Change "Configure IPv4" to "Manually".
-1. Set the IP Address to any IP in the same subnet as the arm's IP address. There is usually a sticker on the control box specifying the IP. For example if the xArm IP is `192.168.1.2`, then an IP such as `192.168.1.10` should be set in your mac's system settings.
-1. Set the Subnet Mask to `255.255.255.0`
-1. Click OK to save the changes.
-1. Your mac should now be able to connect to the xArm, and you can verify with `ping <host>` to the arm's IP address. Note that the IP address setup in your mac's networking settings is not the ping address and should not be used in Viam configuration. It was only set to establish a network to talk to the arm on the IP address that is specified on the control box.
-
-#### Connecting using a Raspberry Pi
-The following steps may need to be followed when running viam-server on your pi.
-
-
-1. Connect an Ethernet cable from the xArm's control box to the Pi.
-2. Open a terminal on the Pi.
-3. Assign the Pi an IP address on the same subnet as the arm. For example, if the xArm’s IP is `192.168.1.2`, you can use:
-```bash
-sudo ip addr add 192.168.1.10/24 dev eth0
-sudo ip link set eth0 up
-```
-4. Verify connectivity by pinging the xArm:
-```bash
-ping 192.168.1.2
-```
 
 ### Using within a Frame System
 
-If you are using your xArm in conjuction with other components it might be useful to add your arm to the frame system. You may do so by pasting the following in your config:
+To use your xArm alongside other components, add it to the frame system:
 
 ```json
 "frame": {
@@ -111,164 +122,153 @@ If you are using your xArm in conjuction with other components it might be usefu
 }
 ```
 
-Then, for example, if you have a gripper attached to the arm's end effector you would have to add the following to the gripper's config for it to be understood by the frame system.
+For an attached gripper, set its parent to the arm's name:
 
 ```json
 {
   "name": "gripper",
-  "namespace": "rdk",
-  "type": "gripper",
-  "model": "fake",
+  "api": "rdk:component:gripper",
+  "model": "viam:ufactory:gripper",
   "attributes": {},
   "frame": {
-    "parent": "name of your xArm",
-    "translation": {
-      "x": 0,
-      "y": 0,
-      "z": 0
-    },
+    "parent": "my-xarm",
+    "translation": { "x": 0, "y": 0, "z": 0 },
     "geometry": {
       "type": "box",
-      "x": 110,
-      "y": 160,
-      "z": 240,
-      "translation": {
-        "x": 0,
-        "y": 0,
-        "z": 0
-      }
+      "x": 110, "y": 160, "z": 240,
+      "translation": { "x": 0, "y": 0, "z": 0 }
     },
     "orientation": {
       "type": "ov_degrees",
-      "value": {
-        "x": 0,
-        "y": 0,
-        "z": 1,
-        "th": 0
-      }
+      "value": { "x": 0, "y": 0, "z": 1, "th": 0 }
     }
   }
 }
 ```
 
-Edit the frame information as applicable.
+## Error Handling
 
-### Using DoCommand
+When a collision or other fault occurs, the arm enters an error state and will not accept motion commands. The driver attempts to clear transient errors automatically on each command. A collision (overcurrent error) requires manual intervention:
 
-Below we provide examples of how a user may use Golang to use the `DoCommand`.
-
-If you want to change the speed the arm operates:
-
+1. Remove any obstacles causing the collision.
+2. Clear the error using `DoCommand` (Go):
 ```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_speed": 50})
+xArmComponent.DoCommand(context.Background(), map[string]interface{}{"clear_error": true})
+```
+Or via Python SDK:
+```python
+await arm.do_command({"clear_error": True})
+```
+3. The arm will return to normal operation automatically.
+
+To inspect current arm state or error codes:
+```go
+// Get current arm state
+resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"get_state": true})
+// resp["state"] contains raw state bytes
+
+// Get current error code
+resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"get_error": true})
+// resp["error info"] contains raw error bytes
 ```
 
-If you want to change the acceleration the arm operates at:
+## DoCommand Reference
 
+The following commands are available via `DoCommand` on the arm component.
+
+### Speed and Acceleration
+
+**Go:**
 ```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{"set_acceleration": 100})
-```
+// Set speed (degrees/second)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"set_speed": 50.0})
 
-If you want to change both the speed and acceleration:
+// Set acceleration (degrees/second²)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"set_acceleration": 100.0})
 
-```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "set_speed":        50,
-    "set_acceleration": 100,
+// Set both
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "set_speed":        50.0,
+    "set_acceleration": 100.0,
 })
 ```
 
-If you want to get the current joint torques of the servo for each joint:
-
-```go
-load, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"load": ""})
+**Python:**
+```python
+await arm.do_command({"set_speed": 50.0, "set_acceleration": 100.0})
 ```
 
-If you are using an UFactory gripper, you may use the `DoCommand` to manipulate it.
-To fully open the gripper:
+### Joint Torques
 
 ```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+resp, err := xArmComponent.DoCommand(ctx, map[string]interface{}{"load": ""})
+// resp["load"] contains a []float64 of per-joint torque values
+```
+
+### UFactory Gripper Control (via arm DoCommand)
+
+> [!NOTE]
+> `"setup_gripper": true` must be included in any gripper move command.
+
+```go
+// Open fully
+xArmComponent.DoCommand(ctx, map[string]interface{}{
     "setup_gripper": true,
-    "move_gripper":  850,
+    "move_gripper":  850.0,
 })
-```
 
-> [!NOTE] > `"setup_gripper": true` must be included in your request if you intend to manipulate the gripper
-
-To close the gripper:
-
-```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{
+// Close
+xArmComponent.DoCommand(ctx, map[string]interface{}{
     "setup_gripper": true,
-    "move_gripper":  0,
+    "move_gripper":  0.0,
 })
+
+// Get position (returns 0–850)
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_gripper": true})
+// resp["gripper_position"]
+
+// Set speed (range 1–5000)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"set_gripper_speed": 2000.0})
+
+// Get speed
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_gripper_speed": true})
+// resp["gripper_speed"]
 ```
 
-To get the current gripper position:
+### Vacuum Gripper Control (via arm DoCommand)
 
 ```go
-resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "get_gripper": true,
-})
-// resp["gripper_position"] contains the position (0-850)
-```
+// Activate suction (grab)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"grab_vacuum": true})
 
-To set the gripper speed (range 1-5000):
+// Release (open)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"open_vacuum": true})
 
-```go
-xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "set_gripper_speed": 2000,
-})
-```
-
-To get the current gripper speed:
-
-```go
-resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "get_gripper_speed": true,
-})
-// resp["gripper_speed"] contains the speed
+// Get suction state
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_vacuum_state": true})
+// resp["vacuum_state"] is a bool
 ```
 
 ### Manual Mode (Teaching Mode)
 
-You can put the arm into manual mode, which allows you to physically move the arm by hand. This is useful for teaching positions or manually positioning the arm for maintenance/storage.
-
-To enter manual mode:
+Manual mode puts the arm into zero-gravity mode, allowing free movement by hand with gravity compensation active. Servos remain engaged — do not disable them.
 
 ```go
-resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "enter_manual_mode": true,
-})
+// Enter manual mode
+xArmComponent.DoCommand(ctx, map[string]interface{}{"enter_manual_mode": true})
+
+// Exit manual mode and return to normal operation
+xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 ```
 
-To exit manual mode and return to normal operation:
-
-```go
-resp, err := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
-    "exit_manual_mode": true,
-})
-```
-
-> [!NOTE]
-> When in manual mode, the arm will be free to move by hand. Make sure the arm is properly supported and in a safe position before entering manual mode.
-
-## UFactory xArm Resources
-
-The below documents will be useful for developers looking to contribute to this repository.
-
-- [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
-- [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
-- [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
-- [UFactory xArm Vacuum Gripper User Manual](https://static.generation-robots.com/media/xArm-Vacuum-Gripper-User-Manual-V1.6.1.pdf)
-
+> [!CAUTION]
+> Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
 
 ## UFactory Studio Proxy
 
-The arm runs UFactory Studio, a web UI accessible at `http://<arm-ip>:18333`. When the machine running `viam-server` and the arm are on different subnets (e.g., arm on a direct Ethernet connection), the Studio UI may not be reachable from your browser.
+The arm hosts UFactory Studio at `http://<arm-ip>:18333`. When viam-server and the arm are on different subnets (e.g., direct Ethernet connection), Studio may not be reachable from your browser.
 
-Enabling `ufactory-studio-proxy` starts a local reverse proxy on the `viam-server` host that forwards requests to the arm's Studio port. This lets you access Studio at `http://<viam-server-ip>:<proxy-port>` without direct network access to the arm.
+Enable `ufactory-studio-proxy` to start a local reverse proxy on the viam-server host:
 
 ```json
 {
@@ -278,64 +278,95 @@ Enabling `ufactory-studio-proxy` starts a local reverse proxy on the `viam-serve
 }
 ```
 
-The proxy port defaults to `18333`. If that port is unavailable on the host, set `ufactory-studio-proxy-port` to a different value.
+Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `ufactory-studio-proxy-port` to a different value.
 
 > [!CAUTION]
-> The proxy listens on **all network interfaces** with **no authentication**. Anyone who can reach the proxy port on the `viam-server` host has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or use firewall rules to restrict access to the proxy port.
+> The proxy listens on all interfaces with no authentication. Anyone who can reach that port has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or restrict access with firewall rules.
 
-## gripper
+## Gripper
 
-```jsonc
+The standard two-finger gripper for xArm6/xArm7.
+
+```json
 {
-   "arm": "arm",           // required: name of the arm component
-   "gripper_speed": 2000   // optional: default speed (1-5000)
+  "arm": "my-xarm",
+  "gripper_speed": 2000
 }
 ```
 
-| Name             | Type   | Inclusion    | Description                                                        |
-|------------------|--------|--------------|--------------------------------------------------------------------|
-| `arm`            | string | **Required** | The name of the arm component this gripper is attached to.         |
-| `gripper_speed`  | int    | Optional     | Default gripper speed (1-5000). Applied on startup. If omitted, the gripper uses its firmware default. |
+| Name | Type | Inclusion | Description |
+|------|------|-----------|-------------|
+| `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
+| `gripper_speed` | int | Optional | Default speed on startup (1–5000). Uses firmware default if omitted. |
 
 ### DoCommand
 
 ```go
-// Get the current position
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get": true})
-// resp["pos"] contains the position
+// Get current position (0–850)
+resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get": true})
+// resp["pos"]
 
-// Move to a specific position
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set": 500.0})
-// resp["position"] contains the final position
+// Move to a specific position (0–850)
+resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0})
+// resp["position"]
 
-// Set/get gripper speed (proxied to arm DoCommand)
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+// Set/get speed (proxied to arm)
+gripperComponent.DoCommand(ctx, map[string]interface{}{"set_gripper_speed": 2000.0})
+resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get_gripper_speed": true})
 ```
 
-## gripper lite
-A two finger gripper compatible with the xarm lite6 model
-```
+## Gripper Lite
+
+Two-finger gripper for the Lite 6.
+
+```json
 {
-   "arm" : "arm"
+  "arm": "my-xarm"
 }
 ```
 
-## vacuum gripper
-The vacuum gripper only works if it has a wired connection to the not, not a contact connection
+### DoCommand
+
+```go
+// Open
+gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_lite_action": "open"})
+
+// Close
+gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_lite_action": "close"})
+
+// Stop
+gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_lite_action": "stop"})
+
+// Check if holding something
+resp, _ := gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_lite_action": "is_closed"})
+// resp["gripper_lite_action"]["is_closed"] is a bool
 ```
+
+## Vacuum Gripper
+
+For use with the standard xArm vacuum gripper. Requires a wired connection to the arm controller (not a contact connection).
+
+```json
 {
-  "arm": "arm",
-  "vacuum_length_mm" : 48
+  "arm": "my-xarm",
+  "vacuum_length_mm": 48
 }
 ```
 
-## vacuum gripper lite
-The vacuum gripper commonly attached to the lite6.
-```
+## Vacuum Gripper Lite
+
+Vacuum gripper for the Lite 6.
+
+```json
 {
-  "arm": "arm",
-  "vacuum_length_mm" : 48
+  "arm": "my-xarm",
+  "vacuum_length_mm": 48
 }
 ```
 
+## UFactory xArm Resources
+
+- [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)
+- [UFactory xArm Developer Manual](https://www.ufactory.cc/wp-content/uploads/2023/04/xArm-Developer-Manual-V1.10.0.pdf)
+- [UFactory xArm Gripper User Manual](http://download.ufactory.cc/xarm/tool/Gripper%20User%20Manual.pdf?v=1594857600061)
+- [UFactory xArm Vacuum Gripper User Manual](https://static.generation-robots.com/media/xArm-Vacuum-Gripper-User-Manual-V1.6.1.pdf)
