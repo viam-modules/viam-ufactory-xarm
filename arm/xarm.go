@@ -61,6 +61,8 @@ const (
 	gripperSpeedKey          = "gripper_speed"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
+	enterJointOnlineModeKey  = "enter_joint_online_mode"
+	exitJointOnlineModeKey   = "exit_joint_online_mode"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -144,6 +146,11 @@ type xArm struct {
 
 	// state of movement things
 	started atomic.Int32 // -1 is off, >= 0 is mode
+	// jointOnlineMode is a sticky intent flag for mode 6 (joint online trajectory
+	// planning). It is intentionally separate from `started`: a socket reset zeroes
+	// `started` via the cmdConn onReset callback, but this flag survives, so start()
+	// re-enters mode 6 after a reconnect instead of falling back to servo mode.
+	jointOnlineMode atomic.Bool
 
 	name        resource.Name
 	conf        *Config
@@ -842,6 +849,22 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp["status"] = "exited manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[enterJointOnlineModeKey]; ok {
+		if err := x.enterJointOnlineMode(ctx); err != nil {
+			return nil, err
+		}
+		resp["status"] = "entered joint online mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[exitJointOnlineModeKey]; ok {
+		if err := x.exitJointOnlineMode(ctx); err != nil {
+			return nil, err
+		}
+		resp["status"] = "exited joint online mode"
 		validCommand = true
 	}
 

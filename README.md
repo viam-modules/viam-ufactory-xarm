@@ -264,6 +264,21 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 > [!CAUTION]
 > Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
 
+### Joint Online Trajectory Planning Mode (Mode 6)
+
+Joint online mode puts the arm into the firmware's mode 6, where it replans trajectories in real time with continuous velocity/acceleration profiles. This smooths out the stop-start jerk that the default servo mode produces between successive small joint moves, which makes it well suited to streaming targets (e.g. teleoperation). While the mode is active, joint commands are sent with the `set_servo_angle` (`P2PJoint`) command rather than the servo streaming command. Mode 7 is the equivalent for Cartesian online trajectory planning and is not currently exposed by this module.
+
+```go
+// Enter joint online mode
+xArmComponent.DoCommand(ctx, map[string]interface{}{"enter_joint_online_mode": true})
+
+// Exit joint online mode and return to normal servo operation
+xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_joint_online_mode": true})
+```
+
+> [!NOTE]
+> Joint online trajectory planning requires arm firmware v1.10.0 or newer. The setting is sticky across reconnects: once enabled, the arm re-enters mode 6 automatically if the connection drops and is re-established, until you exit the mode.
+
 ## UFactory Studio Proxy
 
 The arm hosts UFactory Studio at `http://<arm-ip>:18333`. When viam-server and the arm are on different subnets (e.g., direct Ethernet connection), Studio may not be reachable from your browser.

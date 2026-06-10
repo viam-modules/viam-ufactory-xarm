@@ -24,6 +24,7 @@ import (
 
 const servoMotionMode = 1
 const manualMode = 2
+const jointOnlineMotionMode = 6
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
@@ -331,7 +332,11 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return nil
 		}
 		x.logger.Error("motion not ready will enable it")
-		return multierr.Combine(x.setMotionMode(ctx, servoMotionMode), x.setMotionState(ctx, 0))
+		mode := byte(servoMotionMode)
+		if x.jointOnlineMode.Load() {
+			mode = jointOnlineMotionMode
+		}
+		return multierr.Combine(x.setMotionMode(ctx, mode), x.setMotionState(ctx, 0))
 	}
 	return nil
 }
@@ -352,7 +357,9 @@ func (x *xArm) setMotionState(ctx context.Context, state byte) error {
 // 0: Position Control Mode, i.e. "normal" mode
 // 1: Servoj mode. This mode will immediately execute joint positions at the fastest available speed and is intended
 // for streaming large numbers of joint positions to the arm.
-// 2: Joint teaching mode, not useful right now
+// 2: Joint teaching mode (manual/free-drive with gravity compensation)
+// 6: Joint online trajectory planning mode. The firmware replans trajectories in real-time with
+// continuous velocity/acceleration profiles. Requires firmware >= v1.10.0.
 func (x *xArm) setMotionMode(ctx context.Context, state byte) error {
 	c := x.newCmd(regMap["SetMode"])
 	c.params = append(c.params, state)
@@ -376,6 +383,9 @@ func (x *xArm) toggleServos(ctx context.Context, enable bool) error {
 
 func (x *xArm) start(ctx context.Context, direct bool) error {
 	mode := byte(servoMotionMode)
+	if x.jointOnlineMode.Load() {
+		mode = jointOnlineMotionMode
+	}
 	if direct {
 		mode = 0
 	}
@@ -462,6 +472,44 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 	}
 
 	x.logger.Info("Manual mode exited - arm ready for programmatic commands")
+	return nil
+}
+
+// enterJointOnlineMode puts the arm into mode 6 (joint online trajectory planning).
+// In this mode the firmware performs real-time trajectory replanning with
+// continuous velocity/acceleration profiles, eliminating the stop-start jerk
+// that mode 1 produces between successive small movements. Mode 7 is the
+// equivalent for Cartesian online trajectory planning.
+// Requires firmware >= v1.10.0.
+func (x *xArm) enterJointOnlineMode(ctx context.Context) error {
+	x.logger.Info("Entering joint online trajectory planning mode (mode 6)")
+
+	// Set the sticky flag and force a re-init. start() reads jointOnlineMode to
+	// select mode 6, enables the servos, and applies the mode/state; resetting
+	// started makes start() run past its "already in this mode" early return.
+	x.jointOnlineMode.Store(true)
+	x.started.Store(-1)
+	if err := x.start(ctx, false); err != nil {
+		x.jointOnlineMode.Store(false)
+		return fmt.Errorf("failed to enter joint online mode: %w", err)
+	}
+
+	x.logger.Info("Joint online mode enabled - firmware handles online trajectory replanning")
+	return nil
+}
+
+// exitJointOnlineMode exits joint online mode and returns the arm to normal servo operation (mode 1).
+func (x *xArm) exitJointOnlineMode(ctx context.Context) error {
+	x.logger.Info("Exiting joint online trajectory planning mode")
+
+	x.jointOnlineMode.Store(false)
+	x.started.Store(-1)
+
+	if err := x.start(ctx, false); err != nil {
+		return fmt.Errorf("failed to exit joint online mode: %w", err)
+	}
+
+	x.logger.Info("Joint online mode exited - arm ready for normal servo commands")
 	return nil
 }
 
@@ -797,7 +845,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 		loopTimeStart := time.Now()
 
 		cName := "MoveJoints"
-		if mo.direct {
+		if mo.direct || x.jointOnlineMode.Load() {
 			cName = "P2PJoint"
 		}
 		c := x.newCmd(regMap[cName])
