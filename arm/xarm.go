@@ -42,25 +42,26 @@ const (
 	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
 
 	// DoCommand keys.
-	loadKey                  = "load"
-	moveGripperKey           = "move_gripper"
-	getGripperKey            = "get_gripper"
-	gripperPositionKey       = "gripper_position"
-	setAcckey                = "set_acceleration"
-	setSpeedKey              = "set_speed"
-	grabVacuumKey            = "grab_vacuum"
-	openVacuumKey            = "open_vacuum"
-	clearErrorKey            = "clear_error"
-	getStateKey              = "get_state"
-	getErrorKey              = "get_error"
-	getVacuumGripperStateKey = "get_vacuum_state"
-	vacuumGripperStateKey    = "vacuum_state"
-	gripperLiteActionKey     = "gripper_lite_action"
-	setGripperSpeedKey       = "set_gripper_speed"
-	getGripperSpeedKey       = "get_gripper_speed"
-	gripperSpeedKey          = "gripper_speed"
-	enterManualModeKey       = "enter_manual_mode"
-	exitManualModeKey        = "exit_manual_mode"
+	loadKey                    = "load"
+	moveGripperKey             = "move_gripper"
+	getGripperKey              = "get_gripper"
+	gripperPositionKey         = "gripper_position"
+	setAcckey                  = "set_acceleration"
+	setSpeedKey                = "set_speed"
+	grabVacuumKey              = "grab_vacuum"
+	openVacuumKey              = "open_vacuum"
+	clearErrorKey              = "clear_error"
+	getStateKey                = "get_state"
+	getErrorKey                = "get_error"
+	getVacuumGripperStateKey   = "get_vacuum_state"
+	vacuumGripperStateKey      = "vacuum_state"
+	gripperLiteActionKey       = "gripper_lite_action"
+	setGripperSpeedKey         = "set_gripper_speed"
+	getGripperSpeedKey         = "get_gripper_speed"
+	gripperSpeedKey            = "gripper_speed"
+	enterManualModeKey         = "enter_manual_mode"
+	exitManualModeKey          = "exit_manual_mode"
+	setCollisionSensitivityKey = "set_collision_sensitivity"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -762,6 +763,31 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		x.confLock.Lock()
 		x.acceleration = utils.DegToRad(acceleration)
 		x.confLock.Unlock()
+		validCommand = true
+	}
+	if val, ok := cmd[setCollisionSensitivityKey]; ok {
+		sensitivity, err := utils.AssertType[float64](val)
+		if err != nil {
+			return nil, err
+		}
+		// The arm only accepts whole-number sensitivity levels in [0, 5];
+		// 0 disables collision detection, 5 is the most sensitive.
+		level := int(sensitivity)
+		if float64(level) != sensitivity || level < 0 || level > 5 {
+			return nil, fmt.Errorf("collision sensitivity must be an integer between 0 and 5, got %v", val)
+		}
+		// Refuse while moving: changing the threshold mid-trajectory could race
+		// with the in-flight motion commands, so callers must set it between moves.
+		moving, err := x.IsMoving(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if moving {
+			return nil, errors.New("cannot set collision sensitivity while the arm is moving")
+		}
+		if err := x.setCollisionDetectionSensitivity(ctx, level); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 	if _, ok := cmd[grabVacuumKey]; ok {
