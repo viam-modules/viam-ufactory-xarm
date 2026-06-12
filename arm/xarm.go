@@ -143,7 +143,8 @@ type xArm struct {
 	gripperConn *modbusConn
 
 	// state of movement things
-	started atomic.Int32 // -1 is off, >= 0 is mode
+	started      atomic.Int32 // -1 is off, >= 0 is mode
+	gripperSetup atomic.Bool  // true if gripper has been enabled and mode set
 
 	name        resource.Name
 	conf        *Config
@@ -385,7 +386,10 @@ func NewXArm(ctx context.Context, name resource.Name,
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
+	x.cmdConn = newModbusConn(newConf.host(), logger, func() {
+		x.started.Store(-1)
+		x.gripperSetup.Store(false)
+	})
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
 
 	if newConf.Motion != "" {

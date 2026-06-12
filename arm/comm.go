@@ -198,8 +198,12 @@ func (m *modbusConn) writeBytes(ctx context.Context, c cmd) (cmd, error) {
 	return m.responseInLock(ctx)
 }
 
-func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
-	buf, err := utils.ReadBytes(ctx, m.conn, 7)
+func (m *modbusConn) responseInLock(_ context.Context) (cmd, error) {
+	// Use a non-cancellable context for reading the response. Once a command has been
+	// written to the socket, we must read the response to keep the protocol in sync.
+	// The 5-second TCP deadline set in writeBytes provides timeout protection.
+	readCtx := context.WithoutCancel(context.Background())
+	buf, err := utils.ReadBytes(readCtx, m.conn, 7)
 	if err != nil {
 		m.resetConnection()
 		return cmd{}, err
@@ -209,7 +213,7 @@ func (m *modbusConn) responseInLock(ctx context.Context) (cmd, error) {
 	c.prot = binary.BigEndian.Uint16(buf[2:4])
 	c.reg = buf[6]
 	length := binary.BigEndian.Uint16(buf[4:6])
-	c.params, err = utils.ReadBytes(ctx, m.conn, int(length-1))
+	c.params, err = utils.ReadBytes(readCtx, m.conn, int(length-1))
 	if err != nil {
 		m.resetConnection()
 		return cmd{}, err
@@ -489,6 +493,7 @@ func (x *xArm) Close(ctx context.Context) error {
 	}
 
 	x.closed.Store(true)
+	x.gripperSetup.Store(false)
 
 	return err
 }
@@ -931,12 +936,16 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 }
 
 func (x *xArm) setupGripper(ctx context.Context) error {
+	if x.gripperSetup.Load() {
+		return nil
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
 	if err := x.setGripperMode(ctx, false); err != nil {
 		return err
 	}
+	x.gripperSetup.Store(true)
 	return nil
 }
 
@@ -956,14 +965,42 @@ func (x *xArm) gripperPreamble(write bool) cmd {
 	return c
 }
 
-// gripperSend mirrors x.send but routes through gripperConn. checkError is
-// always true on this path — gripper Modbus failures should surface, never
-// be swallowed silently.
+const gripperRetries = 3
+
+// gripperSend mirrors x.send but routes through gripperConn, retrying a few
+// times on failure and clearing the arm's error state between attempts.
+// checkError is always true on this path — gripper Modbus failures should
+// surface, never be swallowed silently.
 func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 	if x.closed.Load() {
 		return cmd{}, errors.New("closed")
 	}
-	return x.gripperConn.send(ctx, c, true)
+	var resp cmd
+	var err error
+	for attempt := range gripperRetries {
+		resp, err = x.gripperConn.send(ctx, c, true)
+		if err == nil {
+			return resp, nil
+		}
+		if attempt < gripperRetries-1 {
+			x.logger.Warnf("gripper command failed (attempt %d/%d): %v, performing e-stop recovery", attempt+1, gripperRetries, err)
+			// Replicate the manual e-stop + re-enable cycle that reliably restores
+			// gripper communication. ClearError alone doesn't reset the TGPIO Modbus
+			// interface — setMotionState(4) ("restart system") does.
+			if stopErr := x.setMotionState(ctx, 4); stopErr != nil {
+				x.logger.Warnf("e-stop during gripper recovery failed: %v", stopErr)
+			}
+			time.Sleep(500 * time.Millisecond)
+			x.gripperSetup.Store(false)
+			if startErr := x.start(ctx, false); startErr != nil {
+				x.logger.Warnf("re-enable during gripper recovery failed: %v", startErr)
+			}
+			if setupErr := x.setupGripper(ctx); setupErr != nil {
+				x.logger.Warnf("gripper re-init during recovery failed: %v", setupErr)
+			}
+		}
+	}
+	return resp, err
 }
 
 func (x *xArm) enableGripper(ctx context.Context) error {
@@ -972,7 +1009,7 @@ func (x *xArm) enableGripper(ctx context.Context) error {
 	c.params = append(c.params, 0x00, 0x01)
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.gripperSend(ctx, c)
+	_, err := x.send(ctx, c, true)
 	return err
 }
 
@@ -986,7 +1023,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 	} else {
 		c.params = append(c.params, 0x00, 0x00)
 	}
-	_, err := x.gripperSend(ctx, c)
+	_, err := x.send(ctx, c, true)
 	return err
 }
 
