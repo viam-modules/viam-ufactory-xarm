@@ -62,6 +62,33 @@ Copy and paste the following attributes into your JSON configuration:
 | `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
 | `ufactory-studio-proxy-port` | int | Optional | `18333` | Local port for the Studio proxy. |
 
+#### Per-Move Collision Sensitivity
+
+The move APIs (`MoveToPosition`, `MoveToJointPositions`, and `MoveThroughJointPositions`) accept a
+`collision_sensitivity` value in their `extra` map to override the configured
+`collision_sensitivity` for the duration of that move. The value must be an integer from `0`
+(detection off) to `5` (most sensitive). The arm's collision detection is set to that level before
+the move starts and restored to the configured value (or the firmware default of `3` if none is
+configured) once the move completes — including when the move fails.
+
+This is useful when some moves deliberately make contact (for example pressing a physical button)
+while others should stop on any unexpected contact:
+
+**Go:**
+```go
+// Move that intentionally makes contact: disable detection for this move only.
+xArmComponent.MoveToPosition(ctx, pressPose, map[string]interface{}{"collision_sensitivity": 0})
+
+// Free-space move: stop on any unexpected contact.
+xArmComponent.MoveToJointPositions(ctx, travelInputs, map[string]interface{}{"collision_sensitivity": 3})
+```
+
+**Python:**
+```python
+await arm.move_to_position(press_pose, extra={"collision_sensitivity": 0})
+await arm.move_to_joint_positions(travel_positions, extra={"collision_sensitivity": 3})
+```
+
 ### Networking
 
 #### Connecting using macOS
