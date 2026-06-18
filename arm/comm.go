@@ -48,6 +48,9 @@ var regMap = map[string]byte{
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
+	"FTSensorData":   0xC8,
+	"FTSensorEnable": 0xC9,
+	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
@@ -1220,6 +1223,57 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	}
 
 	return loads, nil
+}
+
+// ftSensorValueCount is the number of values the 6-axis F/T sensor returns:
+// Fx, Fy, Fz, Tx, Ty, Tz.
+const ftSensorValueCount = 6
+
+// parseFTSensorData parses the controller response for FTSensorData (0xC8).
+// params[0] is a leading status byte; the six float32 values follow, little-endian,
+// at offset i*4+1 (same layout as getLoad / JointPositions).
+func parseFTSensorData(params []byte) ([]float64, error) {
+	need := 1 + ftSensorValueCount*4
+	if len(params) < need {
+		return nil, fmt.Errorf("unexpected F/T sensor response length, got %d want >= %d", len(params), need)
+	}
+	vals := make([]float64, 0, ftSensorValueCount)
+	for i := range ftSensorValueCount {
+		idx := i*4 + 1
+		vals = append(vals, float64(rutils.Float32FromBytesLE(params[idx:idx+4])))
+	}
+	return vals, nil
+}
+
+// getFTSensorData reads the wrist 6-axis F/T sensor: [Fx, Fy, Fz, Tx, Ty, Tz].
+func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
+	c := x.newCmd(regMap["FTSensorData"])
+	resp, err := x.send(ctx, c, true)
+	if err != nil {
+		return nil, err
+	}
+	return parseFTSensorData(resp.params)
+}
+
+// setFTSensorEnable enables or disables the 6-axis F/T sensor.
+func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
+	c := x.newCmd(regMap["FTSensorEnable"])
+	var b byte
+	if enable {
+		b = 0x01
+	}
+	c.params = append(c.params, b)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+// setFTSensorZero tares the sensor: the controller snapshots the current reading as
+// the offset subtracted from all subsequent reads. The arm should be stationary at
+// the reference pose/payload and the sensor must be enabled first.
+func (x *xArm) setFTSensorZero(ctx context.Context) error {
+	c := x.newCmd(regMap["FTSensorZero"])
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
