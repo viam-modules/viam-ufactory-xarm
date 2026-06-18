@@ -364,6 +364,45 @@ Vacuum gripper for the Lite 6.
 }
 ```
 
+## Force Torque Sensor
+
+Model `viam:ufactory:ft_sensor` exposes the UFactory wrist-mounted 6-axis
+Force/Torque sensor as a Viam `sensor`. It depends on a configured xArm and reads
+through the arm's controller connection. Requires controller firmware >= 1.8.3.
+
+### Configuration
+
+```json
+{
+  "arm": "my-xarm",
+  "enable_on_start": false
+}
+```
+
+| Attribute         | Type   | Required | Description |
+|-------------------|--------|----------|-------------|
+| `arm`             | string | yes      | Name of the xArm this sensor is attached to. |
+| `enable_on_start` | bool   | no       | Enable the sensor when the resource starts. Default `false`. Leave `false` if you enabled the sensor in UFactory Studio (that setting persists on the controller); set `true` if you did not, so readings work without a manual `DoCommand`. |
+
+### Readings
+
+`GetReadings` returns the same keys and units as the Universal Robots F/T sensor:
+
+```json
+{ "Fx_N": -0.987, "Fy_N": -2.923, "Fz_N": -18.356,
+  "TRx_Nm": -0.0012, "TRy_Nm": -0.0914, "TRz_Nm": 0.00698 }
+```
+
+Forces (`F*_N`) are in newtons; torques (`TR*_Nm`) are in newton-metres.
+
+### DoCommand
+
+| Command | Effect |
+|---------|--------|
+| `{"enable": true}` | Enable the sensor (required before taring/reading). |
+| `{"enable": false}` | Disable the sensor. |
+| `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
+
 ## UFactory xArm Resources
 
 - [UFactory xArm User Manual](https://www.ufactory.cc/wp-content/uploads/2023/05/xArm-User-Manual-V2.0.0.pdf)

@@ -52,6 +52,12 @@
       "model": "viam:ufactory:gripper_lite",
       "markdown_link": "README.md#gripper-lite",
       "short_description": "gripper lite component driver for two fingers gripper install on lite6"
+    },
+    {
+      "api": "rdk:component:sensor",
+      "model": "viam:ufactory:ft_sensor",
+      "markdown_link": "README.md#force-torque-sensor",
+      "short_description": "6-axis force/torque sensor driver for the ufactory wrist-mounted F/T sensor"
     }
   ],
   "build":{
