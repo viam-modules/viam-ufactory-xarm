@@ -61,6 +61,10 @@ const (
 	gripperSpeedKey          = "gripper_speed"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
+	getFTSensorDataKey       = "get_ft_sensor_data"
+	setFTSensorEnableKey     = "set_ft_sensor_enable"
+	ftSensorZeroKey          = "ft_sensor_zero"
+	ftSensorDataKey          = "ft_sensor_data"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -674,6 +678,18 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
+// ftReadingsMap converts [Fx, Fy, Fz, Tx, Ty, Tz] into the UR-compatible reading map.
+func ftReadingsMap(vals []float64) map[string]any {
+	return map[string]any{
+		"Fx_N":   vals[0],
+		"Fy_N":   vals[1],
+		"Fz_N":   vals[2],
+		"TRx_Nm": vals[3],
+		"TRy_Nm": vals[4],
+		"TRz_Nm": vals[5],
+	}
+}
+
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	resp := map[string]any{}
 	validCommand := false
@@ -842,6 +858,31 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp["status"] = "exited manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[getFTSensorDataKey]; ok {
+		vals, err := x.getFTSensorData(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[ftSensorDataKey] = ftReadingsMap(vals)
+		validCommand = true
+	}
+	if val, ok := cmd[setFTSensorEnableKey]; ok {
+		enable, ok := val.(bool)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a bool, got %v (%T)", setFTSensorEnableKey, val, val)
+		}
+		if err := x.setFTSensorEnable(ctx, enable); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if _, ok := cmd[ftSensorZeroKey]; ok {
+		if err := x.setFTSensorZero(ctx); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
