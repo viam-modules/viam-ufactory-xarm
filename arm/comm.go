@@ -49,7 +49,6 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"FTSensorData":   0xC8,
-	"FTSensorEnable": 0xC9,
 	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
@@ -1253,18 +1252,6 @@ func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
 		return nil, err
 	}
 	return parseFTSensorData(resp.params)
-}
-
-// setFTSensorEnable enables or disables the 6-axis F/T sensor.
-func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
-	c := x.newCmd(regMap["FTSensorEnable"])
-	var b byte
-	if enable {
-		b = 0x01
-	}
-	c.params = append(c.params, b)
-	_, err := x.send(ctx, c, true)
-	return err
 }
 
 // setFTSensorZero tares the sensor: the controller snapshots the current reading as

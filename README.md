@@ -370,37 +370,40 @@ Model `viam:ufactory:ft_sensor` exposes the UFactory wrist-mounted 6-axis
 Force/Torque sensor as a Viam `sensor`. It depends on a configured xArm and reads
 through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
+> **Prerequisite:** The sensor must be **enabled and calibrated in UFactory Studio
+> before use** (Externals → Torque Sensor: confirm a real SN/firmware appear, then run
+> payload identification / zeroing). This module only reads the sensor; it does not
+> enable or commission it. If the sensor is not enabled and calibrated, reads will
+> fail or return meaningless values.
+
 ### Configuration
 
 ```json
 {
-  "arm": "my-xarm",
-  "enable_on_start": false
+  "arm": "my-xarm"
 }
 ```
 
-| Attribute         | Type   | Required | Description |
-|-------------------|--------|----------|-------------|
-| `arm`             | string | yes      | Name of the xArm this sensor is attached to. |
-| `enable_on_start` | bool   | no       | Enable the sensor when the resource starts. Default `false`. Leave `false` if you enabled the sensor in UFactory Studio (that setting persists on the controller); set `true` if you did not, so readings work without a manual `DoCommand`. |
+| Attribute | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| `arm`     | string | yes      | Name of the xArm this sensor is attached to. |
 
 ### Readings
 
-`GetReadings` returns the same keys and units as the Universal Robots F/T sensor:
+`GetReadings` returns the six force/torque values keyed with their units:
 
 ```json
 { "Fx_N": -0.987, "Fy_N": -2.923, "Fz_N": -18.356,
   "TRx_Nm": -0.0012, "TRy_Nm": -0.0914, "TRz_Nm": 0.00698 }
 ```
 
-Forces (`F*_N`) are in newtons; torques (`TR*_Nm`) are in newton-metres.
+Forces (`Fx_N`, `Fy_N`, `Fz_N`) are in newtons; torques (`TRx_Nm`, `TRy_Nm`,
+`TRz_Nm`) are in newton-metres.
 
 ### DoCommand
 
 | Command | Effect |
 |---------|--------|
-| `{"enable": true}` | Enable the sensor (required before taring/reading). |
-| `{"enable": false}` | Disable the sensor. |
 | `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
 
 ## UFactory xArm Resources

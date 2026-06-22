@@ -44,10 +44,6 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 	_, err := s.DoCommand(context.Background(), map[string]any{"tare": true})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, fa.lastCmd[ftSensorZeroKey], test.ShouldEqual, true)
-
-	_, err = s.DoCommand(context.Background(), map[string]any{"enable": true})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, fa.lastCmd[setFTSensorEnableKey], test.ShouldEqual, true)
 }
 
 func TestFTSensorConfigValidate(t *testing.T) {

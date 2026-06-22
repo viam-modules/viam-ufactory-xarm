@@ -18,11 +18,6 @@ var FTSensorModel = family.WithModel("ft_sensor")
 // the controller connection.
 type FTSensorConfig struct {
 	Arm string `json:"arm"`
-	// EnableOnStart sends set_ft_sensor_enable=true once at construction. Default
-	// false so the controller's persisted enable state (e.g. set in UFactory Studio)
-	// stays authoritative; non-Studio users set this true so reads work without a
-	// manual DoCommand.
-	EnableOnStart bool `json:"enable_on_start,omitempty"`
 }
 
 // Validate ensures the arm dependency is set and returns it as a required dependency.
@@ -63,11 +58,6 @@ func newFTSensor(ctx context.Context, deps resource.Dependencies, conf resource.
 	if err != nil {
 		return nil, err
 	}
-	if newConf.EnableOnStart {
-		if _, err := s.arm.DoCommand(ctx, map[string]any{setFTSensorEnableKey: true}); err != nil {
-			return nil, errors.Wrap(err, "failed to enable F/T sensor on start")
-		}
-	}
 	return s, nil
 }
 
@@ -84,14 +74,10 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 	return data, nil
 }
 
-// DoCommand supports {"tare": true} to zero the sensor and {"enable": <bool>} to
-// enable/disable it.
+// DoCommand supports {"tare": true} to zero the sensor at its current reading.
 func (s *ftSensor) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	if _, ok := cmd["tare"]; ok {
 		return s.arm.DoCommand(ctx, map[string]any{ftSensorZeroKey: true})
-	}
-	if val, ok := cmd["enable"]; ok {
-		return s.arm.DoCommand(ctx, map[string]any{setFTSensorEnableKey: val})
 	}
 	return map[string]any{}, nil
 }

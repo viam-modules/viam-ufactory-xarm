@@ -62,7 +62,6 @@ const (
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 	getFTSensorDataKey       = "get_ft_sensor_data"
-	setFTSensorEnableKey     = "set_ft_sensor_enable"
 	ftSensorZeroKey          = "ft_sensor_zero"
 	ftSensorDataKey          = "ft_sensor_data"
 
@@ -867,16 +866,6 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[ftSensorDataKey] = ftReadingsMap(vals)
-		validCommand = true
-	}
-	if val, ok := cmd[setFTSensorEnableKey]; ok {
-		enable, ok := val.(bool)
-		if !ok {
-			return nil, fmt.Errorf("%s must be a bool, got %v (%T)", setFTSensorEnableKey, val, val)
-		}
-		if err := x.setFTSensorEnable(ctx, enable); err != nil {
-			return nil, err
-		}
 		validCommand = true
 	}
 	if _, ok := cmd[ftSensorZeroKey]; ok {
