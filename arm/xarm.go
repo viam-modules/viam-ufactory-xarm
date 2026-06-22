@@ -677,17 +677,6 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
-func ftReadingsMap(vals []float64) map[string]any {
-	return map[string]any{
-		"Fx_N":   vals[0],
-		"Fy_N":   vals[1],
-		"Fz_N":   vals[2],
-		"TRx_Nm": vals[3],
-		"TRy_Nm": vals[4],
-		"TRz_Nm": vals[5],
-	}
-}
-
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	resp := map[string]any{}
 	validCommand := false

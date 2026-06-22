@@ -14,6 +14,19 @@ import (
 // FTSensorModel is the model for the ufactory wrist-mounted 6-axis Force/Torque sensor.
 var FTSensorModel = family.WithModel("ft_sensor")
 
+const tareKey = "tare"
+
+func ftReadingsMap(vals []float64) map[string]any {
+	return map[string]any{
+		"Fx_N":   vals[0],
+		"Fy_N":   vals[1],
+		"Fz_N":   vals[2],
+		"TRx_Nm": vals[3],
+		"TRy_Nm": vals[4],
+		"TRz_Nm": vals[5],
+	}
+}
+
 // FTSensorConfig is the config for the F/T sensor.
 type FTSensorConfig struct {
 	Arm string `json:"arm"`
@@ -73,7 +86,7 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 }
 
 func (s *ftSensor) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
-	if _, ok := cmd["tare"]; ok {
+	if _, ok := cmd[tareKey]; ok {
 		return s.arm.DoCommand(ctx, map[string]any{ftSensorZeroKey: true})
 	}
 	return map[string]any{}, nil

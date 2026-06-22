@@ -27,6 +27,7 @@ const manualMode = 2
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
+const ftSensorValueCount = 6
 
 var regMap = map[string]byte{
 	"Version":        0x01,
@@ -1223,8 +1224,6 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 
 	return loads, nil
 }
-
-const ftSensorValueCount = 6
 
 // parseFTSensorData parses FTSensorData (0xC8): params[0] is a status byte, then six
 // little-endian float32 values at offset i*4+1.

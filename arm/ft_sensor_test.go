@@ -40,7 +40,7 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 	fa := &fakeArm{resp: map[string]any{}}
 	s := &ftSensor{arm: fa}
 
-	_, err := s.DoCommand(context.Background(), map[string]any{"tare": true})
+	_, err := s.DoCommand(context.Background(), map[string]any{tareKey: true})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, fa.lastCmd[ftSensorZeroKey], test.ShouldEqual, true)
 }
