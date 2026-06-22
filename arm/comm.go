@@ -1224,13 +1224,10 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	return loads, nil
 }
 
-// ftSensorValueCount is the number of values the 6-axis F/T sensor returns:
-// Fx, Fy, Fz, Tx, Ty, Tz.
 const ftSensorValueCount = 6
 
-// parseFTSensorData parses the controller response for FTSensorData (0xC8).
-// params[0] is a leading status byte; the six float32 values follow, little-endian,
-// at offset i*4+1 (same layout as getLoad / JointPositions).
+// parseFTSensorData parses FTSensorData (0xC8): params[0] is a status byte, then six
+// little-endian float32 values at offset i*4+1.
 func parseFTSensorData(params []byte) ([]float64, error) {
 	need := 1 + ftSensorValueCount*4
 	if len(params) < need {
@@ -1244,7 +1241,6 @@ func parseFTSensorData(params []byte) ([]float64, error) {
 	return vals, nil
 }
 
-// getFTSensorData reads the wrist 6-axis F/T sensor: [Fx, Fy, Fz, Tx, Ty, Tz].
 func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
 	c := x.newCmd(regMap["FTSensorData"])
 	resp, err := x.send(ctx, c, true)
@@ -1254,9 +1250,6 @@ func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
 	return parseFTSensorData(resp.params)
 }
 
-// setFTSensorZero tares the sensor: the controller snapshots the current reading as
-// the offset subtracted from all subsequent reads. The arm should be stationary at
-// the reference pose/payload and the sensor must be enabled first.
 func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	c := x.newCmd(regMap["FTSensorZero"])
 	_, err := x.send(ctx, c, true)

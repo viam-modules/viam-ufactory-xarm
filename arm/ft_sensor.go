@@ -14,13 +14,12 @@ import (
 // FTSensorModel is the model for the ufactory wrist-mounted 6-axis Force/Torque sensor.
 var FTSensorModel = family.WithModel("ft_sensor")
 
-// FTSensorConfig is the config for the F/T sensor. It depends on an arm, which owns
-// the controller connection.
+// FTSensorConfig is the config for the F/T sensor.
 type FTSensorConfig struct {
 	Arm string `json:"arm"`
 }
 
-// Validate ensures the arm dependency is set and returns it as a required dependency.
+// Validate ensures the arm dependency is set.
 func (cfg *FTSensorConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, utils.NewConfigValidationFieldRequiredError(path, "arm")
@@ -61,7 +60,6 @@ func newFTSensor(ctx context.Context, deps resource.Dependencies, conf resource.
 	return s, nil
 }
 
-// Readings returns the latest F/T values using UR-compatible keys.
 func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[string]any, error) {
 	res, err := s.arm.DoCommand(ctx, map[string]any{getFTSensorDataKey: true})
 	if err != nil {
@@ -74,7 +72,6 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 	return data, nil
 }
 
-// DoCommand supports {"tare": true} to zero the sensor at its current reading.
 func (s *ftSensor) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	if _, ok := cmd["tare"]; ok {
 		return s.arm.DoCommand(ctx, map[string]any{ftSensorZeroKey: true})

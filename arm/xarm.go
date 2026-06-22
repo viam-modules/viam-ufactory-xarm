@@ -677,7 +677,6 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
-// ftReadingsMap converts [Fx, Fy, Fz, Tx, Ty, Tz] into the UR-compatible reading map.
 func ftReadingsMap(vals []float64) map[string]any {
 	return map[string]any{
 		"Fx_N":   vals[0],

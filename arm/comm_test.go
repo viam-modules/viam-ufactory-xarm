@@ -25,7 +25,6 @@ func TestParseFTSensorData(t *testing.T) {
 		test.That(t, got[i], test.ShouldAlmostEqual, want[i], 1e-4)
 	}
 
-	// Too-short frame is an error, not a panic.
 	_, err = parseFTSensorData(make([]byte, 4))
 	test.That(t, err, test.ShouldNotBeNil)
 }

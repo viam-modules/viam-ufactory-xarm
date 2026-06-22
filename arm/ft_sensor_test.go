@@ -8,8 +8,7 @@ import (
 	"go.viam.com/test"
 )
 
-// fakeArm embeds arm.Arm so only DoCommand is implemented; any other call panics,
-// which is fine because the sensor only uses DoCommand.
+// fakeArm embeds arm.Arm so only DoCommand needs implementing.
 type fakeArm struct {
 	arm.Arm
 	lastCmd map[string]any
