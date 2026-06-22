@@ -370,9 +370,7 @@ Model `viam:ufactory:ft_sensor` exposes the UFactory wrist-mounted 6-axis
 Force/Torque sensor as a Viam `sensor`. It depends on a configured xArm and reads
 through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
-**Supported arms:** `xArm6`, `xArm7`, and `xArm850`. The `lite6` is **not** supported —
-UFACTORY does not offer this sensor for the Lite 6 (and at 445 g it would exceed the
-Lite 6's payload). Configuring this sensor against a Lite 6 will result in failed reads.
+**Supported arms:** `xArm6`, `xArm7`, and `xArm850`. The `lite6` is not supported.
 
 > **Prerequisite:** The sensor must be **enabled and calibrated in UFactory Studio
 > before use** (Externals → Torque Sensor: confirm a real SN/firmware appear, then run
