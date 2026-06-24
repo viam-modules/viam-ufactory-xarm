@@ -63,6 +63,9 @@ const (
 	grabWithTorqueKey        = "grab_with_torque"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
+	getFTSensorDataKey       = "get_ft_sensor_data"
+	ftSensorZeroKey          = "ft_sensor_zero"
+	ftSensorDataKey          = "ft_sensor_data"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -165,6 +168,8 @@ type xArm struct {
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
+
+	detectedArm detectedArm
 }
 
 func init() {
@@ -440,6 +445,21 @@ func NewXArm(ctx context.Context, name resource.Name,
 	} else {
 		x.gripperConn = gripperConn
 		logger.Infof("gripper Modbus traffic routed through dedicated port %d", defaultGripperPort)
+	}
+
+	if d, err := x.detectArm(ctx); err != nil {
+		logger.Warnf("xArm hardware detection failed: %v", err)
+	} else {
+		x.detectedArm = d
+		if d.armTypeCode != 0 {
+			logger.Infof(
+				"xArm hardware detected: model=%s axis=%d device_type=%d submodel=%s arm_type=%d control_type=%d fw=%s (configured as %s)",
+				d.model, d.axis, d.deviceType, d.submodel, d.armTypeCode, d.controlTypeCode, d.firmwareVersion, modelName,
+			)
+		} else {
+			logger.Infof("xArm hardware detected: model=%s axis=%d device_type=%d (configured as %s)",
+				d.model, d.axis, d.deviceType, modelName)
+		}
 	}
 
 	err = x.start(ctx, false)
@@ -872,6 +892,21 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp["status"] = "exited manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[getFTSensorDataKey]; ok {
+		vals, err := x.getFTSensorData(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[ftSensorDataKey] = ftReadingsMap(vals)
+		validCommand = true
+	}
+	if _, ok := cmd[ftSensorZeroKey]; ok {
+		if err := x.setFTSensorZero(ctx); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
