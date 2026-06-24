@@ -52,3 +52,29 @@ func TestCreateRawJointSteps1(t *testing.T) {
 	test.That(t, len(out), test.ShouldBeGreaterThan, minMoves)
 	test.That(t, len(out), test.ShouldBeLessThan, 20+minMoves)
 }
+
+func TestCreateRawJointStepsLowSpeed(t *testing.T) {
+	var err error
+	logger := logging.NewTestLogger(t)
+
+	x := &xArm{
+		speed:        utils.DegToRad(3),
+		acceleration: utils.DegToRad(defaultAccel),
+		moveHZ:       defaultMoveHz,
+	}
+
+	start := []float64{0, 0, 0, 0, 0, 0}
+	x.model, err = MakeModelFrame(ModelName6DOF, nil, start, false, nil, logger)
+	test.That(t, err, test.ShouldBeNil)
+
+	displacement := 1.0
+	positions := [][]float64{{displacement, 0, 0, 0, 0, displacement}}
+
+	out, err := x.createRawJointSteps(start, positions, x.moveOptions(nil, nil))
+	test.That(t, err, test.ShouldBeNil)
+
+	expected := (displacement / x.speed) * x.moveHZ
+	// 15% band absorbs accel/decel ramp overhead.
+	test.That(t, float64(len(out)), test.ShouldBeGreaterThan, 0.85*expected)
+	test.That(t, float64(len(out)), test.ShouldBeLessThan, 1.15*expected)
+}
