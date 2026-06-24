@@ -264,19 +264,7 @@ func (g *myGripper) Grab(ctx context.Context, extra map[string]any) (bool, error
 }
 
 func (g *myGripper) Open(ctx context.Context, extra map[string]any) error {
-	g.goToPositionLock.Lock()
-	defer g.goToPositionLock.Unlock()
-
-	g.isMoving.Store(true)
-	defer g.isMoving.Store(false)
-
-	_, err := g.arm.DoCommand(ctx, map[string]any{
-		grabWithTorqueKey: map[string]any{
-			"position": 850.0,
-			"speed":    3000.0,
-			"torque":   100.0,
-		},
-	})
+	_, err := g.goToPosition(ctx, 840)
 	return err
 }
 
