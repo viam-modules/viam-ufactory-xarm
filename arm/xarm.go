@@ -717,7 +717,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, fmt.Errorf("grab_with_torque.torque: %w", err)
 		}
 		if torqueF < 0 || torqueF > 100 {
-			return nil, fmt.Errorf("grab_with_torque.torque must be between 0 and 100, got %v", torqueF)
+			return nil, fmt.Errorf("grab_with_torque.torque must be between 0%% and 100%%, got %v", torqueF)
 		}
 		stall := time.Second
 		if raw, ok := params["stall_seconds"]; ok {
