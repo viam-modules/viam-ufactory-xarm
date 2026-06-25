@@ -22,23 +22,23 @@
         {
             "id": "left_finger",
             "parent": "left_joint",
-            "translation": {"x": 0, "y": 0, "z": 100},
+            "translation": {"x": 0, "y": 0, "z": 0},
             "geometry": {
                 "x": 40,
                 "y": 20,
                 "z": 60,
-                "translation": {"x": 0, "y": 10, "z": 30}
+                "translation": {"x": 0, "y": 10, "z": 130}
             }
         },
         {
             "id": "right_finger",
             "parent": "right_joint",
-            "translation": {"x": 0, "y": 0, "z": 100},
+            "translation": {"x": 0, "y": 0, "z": 0},
             "geometry": {
                 "x": 40,
                 "y": 20,
                 "z": 60,
-                "translation": {"x": 0, "y": -10, "z": 30}
+                "translation": {"x": 0, "y": -10, "z": 130}
             }
         },
         {
