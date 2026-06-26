@@ -702,11 +702,11 @@ func (x *xArm) createRawJointSteps(
 		from = toInputs
 	}
 
-	nominalAccelSteps := int((mo.speed / mo.acceleration) * mo.moveHZ) // This many steps to accelerate, and the same to decelerate
-	if float64(nominalAccelSteps) > stepTotal*0.95 {
-		nominalAccelSteps = int(0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ)
+	nominalAccelSteps := (mo.speed / mo.acceleration) * mo.moveHZ // This many steps to accelerate, and the same to decelerate
+	if nominalAccelSteps > stepTotal*0.95 {
+		nominalAccelSteps = 0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ
 	}
-	maxVel := (float64(nominalAccelSteps) / mo.moveHZ) * mo.acceleration
+	maxVel := (nominalAccelSteps / mo.moveHZ) * mo.acceleration
 
 	inputStepsReversed := [][]referenceframe.Input{}
 	for i := len(inputSteps) - 1; i >= 0; i-- {
@@ -719,7 +719,7 @@ func (x *xArm) createRawJointSteps(
 		allInputSteps [][]referenceframe.Input,
 		stopVel float64,
 	) (int, [][]float64, error) {
-		currSpeed := accelStep
+		currSpeed := math.Min(accelStep, mo.speed)
 		steps := [][]float64{}
 		from = startInputs
 		lastInputs := startInputs
