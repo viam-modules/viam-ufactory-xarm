@@ -11,12 +11,12 @@
         {
             "id": "case",
             "parent": "base",
-            "translation": {"x": 0, "y": 0, "z": 0},
+            "translation": {"x": 0, "y": 0, "z": 50},
             "geometry": {
                 "x": 50,
                 "y": 100,
                 "z": 100,
-                "translation": {"x": 0, "y": 0, "z": 50}
+                "translation": {"x": 0, "y": 0, "z": 0}
             }
         },
         {
@@ -26,8 +26,8 @@
             "geometry": {
                 "x": 40,
                 "y": 20,
-                "z": 60,
-                "translation": {"x": 0, "y": 10, "z": 130}
+                "z": 65,
+                "translation": {"x": 0, "y": 10, "z": 132.5}
             }
         },
         {
@@ -37,14 +37,14 @@
             "geometry": {
                 "x": 40,
                 "y": 20,
-                "z": 60,
-                "translation": {"x": 0, "y": -10, "z": 130}
+                "z": 65,
+                "translation": {"x": 0, "y": -10, "z": 132.5}
             }
         },
         {
             "id": "tcp",
             "parent": "base",
-            "translation": {"x": 0, "y": 0, "z": 160}
+            "translation": {"x": 0, "y": 0, "z": 135}
         }
     ],
     "joints": [

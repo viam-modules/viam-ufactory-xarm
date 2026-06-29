@@ -37,11 +37,12 @@ func TestXArmGripperFingerSymmetry(t *testing.T) {
 		r3.Vector{X: left.X, Y: -left.Y, Z: left.Z}, right, 1e-6,
 	), test.ShouldBeTrue)
 
-	// The TCP is a static link at z = case_height + finger_length = 160.
+	// The TCP is a static link at the configured grasp depth — Z=135 in the
+	// gripper frame, i.e. midway along the finger length.
 	tcpPose, err := model.Transform([]referenceframe.Input{gripperHalfStrokeMM})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, spatialmath.R3VectorAlmostEqual(
-		tcpPose.Point(), r3.Vector{X: 0, Y: 0, Z: 160}, 1e-6,
+		tcpPose.Point(), r3.Vector{X: 0, Y: 0, Z: 135}, 1e-6,
 	), test.ShouldBeTrue)
 }
 
