@@ -310,9 +310,22 @@ resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get": true})
 resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0})
 // resp["position"]
 
-// Set/get speed (proxied to arm)
-gripperComponent.DoCommand(ctx, map[string]interface{}{"set_gripper_speed": 2000.0})
-resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get_gripper_speed": true})
+// Set/get gripper speed (proxied to arm DoCommand)
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+
+// G2 gripper only — set/get the grasp current/torque (0-100%). Affects how hard the gripper squeezes.
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_torque": 50})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_torque": true})
+
+// G2 gripper only — close to a position with a force limit
+gripperComponent.DoCommand(context.Background(), map[string]interface{}{
+    "grab_with_torque": map[string]interface{}{
+        "position": 100,  // 0-850
+        "speed":    3000, // 1-5000
+        "torque":   100,  // 0-100%
+    },
+})
 ```
 
 ## Gripper Lite

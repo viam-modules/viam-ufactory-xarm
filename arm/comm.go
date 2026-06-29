@@ -934,6 +934,9 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 }
 
 func (x *xArm) setupGripper(ctx context.Context) error {
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
@@ -941,6 +944,20 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by graspWithTorque.
+// FnC00 enables the FnCxx block-write control mode (speed+torque+position); when left enabled,
+// subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
+func (x *xArm) disableGripperControlMode(ctx context.Context) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	c.params = append(c.params, 0x02)
+	c.params = append(c.params, 0x00, 0x00)
+	x.logger.Debugf("disableGripperControlMode")
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 // gripperPreamble routes through gripperConn so that gripper-bus traffic
@@ -1035,6 +1052,83 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	}
 
 	return binary.BigEndian.Uint16(res.params[5:]), nil
+}
+
+// graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
+// applies the requested grasp current/torque atomically with the position move. See section 4.2 of
+// the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
+func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, stall time.Duration) error {
+	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
+	// otherwise back-to-back grasp commands may be ignored while a hold is active.
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
+
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x05)
+	c.params = append(c.params, 0x0A)
+
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, 1) // FnC00 enable
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, speed) // FnC01
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, torque) // FnC02
+	c.params = append(c.params, buf...)
+
+	posBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
+	c.params = append(c.params, posBytes...)
+
+	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
+	if _, err := x.send(ctx, c, true); err != nil {
+		return err
+	}
+
+	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
+}
+
+// waitForGripper polls gripper position until it reaches goal (within 6),
+// stalls (no movement >1 for >stall), or 10s elapses as an overall backstop.
+// Caller controls the stall window: a long stall (e.g. 1s) confirms the gripper
+// really stopped; a short stall (e.g. 200ms) returns quickly for callers that
+// expect immediate resistance like squeeze loops.
+func (x *xArm) waitForGripper(ctx context.Context, goal int, stall time.Duration) error {
+	const pollInterval = 30
+	const overallTimeout = 10 * time.Second
+	stallMs := int(stall / time.Millisecond)
+	start := time.Now()
+	old := -1
+	msSinceStuck := -1
+
+	for {
+		time.Sleep(time.Duration(pollInterval) * time.Millisecond)
+
+		pos32, err := x.getGripperPosition(ctx)
+		if err != nil {
+			return err
+		}
+		pos := int(pos32)
+
+		if math.Abs(float64(pos-goal)) <= 6 {
+			return nil
+		}
+
+		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
+			msSinceStuck += pollInterval
+			if msSinceStuck > stallMs {
+				return nil
+			}
+		} else {
+			msSinceStuck = 0
+		}
+		old = pos
+
+		if time.Since(start) > overallTimeout {
+			return nil
+		}
+	}
 }
 
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
