@@ -108,13 +108,6 @@ var (
 	XArm850Model = family.WithModel(ModelName850)
 )
 
-var modelNameToURDFFile = map[string]string{
-	ModelName6DOF: "xarm6.urdf",
-	ModelName7DOF: "xarm7.urdf",
-	ModelNameLite: "lite6.urdf",
-	ModelName850:  "uf850.urdf",
-}
-
 var armTo3DModelParts = map[string][]string{
 	"lite6": {
 		"base_top",
@@ -304,42 +297,32 @@ func (cfg *Config) maxBadJoint() int {
 	return maxJoint
 }
 
-func getModelJSON(modelName string) ([]byte, error) {
-	switch modelName {
-	case ModelName6DOF:
-		return xArm6modeljson, nil
-	case ModelNameLite:
-		return lite6modeljson, nil
-	case ModelName7DOF:
-		return xArm7modeljson, nil
-	case ModelName850:
-		return xArm850modeljson, nil
-	default:
-		return nil, fmt.Errorf("no kinematics information for xarm of model %s", modelName)
-	}
-}
-
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
+// When armTypeCode matches a known hardware variant (e.g. 1305 on xArm6),
+// MakeModelFrame routes to the variant-specific kinematics artifact; otherwise it uses
+// the base model. Pass 0 when variant info isn't available.
 func MakeModelFrame(
-	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, meshDecimationRatios []float64, logger logging.Logger,
+	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool,
+	meshDecimationRatios []float64, logger logging.Logger, armTypeCode int,
 ) (referenceframe.Model, error) {
+	artifact, err := resolveArmKinematicsArtifact(modelName, detectedArm{armTypeCode: armTypeCode})
+	if err != nil {
+		return nil, err
+	}
+
 	var cfg *referenceframe.ModelConfigJSON
 	if useURDFs {
-		parsed, err := makeModelFrameFromURDF(modelName, meshDecimationRatios)
+		parsed, err := makeModelFrameFromURDF(artifact.urdfBasename, modelName, meshDecimationRatios)
 		if err != nil {
 			return nil, err
 		}
 		cfg = parsed.ModelConfig()
 	} else {
-		jsonData, err := getModelJSON(modelName)
-		if err != nil {
-			return nil, err
-		}
-		if len(jsonData) == 0 {
+		if len(artifact.json) == 0 {
 			return nil, referenceframe.ErrNoModelInformation
 		}
-		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: jsonData, Extension: "json"}}
-		if err := json.Unmarshal(jsonData, cfg); err != nil {
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: "json"}}
+		if err := json.Unmarshal(artifact.json, cfg); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal json file")
 		}
 	}
@@ -351,16 +334,22 @@ func MakeModelFrame(
 		logger.Infof("locking joint %d to %v", j, now)
 	}
 
+	source := "json"
+	if useURDFs {
+		source = artifact.urdfBasename + ".urdf"
+	}
+	variant := artifact.variant
+	if variant == "" {
+		variant = "base"
+	}
+	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
+
 	return cfg.ParseConfig(modelName)
 }
 
-func makeModelFrameFromURDF(modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
-	urdfFile, ok := modelNameToURDFFile[modelName]
-	if !ok {
-		return nil, fmt.Errorf("no URDF file for xarm model %s", modelName)
-	}
+func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
-	path := fmt.Sprintf("%s/arm/%s", moduleRoot, urdfFile)
+	path := fmt.Sprintf("%s/arm/%s.urdf", moduleRoot, urdfBasename)
 	return referenceframe.ParseModelXMLFile(path, modelName, meshDecimationRatios)
 }
 
@@ -485,7 +474,9 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger)
+	x.model, err = MakeModelFrame(
+		modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
+	)
 	if err != nil {
 		return nil, err
 	}

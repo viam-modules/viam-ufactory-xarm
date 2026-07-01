@@ -35,7 +35,7 @@ func TestMakeModelFrameJSON(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, false, nil, logger)
+			m, err := MakeModelFrame(tc.model, nil, nil, false, nil, logger, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -63,7 +63,7 @@ func TestMakeModelFrameURDF(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, true, nil, logger)
+			m, err := MakeModelFrame(tc.model, nil, nil, true, nil, logger, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -77,16 +77,16 @@ func TestMakeModelFrameURDFMissingEnv(t *testing.T) {
 	// Ensure VIAM_MODULE_ROOT points to a nonexistent directory.
 	t.Setenv("VIAM_MODULE_ROOT", "/nonexistent/path")
 
-	_, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger)
+	_, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
 func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("unknownModel", nil, nil, true, nil, logger)
+	_, err := MakeModelFrame("unknownModel", nil, nil, true, nil, logger, 0)
 	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "no URDF file for xarm model")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
 
 func TestMakeModelFrameWithBadJoints(t *testing.T) {
@@ -98,7 +98,7 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 		current[i] = 0
 	}
 
-	m, err := MakeModelFrame(ModelName6DOF, []int{2}, current, false, nil, logger)
+	m, err := MakeModelFrame(ModelName6DOF, []int{2}, current, false, nil, logger, 0)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
@@ -109,20 +109,85 @@ func TestUseURDFsDefaultsFalse(t *testing.T) {
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
 }
 
-func TestModelNameToURDFFileMapping(t *testing.T) {
-	// Verify every model has a URDF mapping.
-	for _, model := range []string{ModelName6DOF, ModelName7DOF, ModelNameLite, ModelName850} {
-		_, ok := modelNameToURDFFile[model]
-		test.That(t, ok, test.ShouldBeTrue)
+func TestResolveArmKinematicsArtifact(t *testing.T) {
+	cases := []struct {
+		name             string
+		model            string
+		detected         detectedArm
+		wantURDFBasename string
+		wantVariant      string
+		wantErr          bool
+	}{
+		{
+			name:             "xArm6 base, no detection",
+			model:            ModelName6DOF,
+			detected:         detectedArm{},
+			wantURDFBasename: "xarm6",
+		},
+		{
+			name:             "xArm6 with 1305 hardware variant",
+			model:            ModelName6DOF,
+			detected:         detectedArm{armTypeCode: 1305},
+			wantURDFBasename: "xarm6_1305",
+			wantVariant:      "1305",
+		},
+		{
+			name:             "xArm6 with unknown armTypeCode falls back to base",
+			model:            ModelName6DOF,
+			detected:         detectedArm{armTypeCode: 9999},
+			wantURDFBasename: "xarm6",
+		},
+		{
+			name:             "xArm850 base",
+			model:            ModelName850,
+			detected:         detectedArm{},
+			wantURDFBasename: "uf850",
+		},
+		{
+			name:     "unknown model returns error",
+			model:    "ghost",
+			detected: detectedArm{},
+			wantErr:  true,
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveArmKinematicsArtifact(tc.model, tc.detected)
+			if tc.wantErr {
+				test.That(t, err, test.ShouldNotBeNil)
+				return
+			}
+			test.That(t, err, test.ShouldBeNil)
+			test.That(t, got.urdfBasename, test.ShouldEqual, tc.wantURDFBasename)
+			test.That(t, got.variant, test.ShouldEqual, tc.wantVariant)
+			test.That(t, len(got.json), test.ShouldBeGreaterThan, 0)
+		})
+	}
+}
 
-	// Verify the URDF files actually exist on disk.
+func TestKinematicsArtifactURDFsOnDisk(t *testing.T) {
 	dir := armDir()
-	for _, urdfFile := range modelNameToURDFFile {
-		path := filepath.Join(dir, urdfFile)
+	for _, base := range armKinematicsBase {
+		path := filepath.Join(dir, base.urdfBasename+".urdf")
 		_, err := os.Stat(path)
 		test.That(t, err, test.ShouldBeNil)
 	}
+	for _, v := range armKinematicsVariants {
+		path := filepath.Join(dir, v.urdfBasename+".urdf")
+		_, err := os.Stat(path)
+		test.That(t, err, test.ShouldBeNil)
+	}
+}
+
+func TestMakeModelFrameVariantURDF(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	repoRoot := filepath.Dir(armDir())
+	t.Setenv("VIAM_MODULE_ROOT", repoRoot)
+
+	m, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger, 1305)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, m, test.ShouldNotBeNil)
+	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
 }
 
 func TestMoveOptions(t *testing.T) {

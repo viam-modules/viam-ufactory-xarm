@@ -1,0 +1,33 @@
+<?xml version="1.0" ?>
+<robot name="uflite_gripper">
+
+  <link name="world"/>
+
+  <joint name="world_joint" type="fixed">
+    <parent link="world"/>
+    <child link="uflite_gripper_link"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+
+  <link name="uflite_gripper_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.0 0.0 0.030"/>
+      <mass value="0.25"/>
+      <inertia ixx="0.00047106" ixy="3.9292E-07" ixz="2.6537E-06" iyy="0.00033072" iyz="-1.0975E-05" izz="0.00025642"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="package://description/meshes/uflite_grippermeshes/gripper_lite.stl"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </collision>
+  </link>
+
+  <link name="link_tcp"/>
+
+  <joint name="joint_tcp" type="fixed">
+    <parent link="uflite_gripper_link"/>
+    <child link="link_tcp"/>
+    <origin rpy="0 0 0" xyz="0 0 0.0836"/>
+  </joint>
+</robot>

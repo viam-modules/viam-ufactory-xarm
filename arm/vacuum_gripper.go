@@ -15,14 +15,17 @@ import (
 	"go.viam.com/rdk/spatialmath"
 )
 
+// ModelNameVacuumGripper is the ufactory vacuum gripper commonly attached to xArm6/xArm7/xArm850.
+const ModelNameVacuumGripper = "vacuum_gripper"
+
+// ModelNameVacuumGripperLite is the ufactory vacuum gripper commonly attached to the lite6.
+const ModelNameVacuumGripperLite = "vacuum_gripper_lite"
+
 // VacuumGripperModel model for the ufactory vacuum gripper.
-var VacuumGripperModel = family.WithModel("vacuum_gripper")
+var VacuumGripperModel = family.WithModel(ModelNameVacuumGripper)
 
 // VacuumGripperModelLite is the ufactory vacuum gripper commonly attached to the lite6.
-var VacuumGripperModelLite = family.WithModel("vacuum_gripper_lite")
-
-var caseBoxSize = r3.Vector{X: 70, Y: 93, Z: 117}
-var liteCaseBoxSize = r3.Vector{X: 51, Y: 51, Z: 54}
+var VacuumGripperModelLite = family.WithModel(ModelNameVacuumGripperLite)
 
 func init() {
 	resource.RegisterComponent(
@@ -45,11 +48,17 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
+	mf, err := loadGripperModel(config.Model.Name)
+	if err != nil {
+		return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
+	}
+
 	g := &myVacuumGripper{
 		name:   config.ResourceName(),
 		conf:   newConf,
 		logger: logger,
 		model:  config.Model,
+		mf:     mf,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -68,6 +77,7 @@ type myVacuumGripper struct {
 	name  resource.Name
 	conf  *GripperConfig
 	model resource.Model
+	mf    referenceframe.Model
 
 	arm arm.Arm
 
@@ -144,46 +154,30 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	var (
-		caseBox spatialmath.Geometry
-		err     error
-	)
-	switch g.model {
-	case VacuumGripperModel:
-		caseBox, err = spatialmath.NewBox(spatialmath.NewPoseFromPoint(
-			r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + caseBoxSize.Z/2)}),
-			caseBoxSize,
-			"vacuum-gripper-box")
-		if err != nil {
-			return nil, err
-		}
-	case VacuumGripperModelLite:
-		caseBox, err = spatialmath.NewBox(spatialmath.NewPoseFromPoint(
-			r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM + liteCaseBoxSize.Z/2)}),
-			liteCaseBoxSize,
-			"vacuum-gripper-box")
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("unsupported model %s", g.model)
-	}
-
-	vacuum, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(
-		r3.Vector{X: 0, Y: 0, Z: -1 * (g.conf.VacuumLengthMM / 2)}),
-		r3.Vector{X: 5, Y: 5, Z: max(5, g.conf.VacuumLengthMM)},
-		"vacuum-gripper-tube")
+	gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 	if err != nil {
 		return nil, err
 	}
+	geoms := gif.Geometries()
 
-	return []spatialmath.Geometry{
-		caseBox, vacuum,
-	}, nil
+	// The vacuum suction tube length is configurable per deployment; reflect
+	// it as an additional thin collision body extending past the model's TCP.
+	if g.conf.VacuumLengthMM > 0 {
+		tube, err := spatialmath.NewBox(
+			spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: g.conf.VacuumLengthMM / 2}),
+			r3.Vector{X: 5, Y: 5, Z: g.conf.VacuumLengthMM},
+			"vacuum-gripper-tube")
+		if err != nil {
+			return nil, err
+		}
+		geoms = append(geoms, tube)
+	}
+
+	return geoms, nil
 }
 
 func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return nil, errors.ErrUnsupported
+	return g.mf, nil
 }
 
 func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
