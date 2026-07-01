@@ -314,7 +314,13 @@ func getModelJSON(modelName string) ([]byte, error) {
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
 func MakeModelFrame(
-	resourceName string, modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, meshDecimationRatios []float64, logger logging.Logger,
+	resourceName string,
+	modelName string,
+	badJoints []int,
+	current []referenceframe.Input,
+	useURDFs bool,
+	meshDecimationRatios []float64,
+	logger logging.Logger,
 ) (referenceframe.Model, error) {
 	var cfg *referenceframe.ModelConfigJSON
 	if useURDFs {
