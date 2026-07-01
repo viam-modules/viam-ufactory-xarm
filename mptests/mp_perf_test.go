@@ -13,7 +13,7 @@ import (
 )
 
 func makeTestFrameSystem(logger logging.Logger) (*referenceframe.FrameSystem, error) {
-	armModel, err := xarm.MakeModelFrame(xarm.ModelName6DOF, nil, nil, false, nil, logger)
+	armModel, err := xarm.MakeModelFrame("", xarm.ModelName6DOF, nil, nil, false, nil, logger)
 	if err != nil {
 		return nil, err
 	}
