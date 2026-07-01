@@ -314,7 +314,7 @@ func getModelJSON(modelName string) ([]byte, error) {
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
 func MakeModelFrame(
-	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, meshDecimationRatios []float64, logger logging.Logger,
+	resourceName string, modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool, meshDecimationRatios []float64, logger logging.Logger,
 ) (referenceframe.Model, error) {
 	var cfg *referenceframe.ModelConfigJSON
 	if useURDFs {
@@ -344,7 +344,7 @@ func MakeModelFrame(
 		logger.Infof("locking joint %d to %v", j, now)
 	}
 
-	return cfg.ParseConfig(modelName)
+	return cfg.ParseConfig(resourceName)
 }
 
 func makeModelFrameFromURDF(modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
@@ -447,7 +447,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.model, err = MakeModelFrame(modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger)
+	x.model, err = MakeModelFrame(name.Name, modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger)
 	if err != nil {
 		return nil, err
 	}

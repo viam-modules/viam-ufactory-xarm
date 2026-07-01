@@ -35,7 +35,7 @@ func TestMakeModelFrameJSON(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, false, nil, logger)
+			m, err := MakeModelFrame("", tc.model, nil, nil, false, nil, logger)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -63,7 +63,7 @@ func TestMakeModelFrameURDF(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, true, nil, logger)
+			m, err := MakeModelFrame("", tc.model, nil, nil, true, nil, logger)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -77,14 +77,14 @@ func TestMakeModelFrameURDFMissingEnv(t *testing.T) {
 	// Ensure VIAM_MODULE_ROOT points to a nonexistent directory.
 	t.Setenv("VIAM_MODULE_ROOT", "/nonexistent/path")
 
-	_, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger)
+	_, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
 func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("unknownModel", nil, nil, true, nil, logger)
+	_, err := MakeModelFrame("", "unknownModel", nil, nil, true, nil, logger)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no URDF file for xarm model")
 }
@@ -98,7 +98,7 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 		current[i] = 0
 	}
 
-	m, err := MakeModelFrame(ModelName6DOF, []int{2}, current, false, nil, logger)
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
