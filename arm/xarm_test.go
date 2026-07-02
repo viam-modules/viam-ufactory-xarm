@@ -165,3 +165,15 @@ func TestMoveOptions(t *testing.T) {
 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
 }
+
+func TestFTReadingsMap(t *testing.T) {
+	vals := []float64{-0.987, -2.923, -18.356, -0.0012, -0.0914, 0.00698}
+	m := ftReadingsMap(vals)
+	test.That(t, m["Fx_N"], test.ShouldEqual, -0.987)
+	test.That(t, m["Fy_N"], test.ShouldEqual, -2.923)
+	test.That(t, m["Fz_N"], test.ShouldEqual, -18.356)
+	test.That(t, m["TRx_Nm"], test.ShouldEqual, -0.0012)
+	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
+	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
+	test.That(t, len(m), test.ShouldEqual, 6)
+}

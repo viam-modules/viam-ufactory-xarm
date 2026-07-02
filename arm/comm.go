@@ -27,6 +27,7 @@ const manualMode = 2
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
+const ftSensorValueCount = 6
 
 var regMap = map[string]byte{
 	"Version":        0x01,
@@ -48,6 +49,8 @@ var regMap = map[string]byte{
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
+	"FTSensorData":   0xC8,
+	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
@@ -699,11 +702,11 @@ func (x *xArm) createRawJointSteps(
 		from = toInputs
 	}
 
-	nominalAccelSteps := int((mo.speed / mo.acceleration) * mo.moveHZ) // This many steps to accelerate, and the same to decelerate
-	if float64(nominalAccelSteps) > stepTotal*0.95 {
-		nominalAccelSteps = int(0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ)
+	nominalAccelSteps := (mo.speed / mo.acceleration) * mo.moveHZ // This many steps to accelerate, and the same to decelerate
+	if nominalAccelSteps > stepTotal*0.95 {
+		nominalAccelSteps = 0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ
 	}
-	maxVel := (float64(nominalAccelSteps) / mo.moveHZ) * mo.acceleration
+	maxVel := (nominalAccelSteps / mo.moveHZ) * mo.acceleration
 
 	inputStepsReversed := [][]referenceframe.Input{}
 	for i := len(inputSteps) - 1; i >= 0; i-- {
@@ -716,7 +719,7 @@ func (x *xArm) createRawJointSteps(
 		allInputSteps [][]referenceframe.Input,
 		stopVel float64,
 	) (int, [][]float64, error) {
-		currSpeed := accelStep
+		currSpeed := math.Min(accelStep, mo.speed)
 		steps := [][]float64{}
 		from = startInputs
 		lastInputs := startInputs
@@ -1220,6 +1223,36 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	}
 
 	return loads, nil
+}
+
+// parseFTSensorData parses FTSensorData (0xC8): params[0] is a status byte, then six
+// little-endian float32 values at offset i*4+1.
+func parseFTSensorData(params []byte) ([]float64, error) {
+	need := 1 + ftSensorValueCount*4
+	if len(params) < need {
+		return nil, fmt.Errorf("unexpected F/T sensor response length, got %d want >= %d", len(params), need)
+	}
+	vals := make([]float64, 0, ftSensorValueCount)
+	for i := range ftSensorValueCount {
+		idx := i*4 + 1
+		vals = append(vals, float64(rutils.Float32FromBytesLE(params[idx:idx+4])))
+	}
+	return vals, nil
+}
+
+func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
+	c := x.newCmd(regMap["FTSensorData"])
+	resp, err := x.send(ctx, c, true)
+	if err != nil {
+		return nil, err
+	}
+	return parseFTSensorData(resp.params)
+}
+
+func (x *xArm) setFTSensorZero(ctx context.Context) error {
+	c := x.newCmd(regMap["FTSensorZero"])
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
