@@ -313,8 +313,11 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	old := -1
 	start := time.Now()
 
+	msSinceStuck := -1
+	pollInterval := 30
+
 	for {
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(time.Duration(pollInterval) * time.Millisecond)
 
 		pos, err := g.getPosition(ctx)
 		if err != nil {
@@ -328,12 +331,18 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 		// if the gripper has stopped moving, return
 		// might be grabbing something
 		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
-			return pos, nil
+			msSinceStuck += pollInterval
+			if msSinceStuck > 1000 {
+				return pos, nil
+			}
+		} else {
+			msSinceStuck = 0
 		}
 
 		old = pos
-		if time.Since(start) > (2 * time.Second) {
-			return 0, fmt.Errorf("goToPosition %d timed out after: %v", goal, time.Since(start))
+		// up timeout for high resistance grabs that take longer
+		if time.Since(start) > (10 * time.Second) {
+			return pos, nil
 		}
 	}
 }
@@ -386,6 +395,11 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 		return g.arm.DoCommand(ctx, cmd)
 	}
 	if _, ok := cmd[getGripperSpeedKey]; ok {
+		return g.arm.DoCommand(ctx, cmd)
+	}
+	if _, ok := cmd[grabWithTorqueKey]; ok {
+		g.isMoving.Store(true)
+		defer g.isMoving.Store(false)
 		return g.arm.DoCommand(ctx, cmd)
 	}
 	return map[string]any{}, nil
