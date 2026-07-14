@@ -249,6 +249,17 @@ resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_vacuum_state
 // resp["vacuum_state"] is a bool
 ```
 
+> [!NOTE]
+> `grab_vacuum`, `open_vacuum`, and `get_vacuum_state` accept an optional `connection_type` (`"plugin"` or `"contact"`) alongside the command to select the vacuum gripper's wiring interface. When omitted, the arm auto-detects the interface from the arm model.
+
+```go
+// Override the auto-detected wiring interface
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "grab_vacuum":     true,
+    "connection_type": "contact",
+})
+```
+
 ### Manual Mode (Teaching Mode)
 
 Manual mode puts the arm into zero-gravity mode, allowing free movement by hand with gravity compensation active. Servos remain engaged — do not disable them.
@@ -357,18 +368,25 @@ resp, _ := gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_l
 
 ## Vacuum Gripper
 
-For use with the standard xArm vacuum gripper. Requires a wired connection to the arm controller (not a contact connection).
+For use with the standard xArm vacuum gripper. Both wiring interfaces are supported: the older **plug-in** connection (arm drives TGPIO outputs 0/1) and the newer **contact** connection (TGPIO outputs 3/4). The interface is auto-detected from the arm model — xArm850 and xArm ≥1305 default to `contact`, other arms default to `plugin` — and can be overridden with `connection_type`.
 
 ```json
 {
   "arm": "my-xarm",
-  "vacuum_length_mm": 48
+  "vacuum_length_mm": 48,
+  "connection_type": "contact"
 }
 ```
 
+| Attribute | Type | Inclusion | Description |
+|-----------|------|-----------|-------------|
+| `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
+| `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
+| `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
+
 ## Vacuum Gripper Lite
 
-Vacuum gripper for the Lite 6.
+Vacuum gripper for the Lite 6. This model always uses the plug-in connection and ignores `connection_type`.
 
 ```json
 {
