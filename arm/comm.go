@@ -1151,8 +1151,11 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
 }
 
-// vacuumStateFromResponse decodes "object picked" from a DIGITAL_IN response.
-// v1 reads input pin 0 (bit 0x01); v2 reads input pin 3 (bit 0x04).
+// vacuumStateFromResponse decodes "object picked" from a DIGITAL_IN (0x0A14)
+// response. The picked bit follows the xArm SDK's get_tgpio_digital mapping:
+// v1 uses input pin 0 -> value[1] -> word bit 0 (mask 0x01); v2 uses input pin 3,
+// which the SDK maps to value[3] -> word bit 2 (mask 0x04), not bit 3. params[4]
+// is the low byte of that input word.
 func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 	if len(params) != 5 {
 		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(params), params)
