@@ -122,6 +122,11 @@ func TestVacuumStateFromResponse(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, got, test.ShouldBeFalse)
 
+	// Extra high bits set: masking (not equality) still reads as holding.
+	got, err = vacuumStateFromResponse([]byte{0, 0, 0, 0, 0x05}, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
 	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
 	test.That(t, err, test.ShouldNotBeNil)
 }
