@@ -1180,6 +1180,34 @@ func (x *xArm) vacuumPreamble() cmd {
 	return c
 }
 
+// tgpioCoreBits mirrors the xArm SDK tgpio_set_digital core-pin bit table.
+// Keyed by core pin (userPin+1).
+var tgpioCoreBits = map[int]struct{ mask, val uint16 }{
+	1: {0x0100, 0x0001},
+	2: {0x0200, 0x0002},
+	3: {0x1000, 0x0010},
+	4: {0x0400, 0x0004},
+	5: {0x0800, 0x0008},
+}
+
+// tgpioWord builds the 16-bit mask|value word for a TGPIO digital-out write.
+func tgpioWord(userPin int, value bool) uint16 {
+	b := tgpioCoreBits[userPin+1]
+	w := b.mask
+	if value {
+		w |= b.val
+	}
+	return w
+}
+
+// tgpioDigitalParams builds the params appended after the VacuumControl register
+// byte: [bid=0x09][addr 0x0A,0x15][LE-fp32(word)].
+func tgpioDigitalParams(userPin int, value bool) []byte {
+	arg := make([]byte, 4)
+	binary.LittleEndian.PutUint32(arg, math.Float32bits(float32(tgpioWord(userPin, value))))
+	return append([]byte{0x09, 0x0A, 0x15}, arg...)
+}
+
 // Grab maps to open in ufactory.
 func (x *xArm) grabVacuum(ctx context.Context) error {
 	// Ufactory requires opening channel 0 and channel 1

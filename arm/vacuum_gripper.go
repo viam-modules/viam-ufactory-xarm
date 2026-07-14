@@ -24,6 +24,23 @@ var VacuumGripperModelLite = family.WithModel("vacuum_gripper_lite")
 var caseBoxSize = r3.Vector{X: 70, Y: 93, Z: 117}
 var liteCaseBoxSize = r3.Vector{X: 51, Y: 51, Z: 54}
 
+// connectionType selects which TGPIO pin-set drives the vacuum gripper.
+// Plug-in (v1) uses user pins 0/1; contact (v2) uses user pins 3/4.
+type connectionType string
+
+const (
+	connectionPlugin  connectionType = "plugin"
+	connectionContact connectionType = "contact"
+)
+
+// vacuumPins returns the [ON-pin, OFF-pin] TGPIO user-pin pair for a connection type.
+func vacuumPins(ct connectionType) [2]int {
+	if ct == connectionContact {
+		return [2]int{3, 4}
+	}
+	return [2]int{0, 1}
+}
+
 func init() {
 	resource.RegisterComponent(
 		gripper.API,
