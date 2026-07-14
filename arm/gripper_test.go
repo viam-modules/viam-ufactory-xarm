@@ -16,4 +16,5 @@ func TestGripperConfigValidateConnectionType(t *testing.T) {
 	}
 	_, _, err := base("wired").Validate("p")
 	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "connection_type")
 }
