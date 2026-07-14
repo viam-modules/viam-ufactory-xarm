@@ -100,3 +100,28 @@ func TestTgpioDigitalParams_V1Regression(t *testing.T) {
 	test.That(t, tgpioDigitalParams(1, true), test.ShouldResemble,
 		[]byte{0x09, 0x0A, 0x15, 0x00, 0x80, 0x00, 0x44})
 }
+
+func TestVacuumStateFromResponse(t *testing.T) {
+	holdingV1 := []byte{0, 0, 0, 0, 0x01}
+	holdingV2 := []byte{0, 0, 0, 0, 0x04}
+	idle := []byte{0, 0, 0, 0, 0x00}
+
+	got, err := vacuumStateFromResponse(holdingV1, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
+	got, err = vacuumStateFromResponse(holdingV2, connectionContact)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
+	got, err = vacuumStateFromResponse(holdingV1, connectionContact)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeFalse)
+
+	got, err = vacuumStateFromResponse(idle, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeFalse)
+
+	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
+	test.That(t, err, test.ShouldNotBeNil)
+}

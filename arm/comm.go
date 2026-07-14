@@ -1151,23 +1151,27 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
 }
 
-func (x *xArm) getVacuumStatus(ctx context.Context) (bool, error) {
-	c := x.newCmd(regMap["VacuumState"])
-	additionalParams := []byte{
-		0x09,
-		0x0A,
-		0x14,
+// vacuumStateFromResponse decodes "object picked" from a DIGITAL_IN response.
+// v1 reads input pin 0 (bit 0x01); v2 reads input pin 3 (bit 0x04).
+func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
+	if len(params) != 5 {
+		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(params), params)
 	}
-	c.params = append(c.params, additionalParams...)
+	mask := byte(0x01)
+	if ct == connectionContact {
+		mask = 0x04
+	}
+	return params[4]&mask != 0, nil
+}
+
+func (x *xArm) getVacuumStatus(ctx context.Context, ct connectionType) (bool, error) {
+	c := x.newCmd(regMap["VacuumState"])
+	c.params = append(c.params, 0x09, 0x0A, 0x14)
 	res, err := x.send(ctx, c, true)
 	if err != nil {
 		return false, err
 	}
-
-	if len(res.params) != 5 {
-		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(res.params), res.params)
-	}
-	return (res.params[4] == 0x01), nil
+	return vacuumStateFromResponse(res.params, ct)
 }
 
 // This is the host ID and gripper address which should be appended to each command.
@@ -1208,34 +1212,26 @@ func tgpioDigitalParams(userPin int, value bool) []byte {
 	return append([]byte{0x09, 0x0A, 0x15}, arg...)
 }
 
-// Grab maps to open in ufactory.
-func (x *xArm) grabVacuum(ctx context.Context) error {
-	// Ufactory requires opening channel 0 and channel 1
-	// to open the vacuum gripper
-	c1 := x.vacuumPreamble()
-	c1.params = append(c1.params,
-		0x00,
-		0x80,
-		0x80,
-		0x43,
-	)
-	_, err := x.send(ctx, c1, true)
-	if err != nil {
-		return err
-	}
+// sendTgpioDigital drives one TGPIO digital output (user pin) high/low.
+func (x *xArm) sendTgpioDigital(ctx context.Context, userPin int, value bool) error {
+	c := x.newCmd(regMap["VacuumControl"])
+	c.params = append(c.params, tgpioDigitalParams(userPin, value)...)
+	_, err := x.send(ctx, c, true)
+	return err
+}
 
-	c2 := x.vacuumPreamble()
-	c2.params = append(c2.params,
-		0x00,
-		0x00,
-		0x00,
-		0x44,
-	)
-	_, err = x.send(ctx, c2, true)
-	if err != nil {
+// setVacuum drives the two vacuum pins: ON = pins[0] high & pins[1] low; OFF inverts.
+func (x *xArm) setVacuum(ctx context.Context, ct connectionType, on bool) error {
+	pins := vacuumPins(ct)
+	if err := x.sendTgpioDigital(ctx, pins[0], on); err != nil {
 		return err
 	}
-	return nil
+	return x.sendTgpioDigital(ctx, pins[1], !on)
+}
+
+// Grab maps to open in ufactory.
+func (x *xArm) grabVacuum(ctx context.Context, ct connectionType) error {
+	return x.setVacuum(ctx, ct, true)
 }
 
 func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
@@ -1302,33 +1298,8 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 }
 
 // Close maps to open in ufactory.
-func (x *xArm) openVacuum(ctx context.Context) error {
-	// Ufactory requires close channel 0 and channel 1
-	// to stop the vacuum gripper
-	c1 := x.vacuumPreamble()
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x80,
-		0x43,
-	)
-	_, err := x.send(ctx, c1, true)
-	if err != nil {
-		return err
-	}
-
-	c2 := x.vacuumPreamble()
-	c2.params = append(c2.params,
-		0x00,
-		0x80,
-		0x00,
-		0x44,
-	)
-	_, err = x.send(ctx, c2, true)
-	if err != nil {
-		return err
-	}
-	return nil
+func (x *xArm) openVacuum(ctx context.Context, ct connectionType) error {
+	return x.setVacuum(ctx, ct, false)
 }
 
 func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {

@@ -13,6 +13,19 @@ import (
 	"go.viam.com/test"
 )
 
+func TestConnectionTypeFromCmd(t *testing.T) {
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "contact"}, submodelV1),
+		test.ShouldEqual, connectionContact)
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "plugin"}, submodelV2),
+		test.ShouldEqual, connectionPlugin)
+	test.That(t, connectionTypeFromCmd(map[string]any{}, submodelV2),
+		test.ShouldEqual, connectionContact)
+	test.That(t, connectionTypeFromCmd(map[string]any{}, submodelV1),
+		test.ShouldEqual, connectionPlugin)
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "nonsense"}, submodelV1),
+		test.ShouldEqual, connectionPlugin)
+}
+
 // armDir returns the absolute path to the arm/ directory containing test data.
 func armDir() string {
 	//nolint:dogsled
