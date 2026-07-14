@@ -25,4 +25,8 @@ func TestResolveGripperConnectionType(t *testing.T) {
 	// Lite always uses plug-in, even if a connection_type is set.
 	test.That(t, resolveGripperConnectionType("contact", submodelLite, VacuumGripperModelLite, logger),
 		test.ShouldEqual, connectionPlugin)
+
+	// Lite auto-detect (empty config) also stays plug-in.
+	test.That(t, resolveGripperConnectionType("", submodelLite, VacuumGripperModelLite, logger),
+		test.ShouldEqual, connectionPlugin)
 }

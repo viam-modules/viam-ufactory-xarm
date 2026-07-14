@@ -58,7 +58,7 @@ func resolveGripperConnectionType(configured, detectedSubmodel string, model res
 		return connectionPlugin
 	default:
 		if detectedSubmodel == submodelV2 {
-			logger.Infof("vacuum gripper: auto-detected contact connection; set connection_type to override")
+			logger.Info("vacuum gripper: auto-detected contact (v2) connection; set connection_type in config to override")
 			return connectionContact
 		}
 		return connectionPlugin
