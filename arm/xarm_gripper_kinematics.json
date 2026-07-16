@@ -1,50 +1,122 @@
 {
     "name": "xarm-gripper",
     "kinematic_param_type": "SVA",
-    "output_frames": ["tcp"],
+    "output_frames": [
+        "tcp"
+    ],
     "links": [
         {
             "id": "base",
             "parent": "world",
-            "translation": {"x": 0, "y": 0, "z": 0}
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            }
         },
         {
             "id": "case",
             "parent": "base",
-            "translation": {"x": 0, "y": 0, "z": 50},
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 55
+            },
             "geometry": {
                 "x": 50,
                 "y": 100,
-                "z": 100,
-                "translation": {"x": 0, "y": 0, "z": 0}
+                "z": 110,
+                "translation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                }
+            }
+        },
+        {
+            "id": "left_mechanism",
+            "parent": "base",
+            "translation": {
+                "x": 0,
+                "y": -50,
+                "z": 25
+            },
+            "geometry": {
+                "x": 40,
+                "y": 40,
+                "z": 60,
+                "translation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                }
+            }
+        },
+        {
+            "id": "right_mechanism",
+            "parent": "base",
+            "translation": {
+                "x": 0,
+                "y": 50,
+                "z": 25
+            },
+            "geometry": {
+                "x": 40,
+                "y": 40,
+                "z": 60,
+                "translation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                }
             }
         },
         {
             "id": "left_finger",
             "parent": "left_joint",
-            "translation": {"x": 0, "y": 0, "z": 0},
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
             "geometry": {
                 "x": 40,
                 "y": 20,
                 "z": 65,
-                "translation": {"x": 0, "y": 10, "z": 132.5}
+                "translation": {
+                    "x": 0,
+                    "y": 10,
+                    "z": 142.5
+                }
             }
         },
         {
             "id": "right_finger",
             "parent": "right_joint",
-            "translation": {"x": 0, "y": 0, "z": 0},
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
             "geometry": {
                 "x": 40,
                 "y": 20,
                 "z": 65,
-                "translation": {"x": 0, "y": -10, "z": 132.5}
+                "translation": {
+                    "x": 0,
+                    "y": -10,
+                    "z": 142.5
+                }
             }
         },
         {
             "id": "tcp",
             "parent": "base",
-            "translation": {"x": 0, "y": 0, "z": 135}
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 135
+            }
         }
     ],
     "joints": [
@@ -52,7 +124,11 @@
             "id": "left_joint",
             "type": "prismatic",
             "parent": "base",
-            "axis": {"x": 0, "y": 1, "z": 0},
+            "axis": {
+                "x": 0,
+                "y": 1,
+                "z": 0
+            },
             "min": 0,
             "max": 42
         },
@@ -60,7 +136,11 @@
             "id": "right_joint",
             "type": "prismatic",
             "parent": "base",
-            "axis": {"x": 0, "y": -1, "z": 0},
+            "axis": {
+                "x": 0,
+                "y": -1,
+                "z": 0
+            },
             "mimic": {
                 "joint": "left_joint",
                 "multiplier": 1,
