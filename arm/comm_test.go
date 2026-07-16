@@ -33,11 +33,11 @@ func TestParseFTSensorData(t *testing.T) {
 }
 
 func TestTrajectoryStreamValidator(t *testing.T) {
-	// point builds a trajectory point at time d with dof zeroed joint positions.
+	// point builds a trajectory point at time `d` with `dof` zeroed joint positions.
 	point := func(d time.Duration, dof int) arm.TrajectoryPoint {
 		return arm.TrajectoryPoint{Time: d, Positions: make([]referenceframe.Input, dof)}
 	}
-	// pointWithVel is point plus a declared velocity on each joint.
+	// pointWithVel is `point` plus a declared velocity on each joint.
 	pointWithVel := func(d time.Duration, dof int, vel float64) arm.TrajectoryPoint {
 		p := point(d, dof)
 		vels := make([]float64, dof)
@@ -49,7 +49,7 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 	}
 
 	// The validator carries state across a stream, so each case feeds a whole sequence and asserts
-	// where (if anywhere) the first rejection lands. failAtIdx of -1 means the sequence is valid.
+	// where, if anywhere, the first rejection lands. A `failAtIdx` of -1 means the sequence is valid.
 	for _, tc := range []struct {
 		name      string
 		points    []arm.TrajectoryPoint
