@@ -37,7 +37,7 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 	point := func(d time.Duration, dof int) arm.TrajectoryPoint {
 		return arm.TrajectoryPoint{Time: d, Positions: make([]referenceframe.Input, dof)}
 	}
-	// pointWithVel is `point` plus a declared velocity on each joint.
+	// pointWithVel is `point` plus a declared `Velocities` entry on each joint.
 	pointWithVel := func(d time.Duration, dof int, vel float64) arm.TrajectoryPoint {
 		p := point(d, dof)
 		vels := make([]float64, dof)

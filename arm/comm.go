@@ -565,7 +565,7 @@ func (x *xArm) internalMoveThroughJointPositions(
 // and `executeInputs` already drives it by pacing one setpoint per tick. Streaming reuses that: it
 // takes setpoints from the caller's channel instead of a precomputed slice, and paces each send by
 // the `Time` the caller stamped on the point instead of a fixed `moveHZ`. This handler goroutine
-// reads the channel and paces the sends itself; there is no background worker.
+// reads `batches` and paces the sends itself; there is no background worker.
 //
 // The framework owns both channels: it fills and closes `batches`, and it closes `responses` after
 // this method returns. We only read `batches`, only write `responses`, and close neither.
@@ -603,9 +603,9 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			if err := validator.validate(p); err != nil {
 				return err
 			}
-			// The command frame carries exactly the arm's joints, so a point of the wrong width cannot
-			// form a valid servo command. This check is arm-specific and stays here even when the shape
-			// validation above moves to RDK.
+			// The servo command encodes one value per joint, so a point whose `Positions` length does
+			// not match the arm's DOF cannot be encoded. This check is arm-specific and stays here even
+			// when the shape validation above moves to RDK.
 			if len(p.Positions) != x.dof {
 				return fmt.Errorf("trajectory point has %d joint positions, arm has %d DOF", len(p.Positions), x.dof)
 			}
@@ -625,7 +625,7 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			}
 		}
 		// Acknowledge each wire batch. `Response` is empty today, but emitting one per batch exercises
-		// the response path the bidi design exists for. We watch `ctx` so a cancelled stream, where the
+		// the response path the BiDi design exists for. We watch `ctx` so a cancelled stream, where the
 		// framework has stopped reading, cannot wedge us here.
 		select {
 		case responses <- arm.Response{}:
@@ -655,9 +655,9 @@ func newTrajectoryStreamValidator() *trajectoryStreamValidator {
 }
 
 // validate checks a single point in stream order: the first point must be at time zero, every later
-// point must be strictly later than its predecessor, and all points must carry the same non-empty set
-// of joint positions. These are the client's contractual obligations; we recheck them so a malformed
-// stream is rejected before it can drive the arm.
+// point must be strictly later than its predecessor, and all points must carry the same non-empty
+// `Positions`. These are the client's contractual obligations; we recheck them so a malformed stream
+// is rejected before it can drive the arm.
 func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
 	if len(p.Positions) == 0 {
 		return errors.New("trajectory point has no joint positions")
@@ -667,8 +667,8 @@ func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
 			return fmt.Errorf("first trajectory point must be at time zero, got %v", p.Time)
 		}
 		// A stream must begin from rest: the arm must already be stopped at the first point. If that
-		// point declares velocities, every one must be zero; a position-only first point carries no
-		// velocity to check.
+		// point carries `Constraints`, every entry in `Velocities` must be zero; a first point with no
+		// `Constraints` has no velocity to check.
 		if p.Constraints != nil {
 			for i, vel := range p.Constraints.Velocities {
 				if vel != 0 {
@@ -954,7 +954,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 	return ctx.Err()
 }
 
-// sendJointStep frames one set of joint angles as a single servo, or point-to-point, command and
+// sendJointStep encodes one set of joint angles as a single servo, or point-to-point, command and
 // sends it. The arm acknowledges immediately and then chases the target at up to `mo.speed` and
 // `mo.acceleration`; the caller shapes the actual motion by how it spaces successive calls in time.
 func (x *xArm) sendJointStep(ctx context.Context, step []float64, mo moveOptions) error {
