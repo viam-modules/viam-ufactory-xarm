@@ -35,7 +35,7 @@
         },
         {
             "id": "left_mechanism",
-            "parent": "base",
+            "parent": "case",
             "translation": {
                 "x": 0,
                 "y": -50,
@@ -54,7 +54,7 @@
         },
         {
             "id": "right_mechanism",
-            "parent": "base",
+            "parent": "case",
             "translation": {
                 "x": 0,
                 "y": 50,
