@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	_ "embed" // for embedding the gripper kinematics file.
 	"errors"
 	"fmt"
 	"math"
@@ -17,6 +18,22 @@ import (
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 	"go.viam.com/utils"
+)
+
+//go:embed xarm_gripper_kinematics.json
+var xArmGripperModelJSON []byte
+
+// Per the xArm Gripper G2 spec sheet
+// (https://docs.accessories.ufactory.cc/xArm_Gripper_G2/6.Technical_Specifications.html),
+// the physical stroke is 84±1 mm — so each finger travels up to ~42 mm from
+// the centerline. The firmware accepts a position in pulse units across
+// [0, 850], where one pulse ≈ 0.1 mm of total jaw opening (i.e. 0.05 mm per
+// finger), which is why both the existing Open() command and the model's
+// joint limit land near pulse 840 / 42 mm.
+const (
+	gripperHardwareUnitsPerMM = 20.0 // hardware pulses per mm of per-finger travel
+	gripperHalfStrokeMM       = 42.0 // joint limit per finger
+	gripperHardwareMax        = 850  // firmware-accepted upper bound
 )
 
 const (
@@ -238,9 +255,14 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	model, err := referenceframe.UnmarshalModelJSON(xArmGripperModelJSON, config.ResourceName().ShortName())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse xarm gripper kinematics: %w", err)
+	}
+
 	g := &myGripper{
 		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
+		mf:     model,
 		logger: logger,
 	}
 
@@ -415,50 +437,68 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	inputs, err := g.CurrentInputs(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
-
-	if false {
-		// until geometries aren't cacheed or model frame works differently can't do this
-		pos, err := g.getPosition(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		if pos < 20 { // gripper is closed
-			clawSize.Y = 110
-			clawSize.Z = 130
-		}
-	}
-
-	g.logger.Debugf("clawSize: %v", clawSize)
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}), clawSize, "claws")
+	gif, err := g.mf.Geometries(inputs)
 	if err != nil {
 		return nil, err
 	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return gif.Geometries(), nil
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, fmt.Errorf("temp hack because of issues")
+	return g.mf, nil
 }
 
+// CurrentInputs returns the current jaw position (per-finger travel in mm),
+// derived from the hardware gripper position which reports total opening in
+// 0.1 mm units across the range [0, 850].
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	return nil, errors.ErrUnsupported
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []referenceframe.Input{hardwarePositionToFingerMM(pos)}, nil
 }
 
+// GoToInputs commands the gripper to the requested per-finger travel in mm.
+// Only one input is consumed (the active joint); the opposing finger is
+// driven symmetrically by the mimic frame in the kinematic model.
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	dof := len(g.mf.DoF())
+	for _, step := range inputs {
+		if len(step) != dof {
+			return fmt.Errorf("xarm gripper expected %d input(s), got %d", dof, len(step))
+		}
+		if _, err := g.goToPosition(ctx, fingerMMToHardwarePosition(step[0])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hardwarePositionToFingerMM(pos int) float64 {
+	mm := float64(pos) / gripperHardwareUnitsPerMM
+	if mm < 0 {
+		return 0
+	}
+	if mm > gripperHalfStrokeMM {
+		return gripperHalfStrokeMM
+	}
+	return mm
+}
+
+func fingerMMToHardwarePosition(mm float64) int {
+	pos := int(math.Round(mm * gripperHardwareUnitsPerMM))
+	if pos < 0 {
+		return 0
+	}
+	if pos > gripperHardwareMax {
+		return gripperHardwareMax
+	}
+	return pos
 }
 
 func (g *myGripper) Status(_ context.Context) (map[string]any, error) {
