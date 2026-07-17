@@ -598,7 +598,25 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	var anchor time.Time
 	validator := newTrajectoryStreamValidator()
 
-	for batch := range batches {
+	// Read batches until the client ends the stream or the operation is cancelled. We select on
+	// `ctx.Done()` rather than plainly ranging over `batches`: a cancellation, whether a `Stop`, a
+	// client disconnect, resource close, or module shutdown, must drop us out even if the framework
+	// never closes `batches`, which it does not guarantee on every teardown path. A blocked receive
+	// here would otherwise wedge the handler goroutine and, with it, shutdown.
+	for {
+		var batch []arm.TrajectoryPoint
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case b, ok := <-batches:
+			if !ok {
+				// The client half-closed its send, so the trajectory is complete. Wait for the arm to
+				// settle before reporting done, the same tail the unary path runs.
+				return x.waitForMotionStop(ctx)
+			}
+			batch = b
+		}
+
 		for _, p := range batch {
 			if err := validator.validate(p); err != nil {
 				return err
@@ -633,10 +651,6 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			return ctx.Err()
 		}
 	}
-
-	// The channel is closed, so the client half-closed its send and the trajectory is complete. Wait
-	// for the arm to settle before reporting done, the same tail the unary path runs.
-	return x.waitForMotionStop(ctx)
 }
 
 // trajectoryStreamValidator enforces the shape invariants a streamed trajectory must satisfy,
