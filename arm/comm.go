@@ -627,7 +627,7 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			if len(p.Positions) != x.dof {
 				return fmt.Errorf("trajectory point has %d joint positions, arm has %d DOF", len(p.Positions), x.dof)
 			}
-			// TODO: bounds-check each point against the arm's joint limits before sending it to
+			// TODO(RSDK-14284): bounds-check each point against the arm's joint limits before sending it to
 			// hardware. `arm.CheckDesiredJointPositions` does a live `JointPositions` read per call, so
 			// it cannot be used per point at this cadence; RDK's unexported `checkDesiredJointPositions`
 			// is the check we want.
