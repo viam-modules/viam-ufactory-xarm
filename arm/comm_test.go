@@ -127,3 +127,55 @@ func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	test.That(t, float64(len(out)), test.ShouldBeGreaterThan, 0.85*expected)
 	test.That(t, float64(len(out)), test.ShouldBeLessThan, 1.15*expected)
 }
+
+func TestTgpioWord(t *testing.T) {
+	test.That(t, tgpioWord(0, true), test.ShouldEqual, uint16(0x0101))  // v1 ON  pin0
+	test.That(t, tgpioWord(1, false), test.ShouldEqual, uint16(0x0200)) // v1 ON  pin1
+	test.That(t, tgpioWord(0, false), test.ShouldEqual, uint16(0x0100)) // v1 OFF pin0
+	test.That(t, tgpioWord(1, true), test.ShouldEqual, uint16(0x0202))  // v1 OFF pin1
+	test.That(t, tgpioWord(3, true), test.ShouldEqual, uint16(0x0404))  // v2 ON  pin3
+	test.That(t, tgpioWord(4, false), test.ShouldEqual, uint16(0x0800)) // v2 ON  pin4
+	test.That(t, tgpioWord(3, false), test.ShouldEqual, uint16(0x0400)) // v2 OFF pin3
+	test.That(t, tgpioWord(4, true), test.ShouldEqual, uint16(0x0808))  // v2 OFF pin4
+}
+
+func TestTgpioDigitalParams_V1Regression(t *testing.T) {
+	test.That(t, tgpioDigitalParams(0, true), test.ShouldResemble,
+		[]byte{0x09, 0x0A, 0x15, 0x00, 0x80, 0x80, 0x43})
+	test.That(t, tgpioDigitalParams(1, false), test.ShouldResemble,
+		[]byte{0x09, 0x0A, 0x15, 0x00, 0x00, 0x00, 0x44})
+	test.That(t, tgpioDigitalParams(0, false), test.ShouldResemble,
+		[]byte{0x09, 0x0A, 0x15, 0x00, 0x00, 0x80, 0x43})
+	test.That(t, tgpioDigitalParams(1, true), test.ShouldResemble,
+		[]byte{0x09, 0x0A, 0x15, 0x00, 0x80, 0x00, 0x44})
+}
+
+func TestVacuumStateFromResponse(t *testing.T) {
+	holdingV1 := []byte{0, 0, 0, 0, 0x01}
+	holdingV2 := []byte{0, 0, 0, 0, 0x04}
+	idle := []byte{0, 0, 0, 0, 0x00}
+
+	got, err := vacuumStateFromResponse(holdingV1, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
+	got, err = vacuumStateFromResponse(holdingV2, connectionContact)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
+	got, err = vacuumStateFromResponse(holdingV1, connectionContact)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeFalse)
+
+	got, err = vacuumStateFromResponse(idle, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeFalse)
+
+	// Extra high bits set: masking (not equality) still reads as holding.
+	got, err = vacuumStateFromResponse([]byte{0, 0, 0, 0, 0x05}, connectionPlugin)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, got, test.ShouldBeTrue)
+
+	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
+	test.That(t, err, test.ShouldNotBeNil)
+}
