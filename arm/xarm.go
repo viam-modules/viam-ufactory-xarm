@@ -56,6 +56,7 @@ const (
 	getErrorKey              = "get_error"
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
+	connectionTypeKey        = "connection_type"
 	gripperLiteActionKey     = "gripper_lite_action"
 	setGripperSpeedKey       = "set_gripper_speed"
 	getGripperSpeedKey       = "get_gripper_speed"
@@ -685,6 +686,23 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
+// connectionTypeFromCmd resolves the vacuum connection type for a DoCommand:
+// an explicit connection_type wins; otherwise fall back to the detected submodel.
+func connectionTypeFromCmd(cmd map[string]any, detectedSubmodel string) connectionType {
+	if v, ok := cmd[connectionTypeKey].(string); ok {
+		switch connectionType(v) {
+		case connectionContact:
+			return connectionContact
+		case connectionPlugin:
+			return connectionPlugin
+		}
+	}
+	if detectedSubmodel == submodelV2 {
+		return connectionContact
+	}
+	return connectionPlugin
+}
+
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	resp := map[string]any{}
 	validCommand := false
@@ -762,8 +780,6 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		validCommand = true
 	}
 
-
-
 	if val, ok := cmd[moveGripperKey]; ok {
 		if err := x.setupGripper(ctx); err != nil {
 			return nil, err
@@ -825,7 +841,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if !ok {
 			return nil, errors.New("could not read grab_vacuum")
 		}
-		if err := x.grabVacuum(ctx); err != nil {
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		if err := x.grabVacuum(ctx, ct); err != nil {
 			return nil, err
 		}
 		validCommand = true
@@ -835,7 +852,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if !ok {
 			return nil, errors.New("could not read close_vacuum")
 		}
-		if err := x.openVacuum(ctx); err != nil {
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		if err := x.openVacuum(ctx, ct); err != nil {
 			return nil, err
 		}
 		validCommand = true
@@ -864,7 +882,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		return map[string]any{"error info": sData.params}, nil
 	}
 	if _, ok := cmd[getVacuumGripperStateKey]; ok {
-		res, err := x.getVacuumStatus(ctx)
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		res, err := x.getVacuumStatus(ctx, ct)
 		if err != nil {
 			return nil, err
 		}

@@ -41,6 +41,9 @@ type GripperConfig struct {
 	Arm            string
 	VacuumLengthMM float64 `json:"vacuum_length_mm"`
 	GripperSpeed   int     `json:"gripper_speed,omitempty"`
+	// ConnectionType overrides vacuum wiring detection: "plugin" or "contact".
+	// Empty means auto-detect from the arm model.
+	ConnectionType string `json:"connection_type,omitempty"`
 }
 
 // Validate validates the config.
@@ -50,6 +53,11 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.GripperSpeed != 0 && (cfg.GripperSpeed < 1 || cfg.GripperSpeed > 5000) {
 		return nil, nil, fmt.Errorf("gripper_speed must be between 1 and 5000, got %d", cfg.GripperSpeed)
+	}
+	switch cfg.ConnectionType {
+	case "", string(connectionPlugin), string(connectionContact):
+	default:
+		return nil, nil, fmt.Errorf(`connection_type must be "plugin" or "contact", got %q`, cfg.ConnectionType)
 	}
 	return []string{cfg.Arm}, nil, nil
 }
