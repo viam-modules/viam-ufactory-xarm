@@ -403,11 +403,17 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
 **Supported arms:** `xArm6`, `xArm7`, and `xArm850`. The `lite6` is not supported.
 
-> **Prerequisite:** The sensor must be **enabled and calibrated in UFactory Studio
-> before use** (Externals → Torque Sensor: confirm a real SN/firmware appear, then run
-> payload identification / zeroing). This module only reads the sensor; it does not
-> enable or commission it. If the sensor is not enabled and calibrated, reads will
-> fail or return meaningless values.
+> **Prerequisite:** The sensor must be **commissioned in UFactory Studio before use**
+> (Externals → Torque Sensor: confirm a real SN/firmware appear, then run payload
+> identification / zeroing). The module enables the controller's data stream on
+> startup (it defaults off after a controller boot, which otherwise yields all-zero
+> reads), but it does not run identification/zeroing — do that in Studio first, or
+> reads will return meaningless values.
+
+> **Overloaded sensor:** If reads are all-zero and the sensor's error register is
+> non-zero (over-limit on any axis), the sensor has latched an overload fault. This
+> can only be cleared by **power-cycling the controller** — `clear_error` clears the
+> controller error box but not the sensor's own fault latch.
 
 ### Configuration
 
@@ -438,6 +444,7 @@ Forces (`Fx_N`, `Fy_N`, `Fz_N`) are in newtons; torques (`TRx_Nm`, `TRy_Nm`,
 | Command | Effect |
 |---------|--------|
 | `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
+| `{"clear_error": true}` | Clear the arm controller's error/warning state. Does **not** clear a sensor overload latch (that needs a controller power-cycle). |
 
 ## UFactory xArm Resources
 

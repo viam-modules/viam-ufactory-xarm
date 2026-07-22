@@ -50,6 +50,7 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"FTSensorData":   0xC8,
+	"FTSensorEnable": 0xC9,
 	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
@@ -1347,6 +1348,22 @@ func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
 
 func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	c := x.newCmd(regMap["FTSensorZero"])
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+// setFTSensorEnable turns the controller's F/T data stream on/off (register
+// 0xC9, one-byte on_off payload). The stream defaults off after a controller
+// boot; without this the sensor read register (0xC8) returns all-zeros with no
+// error. Enabling preserves the stored payload identification (mass + centroid)
+// and persists across sessions.
+func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
+	c := x.newCmd(regMap["FTSensorEnable"])
+	on := byte(0)
+	if enable {
+		on = 1
+	}
+	c.params = append(c.params, on)
 	_, err := x.send(ctx, c, true)
 	return err
 }

@@ -66,6 +66,7 @@ const (
 	exitManualModeKey        = "exit_manual_mode"
 	getFTSensorDataKey       = "get_ft_sensor_data"
 	ftSensorZeroKey          = "ft_sensor_zero"
+	ftSensorEnableKey        = "ft_sensor_enable"
 	ftSensorDataKey          = "ft_sensor_data"
 
 	// gripperLiteActionKeys.
@@ -930,6 +931,13 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	}
 	if _, ok := cmd[ftSensorZeroKey]; ok {
 		if err := x.setFTSensorZero(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+	if v, ok := cmd[ftSensorEnableKey]; ok {
+		enable, isBool := v.(bool)
+		if err := x.setFTSensorEnable(ctx, !isBool || enable); err != nil {
 			return nil, err
 		}
 		validCommand = true
