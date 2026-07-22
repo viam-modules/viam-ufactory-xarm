@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/sensor"
+	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/resource"
 	"go.viam.com/test"
 )
 
@@ -43,6 +46,29 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 	_, err := s.DoCommand(context.Background(), map[string]any{tareKey: true})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, fa.lastCmd[ftSensorZeroKey], test.ShouldEqual, true)
+}
+
+func TestFTSensorDoCommandClearError(t *testing.T) {
+	fa := &fakeArm{resp: map[string]any{}}
+	s := &ftSensor{arm: fa}
+
+	_, err := s.DoCommand(context.Background(), map[string]any{clearErrorKey: true})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, fa.lastCmd[clearErrorKey], test.ShouldEqual, true)
+}
+
+func TestFTSensorEnablesOnStartup(t *testing.T) {
+	fa := &fakeArm{resp: map[string]any{}}
+	deps := resource.Dependencies{arm.Named("myarm"): fa}
+	conf := resource.Config{
+		Name:                "ft",
+		API:                 sensor.API,
+		ConvertedAttributes: &FTSensorConfig{Arm: "myarm"},
+	}
+
+	_, err := newFTSensor(context.Background(), deps, conf, logging.NewTestLogger(t))
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, fa.lastCmd[ftSensorEnableKey], test.ShouldEqual, true)
 }
 
 func TestFTSensorConfigValidate(t *testing.T) {

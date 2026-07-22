@@ -70,6 +70,15 @@ func newFTSensor(ctx context.Context, deps resource.Dependencies, conf resource.
 	if err != nil {
 		return nil, err
 	}
+	// The controller's F/T data stream defaults off after a boot; without this
+	// enable, Readings would return all-zeros with no error. Warn instead of
+	// failing: a failure here usually means the sensor wasn't enumerated at boot
+	// (power-cycle the controller), and hard-failing would only turn silent
+	// zeros into a component that won't build.
+	if _, err := s.arm.DoCommand(ctx, map[string]any{ftSensorEnableKey: true}); err != nil {
+		logger.Warnf("could not enable F/T sensor stream (readings may be zero); "+
+			"if this persists, power-cycle the controller to re-enumerate the sensor: %v", err)
+	}
 	return s, nil
 }
 
@@ -88,6 +97,12 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 func (s *ftSensor) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	if _, ok := cmd[tareKey]; ok {
 		return s.arm.DoCommand(ctx, map[string]any{ftSensorZeroKey: true})
+	}
+	// clear_error forwards to the arm's controller error-clear. Note: this only
+	// clears the controller error box; a sensor overload latch (get_ft_sensor_error
+	// 64-71) can only be cleared by power-cycling the controller.
+	if _, ok := cmd[clearErrorKey]; ok {
+		return s.arm.DoCommand(ctx, map[string]any{clearErrorKey: true})
 	}
 	return map[string]any{}, nil
 }
