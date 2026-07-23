@@ -634,13 +634,18 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 
 			if anchor.IsZero() {
 				anchor = time.Now()
+				// xarm currently only operates on position, so there is nothing interesting in the first trajectory point.
+				continue
 			}
-			if !utils.SelectContextOrWait(ctx, time.Until(anchor.Add(p.Time))) {
-				return ctx.Err()
-			}
+
 			if err := x.sendJointStep(ctx, p.Positions, mo); err != nil {
 				return err
 			}
+
+			if !utils.SelectContextOrWait(ctx, time.Until(anchor.Add(p.Time))) {
+				return ctx.Err()
+			}
+
 		}
 		// Acknowledge each wire batch. `Response` is empty today, but emitting one per batch exercises
 		// the response path the BiDi design exists for. We watch `ctx` so a cancelled stream, where the
