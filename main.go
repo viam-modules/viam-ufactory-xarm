@@ -5,6 +5,7 @@ import (
 	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
+	"go.viam.com/rdk/components/sensor"
 	"go.viam.com/rdk/module"
 	"go.viam.com/rdk/resource"
 )
@@ -19,5 +20,6 @@ func main() {
 		resource.APIModel{API: gripper.API, Model: xarm.GripperModelLite},
 		resource.APIModel{API: gripper.API, Model: xarm.VacuumGripperModel},
 		resource.APIModel{API: gripper.API, Model: xarm.VacuumGripperModelLite},
+		resource.APIModel{API: sensor.API, Model: xarm.FTSensorModel},
 	)
 }

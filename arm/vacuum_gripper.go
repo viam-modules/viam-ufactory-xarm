@@ -27,6 +27,47 @@ var VacuumGripperModel = family.WithModel(ModelNameVacuumGripper)
 // VacuumGripperModelLite is the ufactory vacuum gripper commonly attached to the lite6.
 var VacuumGripperModelLite = family.WithModel(ModelNameVacuumGripperLite)
 
+// connectionType selects which TGPIO pin-set drives the vacuum gripper.
+// Plug-in (v1) uses user pins 0/1; contact (v2) uses user pins 3/4.
+type connectionType string
+
+const (
+	connectionPlugin  connectionType = "plugin"
+	connectionContact connectionType = "contact"
+)
+
+// vacuumPins returns the [ON-pin, OFF-pin] TGPIO user-pin pair for a connection type.
+func vacuumPins(ct connectionType) [2]int {
+	if ct == connectionContact {
+		return [2]int{3, 4}
+	}
+	return [2]int{0, 1}
+}
+
+// resolveGripperConnectionType picks the effective connection type from the
+// configured override, falling back to the detected submodel. The Lite always
+// uses the plug-in path.
+func resolveGripperConnectionType(configured, detectedSubmodel string, model resource.Model, logger logging.Logger) connectionType {
+	if model == VacuumGripperModelLite {
+		if configured != "" {
+			logger.Warnf("connection_type %q ignored for %s; Lite uses the plug-in path", configured, model.Name)
+		}
+		return connectionPlugin
+	}
+	switch configured {
+	case string(connectionContact):
+		return connectionContact
+	case string(connectionPlugin):
+		return connectionPlugin
+	default:
+		if detectedSubmodel == submodelV2 {
+			logger.Info("vacuum gripper: auto-detected contact (v2) connection; set connection_type in config to override")
+			return connectionContact
+		}
+		return connectionPlugin
+	}
+}
+
 func init() {
 	resource.RegisterComponent(
 		gripper.API,
@@ -68,6 +109,8 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 
 	g.detected = probeGripper(ctx, g.arm, gripperKindVacuum, logger)
 
+	g.connType = resolveGripperConnectionType(newConf.ConnectionType, g.detected.submodel, config.Model, logger)
+
 	return g, nil
 }
 
@@ -84,6 +127,7 @@ type myVacuumGripper struct {
 	isMoving atomic.Bool
 
 	detected detectedGripper
+	connType connectionType
 
 	logger logging.Logger
 }
@@ -94,7 +138,8 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 
 	{
 		_, err := g.arm.DoCommand(ctx, map[string]any{
-			grabVacuumKey: true,
+			grabVacuumKey:     true,
+			connectionTypeKey: string(g.connType),
 		})
 		if err != nil {
 			return false, err
@@ -110,7 +155,8 @@ func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error 
 
 	{
 		_, err := g.arm.DoCommand(ctx, map[string]any{
-			openVacuumKey: true,
+			openVacuumKey:     true,
+			connectionTypeKey: string(g.connType),
 		})
 		if err != nil {
 			return err
@@ -125,6 +171,7 @@ func (g *myVacuumGripper) IsHoldingSomething(
 ) (gripper.HoldingStatus, error) {
 	res, err := g.arm.DoCommand(ctx, map[string]any{
 		getVacuumGripperStateKey: true,
+		connectionTypeKey:        string(g.connType),
 	})
 	if err != nil {
 		return gripper.HoldingStatus{}, err

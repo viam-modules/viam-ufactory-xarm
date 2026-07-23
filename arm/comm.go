@@ -27,6 +27,7 @@ const manualMode = 2
 const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
+const ftSensorValueCount = 6
 
 var regMap = map[string]byte{
 	"Version":        0x01,
@@ -48,6 +49,8 @@ var regMap = map[string]byte{
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
+	"FTSensorData":   0xC8,
+	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
 	"GripperControl": 0x7C,
@@ -699,11 +702,11 @@ func (x *xArm) createRawJointSteps(
 		from = toInputs
 	}
 
-	nominalAccelSteps := int((mo.speed / mo.acceleration) * mo.moveHZ) // This many steps to accelerate, and the same to decelerate
-	if float64(nominalAccelSteps) > stepTotal*0.95 {
-		nominalAccelSteps = int(0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ)
+	nominalAccelSteps := (mo.speed / mo.acceleration) * mo.moveHZ // This many steps to accelerate, and the same to decelerate
+	if nominalAccelSteps > stepTotal*0.95 {
+		nominalAccelSteps = 0.95 * math.Sqrt(displacementTotal/mo.acceleration) * mo.moveHZ
 	}
-	maxVel := (float64(nominalAccelSteps) / mo.moveHZ) * mo.acceleration
+	maxVel := (nominalAccelSteps / mo.moveHZ) * mo.acceleration
 
 	inputStepsReversed := [][]referenceframe.Input{}
 	for i := len(inputSteps) - 1; i >= 0; i-- {
@@ -716,7 +719,7 @@ func (x *xArm) createRawJointSteps(
 		allInputSteps [][]referenceframe.Input,
 		stopVel float64,
 	) (int, [][]float64, error) {
-		currSpeed := accelStep
+		currSpeed := math.Min(accelStep, mo.speed)
 		steps := [][]float64{}
 		from = startInputs
 		lastInputs := startInputs
@@ -931,6 +934,9 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 }
 
 func (x *xArm) setupGripper(ctx context.Context) error {
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
 	}
@@ -938,6 +944,20 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by graspWithTorque.
+// FnC00 enables the FnCxx block-write control mode (speed+torque+position); when left enabled,
+// subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
+func (x *xArm) disableGripperControlMode(ctx context.Context) error {
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x01)
+	c.params = append(c.params, 0x02)
+	c.params = append(c.params, 0x00, 0x00)
+	x.logger.Debugf("disableGripperControlMode")
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 // gripperPreamble routes through gripperConn so that gripper-bus traffic
@@ -1034,6 +1054,83 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	return binary.BigEndian.Uint16(res.params[5:]), nil
 }
 
+// graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
+// applies the requested grasp current/torque atomically with the position move. See section 4.2 of
+// the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
+func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, stall time.Duration) error {
+	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
+	// otherwise back-to-back grasp commands may be ignored while a hold is active.
+	if err := x.disableGripperControlMode(ctx); err != nil {
+		return err
+	}
+
+	c := x.gripperPreamble(true)
+	c.params = append(c.params, 0x0C, 0x00)
+	c.params = append(c.params, 0x00, 0x05)
+	c.params = append(c.params, 0x0A)
+
+	buf := make([]byte, 2)
+	binary.BigEndian.PutUint16(buf, 1) // FnC00 enable
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, speed) // FnC01
+	c.params = append(c.params, buf...)
+	binary.BigEndian.PutUint16(buf, torque) // FnC02
+	c.params = append(c.params, buf...)
+
+	posBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
+	c.params = append(c.params, posBytes...)
+
+	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
+	if _, err := x.send(ctx, c, true); err != nil {
+		return err
+	}
+
+	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
+}
+
+// waitForGripper polls gripper position until it reaches goal (within 6),
+// stalls (no movement >1 for >stall), or 10s elapses as an overall backstop.
+// Caller controls the stall window: a long stall (e.g. 1s) confirms the gripper
+// really stopped; a short stall (e.g. 200ms) returns quickly for callers that
+// expect immediate resistance like squeeze loops.
+func (x *xArm) waitForGripper(ctx context.Context, goal int, stall time.Duration) error {
+	const pollInterval = 30
+	const overallTimeout = 10 * time.Second
+	stallMs := int(stall / time.Millisecond)
+	start := time.Now()
+	old := -1
+	msSinceStuck := -1
+
+	for {
+		time.Sleep(time.Duration(pollInterval) * time.Millisecond)
+
+		pos32, err := x.getGripperPosition(ctx)
+		if err != nil {
+			return err
+		}
+		pos := int(pos32)
+
+		if math.Abs(float64(pos-goal)) <= 6 {
+			return nil
+		}
+
+		if old >= 0 && math.Abs(float64(pos-old)) <= 1 {
+			msSinceStuck += pollInterval
+			if msSinceStuck > stallMs {
+				return nil
+			}
+		} else {
+			msSinceStuck = 0
+		}
+		old = pos
+
+		if time.Since(start) > overallTimeout {
+			return nil
+		}
+	}
+}
+
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	c := x.gripperPreamble(false)
 	c.params = append(c.params, 0x07, 0x02)
@@ -1054,23 +1151,30 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
 }
 
-func (x *xArm) getVacuumStatus(ctx context.Context) (bool, error) {
-	c := x.newCmd(regMap["VacuumState"])
-	additionalParams := []byte{
-		0x09,
-		0x0A,
-		0x14,
+// vacuumStateFromResponse decodes "object picked" from a DIGITAL_IN (0x0A14)
+// response. The picked bit follows the xArm SDK's get_tgpio_digital mapping:
+// v1 uses input pin 0 -> value[1] -> word bit 0 (mask 0x01); v2 uses input pin 3,
+// which the SDK maps to value[3] -> word bit 2 (mask 0x04), not bit 3. params[4]
+// is the low byte of that input word.
+func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
+	if len(params) != 5 {
+		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(params), params)
 	}
-	c.params = append(c.params, additionalParams...)
+	mask := byte(0x01)
+	if ct == connectionContact {
+		mask = 0x04
+	}
+	return params[4]&mask != 0, nil
+}
+
+func (x *xArm) getVacuumStatus(ctx context.Context, ct connectionType) (bool, error) {
+	c := x.newCmd(regMap["VacuumState"])
+	c.params = append(c.params, 0x09, 0x0A, 0x14)
 	res, err := x.send(ctx, c, true)
 	if err != nil {
 		return false, err
 	}
-
-	if len(res.params) != 5 {
-		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(res.params), res.params)
-	}
-	return (res.params[4] == 0x01), nil
+	return vacuumStateFromResponse(res.params, ct)
 }
 
 // This is the host ID and gripper address which should be appended to each command.
@@ -1083,34 +1187,54 @@ func (x *xArm) vacuumPreamble() cmd {
 	return c
 }
 
-// Grab maps to open in ufactory.
-func (x *xArm) grabVacuum(ctx context.Context) error {
-	// Ufactory requires opening channel 0 and channel 1
-	// to open the vacuum gripper
-	c1 := x.vacuumPreamble()
-	c1.params = append(c1.params,
-		0x00,
-		0x80,
-		0x80,
-		0x43,
-	)
-	_, err := x.send(ctx, c1, true)
-	if err != nil {
-		return err
-	}
+// tgpioCoreBits mirrors the xArm SDK tgpio_set_digital core-pin bit table.
+// Keyed by core pin (userPin+1).
+var tgpioCoreBits = map[int]struct{ mask, val uint16 }{
+	1: {0x0100, 0x0001},
+	2: {0x0200, 0x0002},
+	3: {0x1000, 0x0010},
+	4: {0x0400, 0x0004},
+	5: {0x0800, 0x0008},
+}
 
-	c2 := x.vacuumPreamble()
-	c2.params = append(c2.params,
-		0x00,
-		0x00,
-		0x00,
-		0x44,
-	)
-	_, err = x.send(ctx, c2, true)
-	if err != nil {
+// tgpioWord builds the 16-bit mask|value word for a TGPIO digital-out write.
+func tgpioWord(userPin int, value bool) uint16 {
+	b := tgpioCoreBits[userPin+1]
+	w := b.mask
+	if value {
+		w |= b.val
+	}
+	return w
+}
+
+// tgpioDigitalParams builds the params appended after the VacuumControl register
+// byte: [bid=0x09][addr 0x0A,0x15][LE-fp32(word)].
+func tgpioDigitalParams(userPin int, value bool) []byte {
+	arg := make([]byte, 4)
+	binary.LittleEndian.PutUint32(arg, math.Float32bits(float32(tgpioWord(userPin, value))))
+	return append([]byte{0x09, 0x0A, 0x15}, arg...)
+}
+
+// sendTgpioDigital drives one TGPIO digital output (user pin) high/low.
+func (x *xArm) sendTgpioDigital(ctx context.Context, userPin int, value bool) error {
+	c := x.newCmd(regMap["VacuumControl"])
+	c.params = append(c.params, tgpioDigitalParams(userPin, value)...)
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+// setVacuum drives the two vacuum pins: ON = pins[0] high & pins[1] low; OFF inverts.
+func (x *xArm) setVacuum(ctx context.Context, ct connectionType, on bool) error {
+	pins := vacuumPins(ct)
+	if err := x.sendTgpioDigital(ctx, pins[0], on); err != nil {
 		return err
 	}
-	return nil
+	return x.sendTgpioDigital(ctx, pins[1], !on)
+}
+
+// Grab maps to open in ufactory.
+func (x *xArm) grabVacuum(ctx context.Context, ct connectionType) error {
+	return x.setVacuum(ctx, ct, true)
 }
 
 func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
@@ -1177,33 +1301,8 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 }
 
 // Close maps to open in ufactory.
-func (x *xArm) openVacuum(ctx context.Context) error {
-	// Ufactory requires close channel 0 and channel 1
-	// to stop the vacuum gripper
-	c1 := x.vacuumPreamble()
-	c1.params = append(c1.params,
-		0x00,
-		0x00,
-		0x80,
-		0x43,
-	)
-	_, err := x.send(ctx, c1, true)
-	if err != nil {
-		return err
-	}
-
-	c2 := x.vacuumPreamble()
-	c2.params = append(c2.params,
-		0x00,
-		0x80,
-		0x00,
-		0x44,
-	)
-	_, err = x.send(ctx, c2, true)
-	if err != nil {
-		return err
-	}
-	return nil
+func (x *xArm) openVacuum(ctx context.Context, ct connectionType) error {
+	return x.setVacuum(ctx, ct, false)
 }
 
 func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
@@ -1220,6 +1319,36 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	}
 
 	return loads, nil
+}
+
+// parseFTSensorData parses FTSensorData (0xC8): params[0] is a status byte, then six
+// little-endian float32 values at offset i*4+1.
+func parseFTSensorData(params []byte) ([]float64, error) {
+	need := 1 + ftSensorValueCount*4
+	if len(params) < need {
+		return nil, fmt.Errorf("unexpected F/T sensor response length, got %d want >= %d", len(params), need)
+	}
+	vals := make([]float64, 0, ftSensorValueCount)
+	for i := range ftSensorValueCount {
+		idx := i*4 + 1
+		vals = append(vals, float64(rutils.Float32FromBytesLE(params[idx:idx+4])))
+	}
+	return vals, nil
+}
+
+func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
+	c := x.newCmd(regMap["FTSensorData"])
+	resp, err := x.send(ctx, c, true)
+	if err != nil {
+		return nil, err
+	}
+	return parseFTSensorData(resp.params)
+}
+
+func (x *xArm) setFTSensorZero(ctx context.Context) error {
+	c := x.newCmd(regMap["FTSensorZero"])
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {

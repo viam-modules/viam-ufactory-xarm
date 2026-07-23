@@ -13,6 +13,19 @@ import (
 	"go.viam.com/test"
 )
 
+func TestConnectionTypeFromCmd(t *testing.T) {
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "contact"}, submodelV1),
+		test.ShouldEqual, connectionContact)
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "plugin"}, submodelV2),
+		test.ShouldEqual, connectionPlugin)
+	test.That(t, connectionTypeFromCmd(map[string]any{}, submodelV2),
+		test.ShouldEqual, connectionContact)
+	test.That(t, connectionTypeFromCmd(map[string]any{}, submodelV1),
+		test.ShouldEqual, connectionPlugin)
+	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "nonsense"}, submodelV1),
+		test.ShouldEqual, connectionPlugin)
+}
+
 // armDir returns the absolute path to the arm/ directory containing test data.
 func armDir() string {
 	//nolint:dogsled
@@ -35,7 +48,7 @@ func TestMakeModelFrameJSON(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, false, nil, logger, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, false, nil, logger, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -63,7 +76,7 @@ func TestMakeModelFrameURDF(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame(tc.model, nil, nil, true, nil, logger, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, true, nil, logger, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -77,14 +90,14 @@ func TestMakeModelFrameURDFMissingEnv(t *testing.T) {
 	// Ensure VIAM_MODULE_ROOT points to a nonexistent directory.
 	t.Setenv("VIAM_MODULE_ROOT", "/nonexistent/path")
 
-	_, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
 func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("unknownModel", nil, nil, true, nil, logger, 0)
+	_, err := MakeModelFrame("", "unknownModel", nil, nil, true, nil, logger, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
@@ -98,7 +111,7 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 		current[i] = 0
 	}
 
-	m, err := MakeModelFrame(ModelName6DOF, []int{2}, current, false, nil, logger, 0)
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
@@ -184,7 +197,7 @@ func TestMakeModelFrameVariantURDF(t *testing.T) {
 	repoRoot := filepath.Dir(armDir())
 	t.Setenv("VIAM_MODULE_ROOT", repoRoot)
 
-	m, err := MakeModelFrame(ModelName6DOF, nil, nil, true, nil, logger, 1305)
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 1305)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
@@ -229,4 +242,16 @@ func TestMoveOptions(t *testing.T) {
 	test.That(t, mo.speed, test.ShouldEqual, math.Pi/2)
 	test.That(t, mo.acceleration, test.ShouldEqual, base.acceleration)
 	test.That(t, mo.moveHZ, test.ShouldEqual, base.moveHZ)
+}
+
+func TestFTReadingsMap(t *testing.T) {
+	vals := []float64{-0.987, -2.923, -18.356, -0.0012, -0.0914, 0.00698}
+	m := ftReadingsMap(vals)
+	test.That(t, m["Fx_N"], test.ShouldEqual, -0.987)
+	test.That(t, m["Fy_N"], test.ShouldEqual, -2.923)
+	test.That(t, m["Fz_N"], test.ShouldEqual, -18.356)
+	test.That(t, m["TRx_Nm"], test.ShouldEqual, -0.0012)
+	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
+	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
+	test.That(t, len(m), test.ShouldEqual, 6)
 }

@@ -249,6 +249,17 @@ resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_vacuum_state
 // resp["vacuum_state"] is a bool
 ```
 
+> [!NOTE]
+> `grab_vacuum`, `open_vacuum`, and `get_vacuum_state` accept an optional `connection_type` (`"plugin"` or `"contact"`) alongside the command to select the vacuum gripper's wiring interface. When omitted, the arm auto-detects the interface from the arm model.
+
+```go
+// Override the auto-detected wiring interface
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "grab_vacuum":     true,
+    "connection_type": "contact",
+})
+```
+
 ### Manual Mode (Teaching Mode)
 
 Manual mode puts the arm into zero-gravity mode, allowing free movement by hand with gravity compensation active. Servos remain engaged — do not disable them.
@@ -310,9 +321,22 @@ resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get": true})
 resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0})
 // resp["position"]
 
-// Set/get speed (proxied to arm)
-gripperComponent.DoCommand(ctx, map[string]interface{}{"set_gripper_speed": 2000.0})
-resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get_gripper_speed": true})
+// Set/get gripper speed (proxied to arm DoCommand)
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
+
+// G2 gripper only — set/get the grasp current/torque (0-100%). Affects how hard the gripper squeezes.
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_torque": 50})
+resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_torque": true})
+
+// G2 gripper only — close to a position with a force limit
+gripperComponent.DoCommand(context.Background(), map[string]interface{}{
+    "grab_with_torque": map[string]interface{}{
+        "position": 100,  // 0-850
+        "speed":    3000, // 1-5000
+        "torque":   100,  // 0-100%
+    },
+})
 ```
 
 ## Gripper Lite
@@ -344,18 +368,25 @@ resp, _ := gripperLiteComponent.DoCommand(ctx, map[string]interface{}{"gripper_l
 
 ## Vacuum Gripper
 
-For use with the standard xArm vacuum gripper. Requires a wired connection to the arm controller (not a contact connection).
+For use with the standard xArm vacuum gripper. Both wiring interfaces are supported: the older **plug-in** connection (arm drives TGPIO outputs 0/1) and the newer **contact** connection (TGPIO outputs 3/4). The interface is auto-detected from the arm model — xArm850 and xArm ≥1305 default to `contact`, other arms default to `plugin` — and can be overridden with `connection_type`.
 
 ```json
 {
   "arm": "my-xarm",
-  "vacuum_length_mm": 48
+  "vacuum_length_mm": 48,
+  "connection_type": "contact"
 }
 ```
+
+| Attribute | Type | Inclusion | Description |
+|-----------|------|-----------|-------------|
+| `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
+| `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
+| `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
 
 ## Vacuum Gripper Lite
 
-Vacuum gripper for the Lite 6.
+Vacuum gripper for the Lite 6. This model always uses the plug-in connection and ignores `connection_type`.
 
 ```json
 {
@@ -363,6 +394,50 @@ Vacuum gripper for the Lite 6.
   "vacuum_length_mm": 48
 }
 ```
+
+## Force Torque Sensor
+
+Model `viam:ufactory:ft_sensor` exposes the UFactory wrist-mounted 6-axis
+Force/Torque sensor as a Viam `sensor`. It depends on a configured xArm and reads
+through the arm's controller connection. Requires controller firmware >= 1.8.3.
+
+**Supported arms:** `xArm6`, `xArm7`, and `xArm850`. The `lite6` is not supported.
+
+> **Prerequisite:** The sensor must be **enabled and calibrated in UFactory Studio
+> before use** (Externals → Torque Sensor: confirm a real SN/firmware appear, then run
+> payload identification / zeroing). This module only reads the sensor; it does not
+> enable or commission it. If the sensor is not enabled and calibrated, reads will
+> fail or return meaningless values.
+
+### Configuration
+
+```json
+{
+  "arm": "my-xarm"
+}
+```
+
+| Attribute | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| `arm`     | string | yes      | Name of the xArm this sensor is attached to. |
+
+### Readings
+
+`GetReadings` returns the six force/torque values keyed with their units:
+
+```json
+{ "Fx_N": -0.987, "Fy_N": -2.923, "Fz_N": -18.356,
+  "TRx_Nm": -0.0012, "TRy_Nm": -0.0914, "TRz_Nm": 0.00698 }
+```
+
+Forces (`Fx_N`, `Fy_N`, `Fz_N`) are in newtons; torques (`TRx_Nm`, `TRy_Nm`,
+`TRz_Nm`) are in newton-metres.
+
+### DoCommand
+
+| Command | Effect |
+|---------|--------|
+| `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
 
 ## UFactory xArm Resources
 

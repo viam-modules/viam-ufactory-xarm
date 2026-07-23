@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -55,12 +56,17 @@ const (
 	getErrorKey              = "get_error"
 	getVacuumGripperStateKey = "get_vacuum_state"
 	vacuumGripperStateKey    = "vacuum_state"
+	connectionTypeKey        = "connection_type"
 	gripperLiteActionKey     = "gripper_lite_action"
 	setGripperSpeedKey       = "set_gripper_speed"
 	getGripperSpeedKey       = "get_gripper_speed"
 	gripperSpeedKey          = "gripper_speed"
+	grabWithTorqueKey        = "grab_with_torque"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
+	getFTSensorDataKey       = "get_ft_sensor_data"
+	ftSensorZeroKey          = "ft_sensor_zero"
+	ftSensorDataKey          = "ft_sensor_data"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -299,8 +305,14 @@ func (cfg *Config) maxBadJoint() int {
 // MakeModelFrame routes to the variant-specific kinematics artifact; otherwise it uses
 // the base model. Pass 0 when variant info isn't available.
 func MakeModelFrame(
-	modelName string, badJoints []int, current []referenceframe.Input, useURDFs bool,
-	meshDecimationRatios []float64, logger logging.Logger, armTypeCode int,
+	resourceName string,
+	modelName string,
+	badJoints []int,
+	current []referenceframe.Input,
+	useURDFs bool,
+	meshDecimationRatios []float64,
+	logger logging.Logger,
+	armTypeCode int,
 ) (referenceframe.Model, error) {
 	artifact, err := resolveArmKinematicsArtifact(modelName, detectedArm{armTypeCode: armTypeCode})
 	if err != nil {
@@ -331,17 +343,7 @@ func MakeModelFrame(
 		logger.Infof("locking joint %d to %v", j, now)
 	}
 
-	source := "json"
-	if useURDFs {
-		source = artifact.urdfBasename + ".urdf"
-	}
-	variant := artifact.variant
-	if variant == "" {
-		variant = "base"
-	}
-	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
-
-	return cfg.ParseConfig(modelName)
+	return cfg.ParseConfig(resourceName)
 }
 
 func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
@@ -472,7 +474,8 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 
 	x.model, err = MakeModelFrame(
-		modelName, newConf.BadJoints, current, newConf.UseURDFs, newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
+		name.Name, modelName, newConf.BadJoints, current, newConf.UseURDFs,
+		newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
 	)
 	if err != nil {
 		return nil, err
@@ -665,6 +668,23 @@ func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
 
+// connectionTypeFromCmd resolves the vacuum connection type for a DoCommand:
+// an explicit connection_type wins; otherwise fall back to the detected submodel.
+func connectionTypeFromCmd(cmd map[string]any, detectedSubmodel string) connectionType {
+	if v, ok := cmd[connectionTypeKey].(string); ok {
+		switch connectionType(v) {
+		case connectionContact:
+			return connectionContact
+		case connectionPlugin:
+			return connectionPlugin
+		}
+	}
+	if detectedSubmodel == submodelV2 {
+		return connectionContact
+	}
+	return connectionPlugin
+}
+
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
 	resp := map[string]any{}
 	validCommand := false
@@ -696,6 +716,49 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp[gripperSpeedKey] = float64(speed)
+		validCommand = true
+	}
+
+	if val, ok := cmd[grabWithTorqueKey]; ok {
+		params, ok := val.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a map with keys position, speed, torque; got %T", grabWithTorqueKey, val)
+		}
+		positionF, err := utils.AssertType[float64](params["position"])
+		if err != nil {
+			return nil, fmt.Errorf("grab_with_torque.position: %w", err)
+		}
+		if positionF < 0 || positionF > 850 {
+			return nil, fmt.Errorf("grab_with_torque.position must be between 0 and 850, got %v", positionF)
+		}
+		speedF, err := utils.AssertType[float64](params["speed"])
+		if err != nil {
+			return nil, fmt.Errorf("grab_with_torque.speed: %w", err)
+		}
+		if speedF <= 0 || speedF > 5000 {
+			return nil, fmt.Errorf("grab_with_torque.speed must be between 1 and 5000, got %v", speedF)
+		}
+		torqueF, err := utils.AssertType[float64](params["torque"])
+		if err != nil {
+			return nil, fmt.Errorf("grab_with_torque.torque: %w", err)
+		}
+		if torqueF < 0 || torqueF > 100 {
+			return nil, fmt.Errorf("grab_with_torque.torque must be between 0%% and 100%%, got %v", torqueF)
+		}
+		stall := time.Second
+		if raw, ok := params["stall_seconds"]; ok {
+			stallF, err := utils.AssertType[float64](raw)
+			if err != nil {
+				return nil, fmt.Errorf("grab_with_torque.stall_seconds: %w", err)
+			}
+			if stallF <= 0 {
+				return nil, fmt.Errorf("grab_with_torque.stall_seconds must be > 0, got %v", stallF)
+			}
+			stall = time.Duration(stallF * float64(time.Second))
+		}
+		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF), stall); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
@@ -760,7 +823,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if !ok {
 			return nil, errors.New("could not read grab_vacuum")
 		}
-		if err := x.grabVacuum(ctx); err != nil {
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		if err := x.grabVacuum(ctx, ct); err != nil {
 			return nil, err
 		}
 		validCommand = true
@@ -770,7 +834,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if !ok {
 			return nil, errors.New("could not read close_vacuum")
 		}
-		if err := x.openVacuum(ctx); err != nil {
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		if err := x.openVacuum(ctx, ct); err != nil {
 			return nil, err
 		}
 		validCommand = true
@@ -799,7 +864,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		return map[string]any{"error info": sData.params}, nil
 	}
 	if _, ok := cmd[getVacuumGripperStateKey]; ok {
-		res, err := x.getVacuumStatus(ctx)
+		ct := connectionTypeFromCmd(cmd, vacuumGripperSubmodel(x.detectedArm))
+		res, err := x.getVacuumStatus(ctx, ct)
 		if err != nil {
 			return nil, err
 		}
@@ -833,6 +899,21 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			return nil, err
 		}
 		resp["status"] = "exited manual mode"
+		validCommand = true
+	}
+
+	if _, ok := cmd[getFTSensorDataKey]; ok {
+		vals, err := x.getFTSensorData(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[ftSensorDataKey] = ftReadingsMap(vals)
+		validCommand = true
+	}
+	if _, ok := cmd[ftSensorZeroKey]; ok {
+		if err := x.setFTSensorZero(ctx); err != nil {
+			return nil, err
+		}
 		validCommand = true
 	}
 
