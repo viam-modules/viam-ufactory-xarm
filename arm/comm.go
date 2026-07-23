@@ -558,6 +558,157 @@ func (x *xArm) internalMoveThroughJointPositions(
 	return x.executeInputs(ctx, armRawSteps, mo)
 }
 
+// MoveThroughJointPositionsStreamed executes a trajectory that arrives incrementally over a channel,
+// rather than all at once the way the unary `MoveThroughJointPositions` does.
+//
+// Servo mode (see `setMotionMode`) is already an interface for streaming joint setpoints to the arm,
+// and `executeInputs` already drives it by pacing one setpoint per tick. Streaming reuses that: it
+// takes setpoints from the caller's channel instead of a precomputed slice, and paces each send by
+// the `Time` the caller stamped on the point instead of a fixed `moveHZ`. This handler goroutine
+// reads `batches` and paces the sends itself; there is no background worker.
+//
+// The framework owns both channels: it fills and closes `batches`, and it closes `responses` after
+// this method returns. We only read `batches`, only write `responses`, and close neither.
+func (x *xArm) MoveThroughJointPositionsStreamed(
+	ctx context.Context,
+	batches <-chan []arm.TrajectoryPoint,
+	responses chan<- arm.Response,
+	extra map[string]any,
+) error {
+	// Register as the single in-flight operation, as the unary path does. A `Stop` calls `opMgr.New`
+	// again, which cancels the `ctx` returned here and drops us out of the paced wait.
+	ctx, done := x.opMgr.New(ctx)
+	defer done()
+
+	mo := x.moveOptions(nil, extra)
+	// Streaming is always servo-mode; a paced setpoint feed has no meaning in point-to-point mode, so
+	// we ignore a `direct` setting from `extra`.
+	mo.direct = false
+
+	if err := x.start(ctx, false); err != nil {
+		return err
+	}
+
+	// Point times are relative to the start of the motion; the first point is at t=0. We anchor
+	// wall-clock to the moment we send that first point and schedule every later send for `anchor`
+	// plus the point's `Time`, which follows the trajectory's own clock rather than letting a
+	// per-step sleep accumulate drift. A point that is already past due when it arrives, because the
+	// producer is starving us, sends immediately with no wait; the arm holds its last setpoint until
+	// we catch up. Keeping the arm fed is the caller's contract, not ours to repair.
+	var anchor time.Time
+	validator := newTrajectoryStreamValidator()
+
+	// Read batches until the client ends the stream or the operation is cancelled. We select on
+	// `ctx.Done()` rather than plainly ranging over `batches`: a cancellation, whether a `Stop`, a
+	// client disconnect, resource close, or module shutdown, must drop us out even if the framework
+	// never closes `batches`, which it does not guarantee on every teardown path. A blocked receive
+	// here would otherwise wedge the handler goroutine and, with it, shutdown.
+	for {
+		var batch []arm.TrajectoryPoint
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case b, ok := <-batches:
+			if !ok {
+				// The client half-closed its send, so the trajectory is complete. Wait for the arm to
+				// settle before reporting done, the same tail the unary path runs.
+				return x.waitForMotionStop(ctx)
+			}
+			batch = b
+		}
+
+		for _, p := range batch {
+			if err := validator.validate(p); err != nil {
+				return err
+			}
+			// The servo command encodes one value per joint, so a point whose `Positions` length does
+			// not match the arm's DOF cannot be encoded. This check is arm-specific and stays here even
+			// when the shape validation above moves to RDK.
+			if len(p.Positions) != x.dof {
+				return fmt.Errorf("trajectory point has %d joint positions, arm has %d DOF", len(p.Positions), x.dof)
+			}
+			// TODO(RSDK-14284): bounds-check each point against the arm's joint limits before sending it to
+			// hardware. `arm.CheckDesiredJointPositions` does a live `JointPositions` read per call, so
+			// it cannot be used per point at this cadence; RDK's unexported `checkDesiredJointPositions`
+			// is the check we want.
+
+			if anchor.IsZero() {
+				anchor = time.Now()
+				// xarm currently only operates on position, so there is nothing interesting in the first trajectory point.
+				continue
+			}
+
+			if err := x.sendJointStep(ctx, p.Positions, mo); err != nil {
+				return err
+			}
+
+			if !utils.SelectContextOrWait(ctx, time.Until(anchor.Add(p.Time))) {
+				return ctx.Err()
+			}
+
+		}
+		// Acknowledge each wire batch. `Response` is empty today, but emitting one per batch exercises
+		// the response path the BiDi design exists for. We watch `ctx` so a cancelled stream, where the
+		// framework has stopped reading, cannot wedge us here.
+		select {
+		case responses <- arm.Response{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// trajectoryStreamValidator enforces the shape invariants a streamed trajectory must satisfy,
+// checking one point at a time as it arrives. It holds only cross-point state, the running time and
+// the joint count, and nothing xArm-specific, so it can move into RDK to be shared by every Go arm
+// driver once RDK does this validation server-side (RSDK-14275). Keep it that way: validate here
+// only what RDK itself would validate.
+type trajectoryStreamValidator struct {
+	seen     bool
+	lastTime time.Duration
+	dof      int
+}
+
+func newTrajectoryStreamValidator() *trajectoryStreamValidator {
+	return &trajectoryStreamValidator{}
+}
+
+// validate checks a single point in stream order: the first point must be at time zero, every later
+// point must be strictly later than its predecessor, and all points must carry the same non-empty
+// `Positions`. These are the client's contractual obligations; we recheck them so a malformed stream
+// is rejected before it can drive the arm.
+func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
+	if len(p.Positions) == 0 {
+		return errors.New("trajectory point has no joint positions")
+	}
+	if !v.seen {
+		if p.Time != 0 {
+			return fmt.Errorf("first trajectory point must be at time zero, got %v", p.Time)
+		}
+		// A stream must begin from rest: the arm must already be stopped at the first point. If that
+		// point carries `Constraints`, every entry in `Velocities` must be zero; a first point with no
+		// `Constraints` has no velocity to check.
+		if p.Constraints != nil {
+			for i, vel := range p.Constraints.Velocities {
+				if vel != 0 {
+					return fmt.Errorf("first trajectory point must be at rest, but joint %d has velocity %v", i, vel)
+				}
+			}
+		}
+		v.seen = true
+		v.dof = len(p.Positions)
+		return nil
+	}
+	if p.Time <= v.lastTime {
+		return fmt.Errorf("trajectory point times must strictly increase, got %v after %v", p.Time, v.lastTime)
+	}
+	if len(p.Positions) != v.dof {
+		return fmt.Errorf("trajectory points must all have %d joint positions, got %d", v.dof, len(p.Positions))
+	}
+	v.lastTime = p.Time
+	return nil
+}
+
 func (x *xArm) createTrajGenSteps(
 	ctx context.Context,
 	curPos []referenceframe.Input,
@@ -799,32 +950,7 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 	for stepIdx, step := range rawSteps {
 		loopTimeStart := time.Now()
 
-		cName := "MoveJoints"
-		if mo.direct {
-			cName = "P2PJoint"
-		}
-		c := x.newCmd(regMap[cName])
-		jFloatBytes := make([]byte, 4)
-		for _, jRad := range step {
-			binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(jRad)))
-			c.params = append(c.params, jFloatBytes...)
-		}
-		// xarm 6 has 6 joints, but protocol needs 7- add 4 bytes for a blank 7th joint
-		for dof := x.dof; dof < 7; dof++ {
-			c.params = append(c.params, 0, 0, 0, 0)
-		}
-
-		// speed
-		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.speed)))
-		c.params = append(c.params, jFloatBytes...)
-		// acceleration
-		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.acceleration)))
-		c.params = append(c.params, jFloatBytes...)
-		// Motion Time - not used by the arm yet
-		c.params = append(c.params, 0, 0, 0, 0)
-
-		_, err := x.send(ctx, c, true)
-		if err != nil {
+		if err := x.sendJointStep(ctx, step, mo); err != nil {
 			return err
 		}
 
@@ -841,9 +967,49 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 		}
 	}
 
-	// Our guessing for how long to wait usually accumulates to be 10% off by the end. Wait until
-	// the arm has definitely stopped moving by polling the arm state.
-	for mo.waitAtEnd && ctx.Err() == nil {
+	if mo.waitAtEnd {
+		return x.waitForMotionStop(ctx)
+	}
+	return ctx.Err()
+}
+
+// sendJointStep encodes one set of joint angles as a single servo, or point-to-point, command and
+// sends it. The arm acknowledges immediately and then chases the target at up to `mo.speed` and
+// `mo.acceleration`; the caller shapes the actual motion by how it spaces successive calls in time.
+func (x *xArm) sendJointStep(ctx context.Context, step []float64, mo moveOptions) error {
+	cName := "MoveJoints"
+	if mo.direct {
+		cName = "P2PJoint"
+	}
+	c := x.newCmd(regMap[cName])
+	jFloatBytes := make([]byte, 4)
+	for _, jRad := range step {
+		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(jRad)))
+		c.params = append(c.params, jFloatBytes...)
+	}
+	// xarm 6 has 6 joints, but protocol needs 7- add 4 bytes for a blank 7th joint
+	for dof := x.dof; dof < 7; dof++ {
+		c.params = append(c.params, 0, 0, 0, 0)
+	}
+
+	// speed
+	binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.speed)))
+	c.params = append(c.params, jFloatBytes...)
+	// acceleration
+	binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.acceleration)))
+	c.params = append(c.params, jFloatBytes...)
+	// Motion Time - not used by the arm yet
+	c.params = append(c.params, 0, 0, 0, 0)
+
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+// waitForMotionStop blocks until the arm reports it has stopped moving, polling its state register.
+// Our per-step pacing only approximates the true move duration (it tends to run ~10% short by the
+// end), so callers that must not return until the motion has actually finished wait it out here.
+func (x *xArm) waitForMotionStop(ctx context.Context) error {
+	for ctx.Err() == nil {
 		stateCmd := x.newCmd(regMap["GetState"])
 		resp, err := x.send(ctx, stateCmd, true)
 		if err != nil {
