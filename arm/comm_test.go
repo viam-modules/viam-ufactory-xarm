@@ -40,7 +40,7 @@ func TestCreateRawJointSteps1(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	positions := [][]float64{{1, 0, 0, 0, 0, 1}}
@@ -64,7 +64,7 @@ func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	displacement := 1.0

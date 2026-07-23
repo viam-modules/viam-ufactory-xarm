@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/logging"
@@ -81,6 +80,7 @@ type myGripperLite struct {
 	resource.AlwaysRebuild
 
 	name resource.Name
+	mf   referenceframe.Model
 
 	arm      arm.Arm
 	isMoving atomic.Bool
@@ -96,8 +96,14 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
+	mf, err := loadGripperModel(ModelNameGripperLite)
+	if err != nil {
+		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
+	}
+
 	g := &myGripperLite{
 		name:     config.ResourceName(),
+		mf:       mf,
 		logger:   logger,
 		isMoving: atomic.Bool{},
 	}
@@ -189,27 +195,15 @@ func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 }
 
 func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 	if err != nil {
 		return nil, err
 	}
-
-	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
-	if err != nil {
-		return nil, err
-	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return gif.Geometries(), nil
 }
 
 func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return nil, errors.ErrUnsupported
+	return g.mf, nil
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
@@ -246,9 +240,14 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	mf, err := loadGripperModel(ModelNameGripper)
+	if err != nil {
+		return nil, fmt.Errorf("gripper kinematics: %w", err)
+	}
+
 	g := &myGripper{
 		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
+		mf:     mf,
 		logger: logger,
 	}
 
@@ -423,42 +422,15 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
+	gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 	if err != nil {
 		return nil, err
 	}
-
-	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
-
-	if false {
-		// until geometries aren't cacheed or model frame works differently can't do this
-		pos, err := g.getPosition(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		if pos < 20 { // gripper is closed
-			clawSize.Y = 110
-			clawSize.Z = 130
-		}
-	}
-
-	g.logger.Debugf("clawSize: %v", clawSize)
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}), clawSize, "claws")
-	if err != nil {
-		return nil, err
-	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return gif.Geometries(), nil
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, fmt.Errorf("temp hack because of issues")
+	return g.mf, nil
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
