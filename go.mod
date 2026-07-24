@@ -13,7 +13,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.viam.com/api v0.1.574
 	go.viam.com/rdk v1.1.0-rc1
-	go.viam.com/test v1.2.4
+	go.viam.com/test v1.2.5
 	go.viam.com/utils v0.8.0
 	gorgonia.org/tensor v0.9.24
 	gotest.tools/gotestsum v1.12.2
