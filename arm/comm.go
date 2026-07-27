@@ -28,6 +28,7 @@ const errorState = 1 << 6
 const warningState = 1 << 5
 const notReadyForMotionState = 1 << 4
 const ftSensorValueCount = 6
+const isHoldingWord = 0x0202
 
 var regMap = map[string]byte{
 	"Version":        0x01,
@@ -1290,7 +1291,7 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		// Response payload after state byte is [pad, pad, hi, lo]; the last
 		// two bytes are the 16-bit register value in big-endian.
 		word := binary.BigEndian.Uint16(res.params[3:5])
-		isHolding := word == 0x0202
+		isHolding := word == isHoldingWord
 		return map[string]any{gripperLiteActionIsClosed: isHolding}, nil
 	}
 
