@@ -421,6 +421,12 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 Forces (`Fx_N`, `Fy_N`, `Fz_N`) are in newtons; torques (`TRx_Nm`, `TRy_Nm`,
 `TRz_Nm`) are in newton-metres.
 
+If a read comes back all-zero (the signature of a stream that was disabled by a
+controller event), `Readings` attempts a one-shot re-enable and re-reads — so a
+disabled stream self-heals without a reconfigure. If it's still all-zero after
+that (disconnected, or an overload latch that only a power-cycle clears),
+`Readings` returns an error instead of silently reporting zeros.
+
 ### DoCommand
 
 | Command | Effect |

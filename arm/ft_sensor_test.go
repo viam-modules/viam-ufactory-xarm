@@ -2,6 +2,7 @@ package arm
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"go.viam.com/rdk/components/arm"
@@ -11,16 +12,22 @@ import (
 	"go.viam.com/test"
 )
 
-// fakeArm embeds arm.Arm so only DoCommand needs implementing.
+// fakeArm embeds arm.Arm so only DoCommand needs implementing. Set doFn to vary
+// the response by command (e.g. simulate a stream that wakes up after enable);
+// otherwise it returns the static resp/err.
 type fakeArm struct {
 	arm.Arm
 	lastCmd map[string]any
 	resp    map[string]any
 	err     error
+	doFn    func(cmd map[string]any) (map[string]any, error)
 }
 
 func (f *fakeArm) DoCommand(_ context.Context, cmd map[string]any) (map[string]any, error) {
 	f.lastCmd = cmd
+	if f.doFn != nil {
+		return f.doFn(cmd)
+	}
 	return f.resp, f.err
 }
 
@@ -46,6 +53,45 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 	_, err := s.DoCommand(context.Background(), map[string]any{tareKey: true})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, fa.lastCmd[ftSensorZeroKey], test.ShouldEqual, true)
+}
+
+func TestFTSensorReadingsSelfHeal(t *testing.T) {
+	// Stream starts disabled (all-zeros); a good read appears once enable fires.
+	enabled := false
+	zero := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}
+	live := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{-0.21, 0.14, -0.3, 0, 0, 0})}
+	fa := &fakeArm{doFn: func(cmd map[string]any) (map[string]any, error) {
+		if _, ok := cmd[ftSensorEnableKey]; ok {
+			enabled = true
+			return map[string]any{}, nil
+		}
+		if enabled {
+			return live, nil
+		}
+		return zero, nil
+	}}
+	s := &ftSensor{arm: fa, logger: logging.NewTestLogger(t)}
+
+	readings, err := s.Readings(context.Background(), nil)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, enabled, test.ShouldBeTrue)
+	test.That(t, readings["Fx_N"], test.ShouldEqual, -0.21)
+}
+
+func TestFTSensorReadingsOverloadSurfaced(t *testing.T) {
+	// Stream stuck all-zero and enable fails (faulted/overloaded sensor).
+	zero := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}
+	fa := &fakeArm{doFn: func(cmd map[string]any) (map[string]any, error) {
+		if _, ok := cmd[ftSensorEnableKey]; ok {
+			return nil, errors.New("controller error 18")
+		}
+		return zero, nil
+	}}
+	s := &ftSensor{arm: fa, logger: logging.NewTestLogger(t)}
+
+	_, err := s.Readings(context.Background(), nil)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "power-cycle")
 }
 
 func TestFTSensorDoCommandClearError(t *testing.T) {
