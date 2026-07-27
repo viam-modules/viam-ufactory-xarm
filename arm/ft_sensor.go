@@ -30,6 +30,10 @@ const ftReenableCooldown = 10 * time.Second
 // the all-zero error after this.
 const ftEnableSettle = 250 * time.Millisecond
 
+// ftEnablePollInterval is the pause between reads while polling for the stream
+// to come up within ftEnableSettle.
+const ftEnablePollInterval = 5 * time.Millisecond
+
 func ftReadingsMap(vals []float64) map[string]any {
 	return map[string]any{
 		"Fx_N":   vals[0],
@@ -70,8 +74,6 @@ type ftSensor struct {
 	arm    arm.Arm
 	logger logging.Logger
 
-	// lastReenableNano is the unix-nano timestamp of the last self-heal enable
-	// attempt, used to rate-limit re-enables on an all-zero stream.
 	lastReenableNano atomic.Int64
 }
 
@@ -84,10 +86,6 @@ func newFTSensor(_ context.Context, deps resource.Dependencies, conf resource.Co
 		name:   conf.ResourceName(),
 		logger: logger,
 	}
-	// Only the arm dependency must resolve to construct. The controller's F/T
-	// data stream defaults off after a boot, but we don't enable it here: the
-	// Readings self-heal is the single enable path, so it recovers the stream on
-	// first read (and again after any controller event) without a rebuild.
 	s.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
 		return nil, err
@@ -106,8 +104,6 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 	// read-only sensor has no such path, so self-heal here. Rate-limited via
 	// CompareAndSwap so an overloaded sensor (enable throws controller error 18)
 	// is retried at most once per cooldown, not on every poll.
-	// ponytail: cooldown gate, not a health query; wire get_ft_sensor_error
-	// (servo reg 0x10 on id 8) if we ever need to distinguish overload precisely.
 	now := time.Now().UnixNano()
 	last := s.lastReenableNano.Load()
 	if now-last > ftReenableCooldown.Nanoseconds() && s.lastReenableNano.CompareAndSwap(last, now) {
@@ -139,7 +135,7 @@ func (s *ftSensor) readAfterEnable(ctx context.Context) (map[string]any, error) 
 		if err != nil || !ftAllZero(data) || time.Now().After(deadline) {
 			return data, err
 		}
-		if !utils.SelectContextOrWait(ctx, 5*time.Millisecond) {
+		if !utils.SelectContextOrWait(ctx, ftEnablePollInterval) {
 			return data, ctx.Err()
 		}
 	}

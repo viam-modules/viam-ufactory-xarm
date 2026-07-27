@@ -1350,11 +1350,6 @@ func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	return err
 }
 
-// setFTSensorEnable turns the controller's F/T data stream on/off (register
-// 0xC9, one-byte on_off payload). The stream defaults off after a controller
-// boot; without this the sensor read register (0xC8) returns all-zeros with no
-// error. Enabling preserves the stored payload identification (mass + centroid)
-// and persists across sessions.
 func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
 	c := x.newCmd(regMap["FTSensorEnable"])
 	on := byte(0)
