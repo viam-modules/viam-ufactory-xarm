@@ -387,10 +387,10 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
 > **Prerequisite:** The sensor must be **commissioned in UFactory Studio before use**
 > (Externals → Torque Sensor: confirm a real SN/firmware appear, then run payload
-> identification / zeroing). The module enables the controller's data stream on
-> startup (it defaults off after a controller boot, which otherwise yields all-zero
-> reads), but it does not run identification/zeroing — do that in Studio first, or
-> reads will return meaningless values.
+> identification / zeroing). The module enables the controller's data stream
+> on-demand from `Readings` (it defaults off after a controller boot, which
+> otherwise yields all-zero reads), but it does not run identification/zeroing —
+> do that in Studio first, or reads will return meaningless values.
 
 > **Overloaded sensor:** If reads are all-zero and the sensor's error register is
 > non-zero (over-limit on any axis), the sensor has latched an overload fault. This

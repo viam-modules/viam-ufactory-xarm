@@ -56,8 +56,12 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 }
 
 func TestFTSensorReadingsSelfHeal(t *testing.T) {
-	// Stream starts disabled (all-zeros); a good read appears once enable fires.
+	// Stream starts disabled (all-zeros). After enable, the controller needs a
+	// moment to stream real data, so the first post-enable read is still zero
+	// (modeling the measured ~ms settle) and only the next read is live — this
+	// exercises the readAfterEnable poll loop, not a single re-read.
 	enabled := false
+	postEnableReads := 0
 	zero := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}
 	live := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{-0.21, 0.14, -0.3, 0, 0, 0})}
 	fa := &fakeArm{doFn: func(cmd map[string]any) (map[string]any, error) {
@@ -65,10 +69,14 @@ func TestFTSensorReadingsSelfHeal(t *testing.T) {
 			enabled = true
 			return map[string]any{}, nil
 		}
-		if enabled {
-			return live, nil
+		if !enabled {
+			return zero, nil
 		}
-		return zero, nil
+		postEnableReads++
+		if postEnableReads == 1 {
+			return zero, nil // settle: first read after enable still zero
+		}
+		return live, nil
 	}}
 	s := &ftSensor{arm: fa, logger: logging.NewTestLogger(t)}
 
@@ -103,7 +111,9 @@ func TestFTSensorDoCommandClearError(t *testing.T) {
 	test.That(t, fa.lastCmd[clearErrorKey], test.ShouldEqual, true)
 }
 
-func TestFTSensorEnablesOnStartup(t *testing.T) {
+func TestFTSensorConstructsWithoutEnabling(t *testing.T) {
+	// Construction only resolves the arm dep; it must NOT enable (that's the
+	// Readings self-heal's job) and must NOT fail on hardware state.
 	fa := &fakeArm{resp: map[string]any{}}
 	deps := resource.Dependencies{arm.Named("myarm"): fa}
 	conf := resource.Config{
@@ -114,7 +124,7 @@ func TestFTSensorEnablesOnStartup(t *testing.T) {
 
 	_, err := newFTSensor(context.Background(), deps, conf, logging.NewTestLogger(t))
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, fa.lastCmd[ftSensorEnableKey], test.ShouldEqual, true)
+	test.That(t, fa.lastCmd, test.ShouldBeNil) // no command issued at construct
 }
 
 func TestFTSensorConfigValidate(t *testing.T) {

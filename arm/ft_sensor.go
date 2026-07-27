@@ -24,6 +24,12 @@ const tareKey = "tare"
 // enable) is only retried once per cooldown instead of on every poll.
 const ftReenableCooldown = 10 * time.Second
 
+// ftEnableSettle bounds how long Readings waits for the stream to produce real
+// data after a self-heal enable. Measured settle is a few ms on-LAN; the budget
+// is generous for slower/remote links. A genuinely stuck stream falls through to
+// the all-zero error after this.
+const ftEnableSettle = 250 * time.Millisecond
+
 func ftReadingsMap(vals []float64) map[string]any {
 	return map[string]any{
 		"Fx_N":   vals[0],
@@ -69,7 +75,7 @@ type ftSensor struct {
 	lastReenableNano atomic.Int64
 }
 
-func newFTSensor(ctx context.Context, deps resource.Dependencies, conf resource.Config, logger logging.Logger) (sensor.Sensor, error) {
+func newFTSensor(_ context.Context, deps resource.Dependencies, conf resource.Config, logger logging.Logger) (sensor.Sensor, error) {
 	newConf, err := resource.NativeConfig[*FTSensorConfig](conf)
 	if err != nil {
 		return nil, err
@@ -78,18 +84,13 @@ func newFTSensor(ctx context.Context, deps resource.Dependencies, conf resource.
 		name:   conf.ResourceName(),
 		logger: logger,
 	}
+	// Only the arm dependency must resolve to construct. The controller's F/T
+	// data stream defaults off after a boot, but we don't enable it here: the
+	// Readings self-heal is the single enable path, so it recovers the stream on
+	// first read (and again after any controller event) without a rebuild.
 	s.arm, err = arm.FromProvider(deps, newConf.Arm)
 	if err != nil {
 		return nil, err
-	}
-	// The controller's F/T data stream defaults off after a boot; without this
-	// enable, Readings would return all-zeros with no error. Warn instead of
-	// failing: a failure here usually means the sensor wasn't enumerated at boot
-	// (power-cycle the controller), and hard-failing would only turn silent
-	// zeros into a component that won't build.
-	if _, err := s.arm.DoCommand(ctx, map[string]any{ftSensorEnableKey: true}); err != nil {
-		logger.Warnf("could not enable F/T sensor stream (readings may be zero); "+
-			"if this persists, power-cycle the controller to re-enumerate the sensor: %v", err)
 	}
 	return s, nil
 }
@@ -112,7 +113,7 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 	if now-last > ftReenableCooldown.Nanoseconds() && s.lastReenableNano.CompareAndSwap(last, now) {
 		if _, err := s.arm.DoCommand(ctx, map[string]any{ftSensorEnableKey: true}); err != nil {
 			s.logger.Debugf("F/T self-heal enable failed (sensor may be overloaded): %v", err)
-		} else if data, err = s.readOnce(ctx); err != nil {
+		} else if data, err = s.readAfterEnable(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -123,6 +124,25 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 				"or overloaded (power-cycle the controller if get_ft_sensor_error is 64-71)")
 	}
 	return data, nil
+}
+
+// readAfterEnable polls the stream after a self-heal enable. The controller
+// needs a few ms to start producing real data — the first read after enable is
+// always zero (measured ~3ms, worst ~6ms on-LAN) — so a single re-read would
+// misreport a healthy re-enable as a stuck sensor. Poll until non-zero or the
+// settle budget elapses; a genuinely stuck stream then falls through to the
+// all-zero error.
+func (s *ftSensor) readAfterEnable(ctx context.Context) (map[string]any, error) {
+	deadline := time.Now().Add(ftEnableSettle)
+	for {
+		data, err := s.readOnce(ctx)
+		if err != nil || !ftAllZero(data) || time.Now().After(deadline) {
+			return data, err
+		}
+		if !utils.SelectContextOrWait(ctx, 5*time.Millisecond) {
+			return data, ctx.Err()
+		}
+	}
 }
 
 func (s *ftSensor) readOnce(ctx context.Context) (map[string]any, error) {
