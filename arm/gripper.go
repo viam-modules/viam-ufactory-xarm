@@ -132,6 +132,8 @@ func (g *myGripperLite) Open(ctx context.Context, extra map[string]any) error {
 	return err
 }
 
+// IsHoldingSomething reads DIGITAL_OUT (0x0A15) via TGPIO_R16B — see the
+// gripperLiteActionIsClosed case in liteGripperAction.
 func (g *myGripperLite) IsHoldingSomething(
 	ctx context.Context,
 	extra map[string]any,
@@ -158,10 +160,7 @@ func (g *myGripperLite) IsHoldingSomething(
 	if !ok {
 		return gripper.HoldingStatus{}, fmt.Errorf("key `%s` value is not a bool, %v is a %T", gripperLiteActionIsClosed, isHoldingRaw, isHoldingRaw)
 	}
-
-	return gripper.HoldingStatus{
-		IsHoldingSomething: isHolding,
-	}, nil
+	return gripper.HoldingStatus{IsHoldingSomething: isHolding}, nil
 }
 
 func (g *myGripperLite) Name() resource.Name {

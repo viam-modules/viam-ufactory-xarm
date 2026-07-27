@@ -1246,23 +1246,26 @@ func (x *xArm) makeIoControlParamenterCmd(word float32) cmd {
 }
 
 func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string]any, error) {
-	// we use register 0x7F to control Robot Digital IO to open or close the lite gripper
+	// Lite6 dual-finger gripper is driven by two TGPIO output pins on the tool
+	// board (0x0A15 DIGITAL_OUT)
+	//   open  = IO0=1, IO1=0  →  writes 0x0101 then 0x0200, last write 0x0200
+	//   close = IO0=0, IO1=1  →  writes 0x0100 then 0x0202, last write 0x0202
+	//   stop  = IO0=0, IO1=0  →  writes 0x0100 then 0x0200, last write 0x0200
 	var err error
 	switch action {
-	case gripperLiteActionClose:
-		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2High), true); err != nil {
-			return nil, err
-		}
-		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
-			return nil, err
-		}
-		return map[string]any{}, nil
 	case gripperLiteActionOpen:
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1High), true); err != nil {
+			return nil, err
+		}
 		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2Low), true); err != nil {
 			return nil, err
 		}
-
-		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1High), true); err != nil {
+		return map[string]any{}, nil
+	case gripperLiteActionClose:
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord1Low), true); err != nil {
+			return nil, err
+		}
+		if _, err = x.send(ctx, x.makeIoControlParamenterCmd(ioControlParameterWord2High), true); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil
@@ -1276,24 +1279,18 @@ func (x *xArm) liteGripperAction(ctx context.Context, action string) (map[string
 		return map[string]any{}, nil
 	case gripperLiteActionIsClosed:
 		c := x.newCmd(regMap["VacuumState"])
-		additionalParams := []byte{
-			0x09,
-			0x0A,
-			0x18,
-		}
-		c.params = append(c.params, additionalParams...)
+		c.params = append(c.params, 0x09, 0x0A, 0x15)
 		res, err := x.send(ctx, c, true)
 		if err != nil {
 			return nil, err
 		}
 		if len(res.params) != 5 {
-			return nil, fmt.Errorf("status register at address 0x18 returned an array of length %d expected length 5 raw data %v", len(res.params), res.params)
+			return nil, fmt.Errorf("DIGITAL_OUT read returned %d bytes, want 5 (raw %v)", len(res.params), res.params)
 		}
-		isHolding := false
-		// byte 5 of register 0x18 is 0 when stopped, 1 when opened and 2 when closed
-		if res.params[4] == 2 {
-			isHolding = true
-		}
+		// Response payload after state byte is [pad, pad, hi, lo]; the last
+		// two bytes are the 16-bit register value in big-endian.
+		word := binary.BigEndian.Uint16(res.params[3:5])
+		isHolding := word == 0x0202
 		return map[string]any{gripperLiteActionIsClosed: isHolding}, nil
 	}
 
