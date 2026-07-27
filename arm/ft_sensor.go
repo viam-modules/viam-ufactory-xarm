@@ -107,10 +107,13 @@ func (s *ftSensor) Readings(ctx context.Context, extra map[string]any) (map[stri
 	now := time.Now().UnixNano()
 	last := s.lastReenableNano.Load()
 	if now-last > ftReenableCooldown.Nanoseconds() && s.lastReenableNano.CompareAndSwap(last, now) {
-		if _, err := s.arm.DoCommand(ctx, map[string]any{ftSensorEnableKey: true}); err != nil {
-			s.logger.Debugf("F/T self-heal enable failed (sensor may be overloaded): %v", err)
-		} else if data, err = s.readAfterEnable(ctx); err != nil {
-			return nil, err
+		if _, enableErr := s.arm.DoCommand(ctx, map[string]any{ftSensorEnableKey: true}); enableErr != nil {
+			s.logger.Debugf("F/T self-heal enable failed (sensor may be overloaded): %v", enableErr)
+		} else {
+			data, err = s.readAfterEnable(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
