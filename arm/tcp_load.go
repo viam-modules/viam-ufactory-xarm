@@ -154,6 +154,32 @@ func gripperDefaultTCPLoad(model resource.Model) (tcpLoad, bool) {
 	}
 }
 
+// TCPLoadConfig is the JSON shape of the `tcp_load` config attribute.
+type TCPLoadConfig struct {
+	MassKg float64 `json:"mass_kg"`
+	// CenterOfGravityMM is [x, y, z] relative to the flange center. Optional;
+	// omitting it means the origin.
+	CenterOfGravityMM []float64 `json:"center_of_gravity_mm,omitempty"`
+}
+
+func (c *TCPLoadConfig) toTCPLoad() (tcpLoad, error) {
+	l := tcpLoad{massKg: c.MassKg}
+	switch len(c.CenterOfGravityMM) {
+	case 0:
+	case 3:
+		l.cogMM = r3.Vector{X: c.CenterOfGravityMM[0], Y: c.CenterOfGravityMM[1], Z: c.CenterOfGravityMM[2]}
+	default:
+		return tcpLoad{}, fmt.Errorf(
+			"tcp_load.center_of_gravity_mm must have exactly 3 elements [x, y, z], got %d",
+			len(c.CenterOfGravityMM),
+		)
+	}
+	if err := l.validate(); err != nil {
+		return tcpLoad{}, err
+	}
+	return l, nil
+}
+
 // tcpLoadSource records where the currently-cached payload came from. It is
 // what enforces precedence between config, runtime writes, and gripper defaults.
 type tcpLoadSource int

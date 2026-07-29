@@ -231,6 +231,7 @@ type Config struct {
 	Acceleration         float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
 	MoveHZ               float64        `json:"move_hz,omitempty"`
 	Sensitivity          *int           `json:"collision_sensitivity,omitempty"`
+	TCPLoad              *TCPLoadConfig `json:"tcp_load,omitempty"`
 	BadJoints            []int          `json:"bad-joints"`
 	Motion               string         `json:"motion"`
 	UseURDFs             bool           `json:"use_urdfs,omitempty"`
@@ -264,6 +265,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
 		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
+	}
+
+	if cfg.TCPLoad != nil {
+		if _, err := cfg.TCPLoad.toTCPLoad(); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	for i, r := range cfg.MeshDecimationRatios {
@@ -529,6 +536,19 @@ func NewXArm(ctx context.Context, name resource.Name,
 	if newConf.Sensitivity != nil {
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
+			return nil, err
+		}
+	}
+
+	// A config-sourced payload is the user's explicit instruction, so a failure
+	// here fails construction — same as collision sensitivity above. Note this
+	// also permanently suppresses gripper defaults for this arm instance.
+	if newConf.TCPLoad != nil {
+		l, err := newConf.TCPLoad.toTCPLoad()
+		if err != nil {
+			return nil, err
+		}
+		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceConfig, "config"); err != nil {
 			return nil, err
 		}
 	}
