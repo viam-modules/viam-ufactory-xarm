@@ -264,7 +264,7 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
-		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", *cfg.Sensitivity)
 	}
 
 	if cfg.TCPLoad != nil {
@@ -495,9 +495,12 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	err = x.start(ctx, false)
-	if err != nil {
-		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
+	// Captured separately from err (rather than reusing it, as the surrounding
+	// code does) because err gets overwritten several times below before the
+	// tcp_load block needs to know whether the arm actually started.
+	startErr := x.start(ctx, false)
+	if startErr != nil {
+		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", startErr)
 	}
 
 	current := []referenceframe.Input{}
@@ -541,15 +544,23 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 
 	// A config-sourced payload is the user's explicit instruction, so a failure
-	// here fails construction — same as collision sensitivity above. Note this
-	// also permanently suppresses gripper defaults for this arm instance.
-	if newConf.TCPLoad != nil {
-		l, err := newConf.TCPLoad.toTCPLoad()
-		if err != nil {
-			return nil, err
-		}
-		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceConfig, "config"); err != nil {
-			return nil, err
+	// here normally fails construction — same as collision sensitivity above.
+	// Note this also permanently suppresses gripper defaults for this arm
+	// instance.
+	//
+	// Exception: if the arm never started (startErr != nil, e.g. a latched
+	// collision/overcurrent state), setTCPLoad's checkError inspects the arm's
+	// own state byte and would turn this into a hard failure too — destroying
+	// the only recovery path (the clear_error DoCommand) the warning above just
+	// told the user to use. A config instruction cannot be honored on a
+	// non-operational arm anyway, so warn and continue instead of failing
+	// construction.
+	if err := applyConfigTCPLoad(ctx, newConf.TCPLoad, x.applyTCPLoad); err != nil {
+		wrapped := fmt.Errorf("applying tcp_load from config: %w", err)
+		if startErr != nil {
+			logger.Warnf("%v", wrapped)
+		} else {
+			return nil, multierr.Combine(wrapped, x.Close(ctx))
 		}
 	}
 

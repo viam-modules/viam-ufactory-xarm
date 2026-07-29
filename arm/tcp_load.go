@@ -156,16 +156,24 @@ func gripperDefaultTCPLoad(model resource.Model) (tcpLoad, bool) {
 
 // TCPLoadConfig is the JSON shape of the `tcp_load` config attribute.
 type TCPLoadConfig struct {
-	MassKg float64 `json:"mass_kg"`
+	// MassKg is a pointer so an explicit `"mass_kg": 0` (a genuine zero payload)
+	// can be told apart from an omitted field (a mistake: the user described a
+	// center of gravity but forgot the mass). Both would otherwise decode to the
+	// same zero value and silently write a 0 kg payload.
+	MassKg *float64 `json:"mass_kg"`
 	// CenterOfGravityMM is [x, y, z] relative to the flange center. Optional;
 	// omitting it means the origin.
 	CenterOfGravityMM []float64 `json:"center_of_gravity_mm,omitempty"`
 }
 
 func (c *TCPLoadConfig) toTCPLoad() (tcpLoad, error) {
-	l := tcpLoad{massKg: c.MassKg}
+	if c.MassKg == nil {
+		return tcpLoad{}, fmt.Errorf("tcp_load.mass_kg is required")
+	}
+	l := tcpLoad{massKg: *c.MassKg}
 	switch len(c.CenterOfGravityMM) {
 	case 0:
+		// omitted; cogMM stays at the origin
 	case 3:
 		l.cogMM = r3.Vector{X: c.CenterOfGravityMM[0], Y: c.CenterOfGravityMM[1], Z: c.CenterOfGravityMM[2]}
 	default:
@@ -175,9 +183,24 @@ func (c *TCPLoadConfig) toTCPLoad() (tcpLoad, error) {
 		)
 	}
 	if err := l.validate(); err != nil {
-		return tcpLoad{}, err
+		return tcpLoad{}, fmt.Errorf("tcp_load: %w", err)
 	}
 	return l, nil
+}
+
+// applyConfigTCPLoad applies a config-sourced payload. apply is injected so the
+// source/requester wiring is testable without a controller.
+func applyConfigTCPLoad(ctx context.Context, c *TCPLoadConfig,
+	apply func(context.Context, tcpLoad, tcpLoadSource, string) error,
+) error {
+	if c == nil {
+		return nil
+	}
+	l, err := c.toTCPLoad()
+	if err != nil {
+		return err
+	}
+	return apply(ctx, l, tcpLoadSourceConfig, "config")
 }
 
 // tcpLoadSource records where the currently-cached payload came from. It is

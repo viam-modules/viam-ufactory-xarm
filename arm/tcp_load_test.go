@@ -240,6 +240,60 @@ func TestDecideTCPLoad(t *testing.T) {
 	})
 }
 
+// TestApplyConfigTCPLoad pins the seam NewXArm calls: given a *TCPLoadConfig,
+// it must invoke apply with source tcpLoadSourceConfig and requester "config"
+// — not any other source, since that would invert the precedence model Tasks
+// 5-6 establish (e.g. a config-set payload on a Lite6 would be refused instead
+// of applied-with-warning, and config would stop suppressing gripper pushes).
+// A nil config must not call apply at all.
+func TestApplyConfigTCPLoad(t *testing.T) {
+	t.Run("nil config applies nothing", func(t *testing.T) {
+		called := false
+		err := applyConfigTCPLoad(context.Background(), nil,
+			func(context.Context, tcpLoad, tcpLoadSource, string) error {
+				called = true
+				return nil
+			})
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, called, test.ShouldBeFalse)
+	})
+
+	t.Run("wires source and requester", func(t *testing.T) {
+		var gotLoad tcpLoad
+		var gotSrc tcpLoadSource
+		var gotRequester string
+		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{MassKg: massKgPtr(0.82)},
+			func(_ context.Context, l tcpLoad, src tcpLoadSource, requester string) error {
+				gotLoad, gotSrc, gotRequester = l, src, requester
+				return nil
+			})
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, gotLoad.massKg, test.ShouldAlmostEqual, 0.82, 1e-9)
+		test.That(t, gotSrc, test.ShouldEqual, tcpLoadSourceConfig)
+		test.That(t, gotRequester, test.ShouldEqual, "config")
+	})
+
+	t.Run("propagates conversion errors without calling apply", func(t *testing.T) {
+		called := false
+		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{},
+			func(context.Context, tcpLoad, tcpLoadSource, string) error {
+				called = true
+				return nil
+			})
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, called, test.ShouldBeFalse)
+	})
+
+	t.Run("propagates apply errors", func(t *testing.T) {
+		boom := errors.New("write failed")
+		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{MassKg: massKgPtr(0.82)},
+			func(context.Context, tcpLoad, tcpLoadSource, string) error {
+				return boom
+			})
+		test.That(t, errors.Is(err, boom), test.ShouldBeTrue)
+	})
+}
+
 func TestApplyTCPLoadDoesNotCacheFailedWrite(t *testing.T) {
 	x := &xArm{logger: logging.NewTestLogger(t)}
 	boom := errors.New("controller rejected the write")
