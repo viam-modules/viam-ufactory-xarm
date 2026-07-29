@@ -488,6 +488,18 @@ func TestParseTCPLoadRequest(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, l.massKg, test.ShouldAlmostEqual, 0, 1e-9)
 
+	// An explicit empty list agrees with omitting the key entirely: both mean
+	// the origin. This must match toTCPLoad's reading of the same JSON shape
+	// (see TestTCPLoadRequestAndConfigAgreeOnEmptyCOG).
+	l, err = parseTCPLoadRequest(map[string]any{"mass_kg": 1.0, "center_of_gravity_mm": []any{}})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.cogMM, test.ShouldResemble, r3.Vector{})
+
+	// requester is a recognized key and must not be rejected by the allowlist.
+	l, err = parseTCPLoadRequest(map[string]any{"mass_kg": 1.0, "requester": "vacuum_gripper"})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.massKg, test.ShouldAlmostEqual, 1.0, 1e-9)
+
 	// Rejections.
 	for _, bad := range []map[string]any{
 		{},                   // missing mass
@@ -495,15 +507,89 @@ func TestParseTCPLoadRequest(t *testing.T) {
 		{"mass_kg": -1.0},    // negative
 		{"mass_kg": 1.0, "center_of_gravity_mm": []any{1.0, 2.0}},      // short
 		{"mass_kg": 1.0, "center_of_gravity_mm": []any{1.0, 2.0, "z"}}, // wrong element type
+		// A misspelled optional key (missing "_mm") must be rejected outright,
+		// not silently ignored: it is the only optional field, so a typo here
+		// would otherwise parse cleanly and write a payload at the flange
+		// origin instead of the center of gravity the caller intended.
+		{"mass_kg": 1.0, "center_of_gravity": []any{0.0, 0.0, 48.0}},
+		{"mass_kg": 1.0, "unexpected_key": true},
 	} {
 		_, err := parseTCPLoadRequest(bad)
 		test.That(t, err, test.ShouldNotBeNil)
 	}
 }
 
+// TestTCPLoadRequestAndConfigAgreeOnEmptyCOG pins that parseTCPLoadRequest
+// (the DoCommand path) and toTCPLoad (the config path) give the same answer
+// for an explicit empty center_of_gravity_mm: both treat it as the origin,
+// same as omitting the key. They previously disagreed — toTCPLoad accepted
+// it, parseTCPLoadRequest rejected it as "must have exactly 3 elements, got
+// 0" — even though both parse the identical JSON shape.
+func TestTCPLoadRequestAndConfigAgreeOnEmptyCOG(t *testing.T) {
+	fromRequest, err := parseTCPLoadRequest(map[string]any{"mass_kg": 0.82, "center_of_gravity_mm": []any{}})
+	test.That(t, err, test.ShouldBeNil)
+
+	fromConfig, err := (&TCPLoadConfig{MassKg: massKgPtr(0.82), CenterOfGravityMM: []float64{}}).toTCPLoad()
+	test.That(t, err, test.ShouldBeNil)
+
+	test.That(t, fromRequest, test.ShouldResemble, fromConfig)
+	test.That(t, fromRequest.cogMM, test.ShouldResemble, r3.Vector{})
+}
+
+func TestRequesterFor(t *testing.T) {
+	// No requester param: the DoCommand key stands in.
+	test.That(t, requesterFor("set_tcp_load", map[string]any{}), test.ShouldEqual, "set_tcp_load")
+	test.That(t, requesterFor("set_default_tcp_load", nil), test.ShouldEqual, "set_default_tcp_load")
+
+	// Explicit requester wins.
+	test.That(t,
+		requesterFor("set_default_tcp_load", map[string]any{"requester": "vacuum_gripper"}),
+		test.ShouldEqual, "vacuum_gripper")
+
+	// A present-but-empty or wrong-typed requester falls back to the key,
+	// rather than caching an empty or garbage name.
+	test.That(t, requesterFor("set_tcp_load", map[string]any{"requester": ""}), test.ShouldEqual, "set_tcp_load")
+	test.That(t, requesterFor("set_tcp_load", map[string]any{"requester": 42}), test.ShouldEqual, "set_tcp_load")
+}
+
+func TestApplyTCPLoadCommand(t *testing.T) {
+	t.Run("rejects a non-map value", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		err := x.applyTCPLoadCommand(context.Background(), setTCPLoadKey, "nope", tcpLoadSourceDoCommand)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, setTCPLoadKey)
+	})
+
+	t.Run("propagates parse errors, naming the DoCommand key", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		err := x.applyTCPLoadCommand(context.Background(), setTCPLoadKey,
+			map[string]any{"mass_kg": -1.0}, tcpLoadSourceDoCommand)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, setTCPLoadKey)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "tcp load mass cannot be negative")
+	})
+
+	// Suppression lets this run to completion without a real controller
+	// connection: decideTCPLoad returns before applyTCPLoadWith ever calls
+	// the injected write function.
+	t.Run("a suppressed default does not reach the controller", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		x.tcpLoad = tcpLoad{massKg: 1.2}
+		x.tcpLoadSource = tcpLoadSourceDoCommand
+		x.tcpLoadRequester = "set_tcp_load"
+
+		err := x.applyTCPLoadCommand(context.Background(), setDefaultTCPLoadKey,
+			map[string]any{"mass_kg": 0.61, "requester": "vacuum_gripper"}, tcpLoadSourceGripperDefault)
+		test.That(t, err, test.ShouldBeNil)
+		// Untouched: the earlier explicit write survives.
+		test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceDoCommand)
+		test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
+	})
+}
+
 func TestTCPLoadResponse(t *testing.T) {
-	// Unset: numeric fields must be omitted entirely. Reporting 0 kg would be
-	// indistinguishable from a real zero payload.
+	// Unset: numeric fields (and requester) must be omitted entirely.
+	// Reporting 0 kg would be indistinguishable from a real zero payload.
 	x := &xArm{logger: logging.NewTestLogger(t)}
 	resp := x.tcpLoadResponse()
 	test.That(t, resp["source"], test.ShouldEqual, "unset")
@@ -511,12 +597,76 @@ func TestTCPLoadResponse(t *testing.T) {
 	test.That(t, hasMass, test.ShouldBeFalse)
 	_, hasCog := resp["center_of_gravity_mm"]
 	test.That(t, hasCog, test.ShouldBeFalse)
+	_, hasRequester := resp["requester"]
+	test.That(t, hasRequester, test.ShouldBeFalse)
 
-	// After a write, everything is reported.
+	// After a write, everything is reported, including who asked for it: a
+	// gripper pushing set_default_tcp_load needs requester to tell its own
+	// default apart from a competing gripper's that already won.
 	x.tcpLoad = tcpLoad{massKg: 1.2, cogMM: r3.Vector{X: 1, Y: 2, Z: 48}}
 	x.tcpLoadSource = tcpLoadSourceDoCommand
+	x.tcpLoadRequester = "set_tcp_load"
 	resp = x.tcpLoadResponse()
 	test.That(t, resp["source"], test.ShouldEqual, "do_command")
 	test.That(t, resp["mass_kg"], test.ShouldAlmostEqual, 1.2, 1e-9)
 	test.That(t, resp["center_of_gravity_mm"], test.ShouldResemble, []float64{1, 2, 48})
+	test.That(t, resp["requester"], test.ShouldEqual, "set_tcp_load")
+}
+
+// TestDoCommandTCPLoadKeys exercises set_tcp_load, set_default_tcp_load, and
+// get_tcp_load through the real DoCommand entry point, against a bare *xArm
+// with no socket. DoCommand has no connection-requiring preamble, so this
+// works as long as every path taken either errors out before reaching the
+// controller or is suppressed by precedence before applyTCPLoadWith calls
+// its injected write function — a real write would panic on the nil
+// connection. That constraint is what makes the last case below valuable: it
+// exercises the full set_default_tcp_load block, including which
+// tcpLoadSource it passes to applyTCPLoad, without needing a socket. Pin
+// wrong there (e.g. swapped with tcpLoadSourceDoCommand) and suppression
+// stops firing, the call reaches the controller, and the whole test binary
+// panics.
+func TestDoCommandTCPLoadKeys(t *testing.T) {
+	t.Run("get_tcp_load when unset", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		resp, err := x.DoCommand(context.Background(), map[string]any{getTCPLoadKey: true})
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, resp, test.ShouldResemble, map[string]any{
+			tcpLoadKey: map[string]any{"source": "unset"},
+		})
+	})
+
+	t.Run("set_tcp_load rejects a non-map value, naming the key and the type", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		_, err := x.DoCommand(context.Background(), map[string]any{setTCPLoadKey: "nope"})
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, setTCPLoadKey)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "string")
+	})
+
+	t.Run("set_tcp_load rejects an invalid payload before touching the controller", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		_, err := x.DoCommand(context.Background(), map[string]any{
+			setTCPLoadKey: map[string]any{"mass_kg": -1.0},
+		})
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "tcp load mass cannot be negative")
+	})
+
+	t.Run("set_default_tcp_load suppressed by a prior explicit write reports the retained payload", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		x.tcpLoad = tcpLoad{massKg: 1.2}
+		x.tcpLoadSource = tcpLoadSourceDoCommand
+		x.tcpLoadRequester = "set_tcp_load"
+
+		resp, err := x.DoCommand(context.Background(), map[string]any{
+			setDefaultTCPLoadKey: map[string]any{"mass_kg": 0.61, "requester": "vacuum_gripper"},
+		})
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, resp[tcpLoadKey], test.ShouldResemble, map[string]any{
+			"source":               "do_command",
+			"mass_kg":              1.2,
+			"center_of_gravity_mm": []float64{0, 0, 0},
+			"requester":            "set_tcp_load",
+		})
+	})
 }

@@ -168,26 +168,33 @@ type TCPLoadConfig struct {
 	CenterOfGravityMM []float64 `json:"center_of_gravity_mm,omitempty"`
 }
 
+// tcpLoadFrom builds and validates a tcpLoad from an already-typed mass and
+// an optional center of gravity. An empty (or nil) cog means the origin —
+// deliberately, so that an omitted field and an explicit empty list agree.
+// Anything else must have exactly 3 elements [x, y, z]. prefix names the
+// caller for error messages (e.g. "tcp_load: "); pass "" for none.
+func tcpLoadFrom(mass float64, cog []float64, prefix string) (tcpLoad, error) {
+	l := tcpLoad{massKg: mass}
+	switch len(cog) {
+	case 0:
+		// omitted/empty; cogMM stays at the origin
+	case 3:
+		l.cogMM = r3.Vector{X: cog[0], Y: cog[1], Z: cog[2]}
+	default:
+		return tcpLoad{}, fmt.Errorf(
+			"%scenter_of_gravity_mm must have exactly 3 elements [x, y, z], got %d", prefix, len(cog))
+	}
+	if err := l.validate(); err != nil {
+		return tcpLoad{}, fmt.Errorf("%s%w", prefix, err)
+	}
+	return l, nil
+}
+
 func (c *TCPLoadConfig) toTCPLoad() (tcpLoad, error) {
 	if c.MassKg == nil {
 		return tcpLoad{}, fmt.Errorf("tcp_load.mass_kg is required")
 	}
-	l := tcpLoad{massKg: *c.MassKg}
-	switch len(c.CenterOfGravityMM) {
-	case 0:
-		// omitted; cogMM stays at the origin
-	case 3:
-		l.cogMM = r3.Vector{X: c.CenterOfGravityMM[0], Y: c.CenterOfGravityMM[1], Z: c.CenterOfGravityMM[2]}
-	default:
-		return tcpLoad{}, fmt.Errorf(
-			"tcp_load.center_of_gravity_mm must have exactly 3 elements [x, y, z], got %d",
-			len(c.CenterOfGravityMM),
-		)
-	}
-	if err := l.validate(); err != nil {
-		return tcpLoad{}, fmt.Errorf("tcp_load: %w", err)
-	}
-	return l, nil
+	return tcpLoadFrom(*c.MassKg, c.CenterOfGravityMM, "tcp_load: ")
 }
 
 // applyConfigTCPLoad applies a config-sourced payload. apply is injected so the
@@ -421,51 +428,95 @@ func (x *xArm) applyTCPLoadWith(
 	return nil
 }
 
+// tcpLoadRequestKeys allowlists the nested-map payload shared by set_tcp_load
+// and set_default_tcp_load. A misspelled key (e.g. "center_of_gravity"
+// missing its "_mm") must be rejected rather than silently ignored: since
+// center_of_gravity_mm is the only optional field, a typo there would parse
+// cleanly and write a payload at the flange origin instead of the intended
+// center of gravity — exactly the "does not match reality" failure mode this
+// file's header warns about.
+var tcpLoadRequestKeys = map[string]bool{
+	"mass_kg":              true,
+	"center_of_gravity_mm": true,
+	"requester":            true,
+}
+
 // parseTCPLoadRequest reads the nested-map payload shared by set_tcp_load and
 // set_default_tcp_load. JSON numbers arrive as float64 over the wire.
 func parseTCPLoadRequest(params map[string]any) (tcpLoad, error) {
+	for k := range params {
+		if !tcpLoadRequestKeys[k] {
+			return tcpLoad{}, fmt.Errorf(
+				"tcp load request: unknown key %q (allowed: mass_kg, center_of_gravity_mm, requester)", k)
+		}
+	}
+
 	raw, ok := params["mass_kg"]
 	if !ok {
 		return tcpLoad{}, errors.New("tcp load request requires mass_kg")
 	}
 	mass, err := utils.AssertType[float64](raw)
 	if err != nil {
-		return tcpLoad{}, fmt.Errorf("tcp load mass_kg: %w", err)
+		return tcpLoad{}, fmt.Errorf("mass_kg: %w", err)
 	}
-	l := tcpLoad{massKg: mass}
 
+	var cog []float64
 	if rawCog, ok := params["center_of_gravity_mm"]; ok {
 		items, err := utils.AssertType[[]any](rawCog)
 		if err != nil {
-			return tcpLoad{}, fmt.Errorf("tcp load center_of_gravity_mm: %w", err)
+			return tcpLoad{}, fmt.Errorf("center_of_gravity_mm: %w", err)
 		}
-		if len(items) != 3 {
-			return tcpLoad{}, fmt.Errorf(
-				"tcp load center_of_gravity_mm must have exactly 3 elements [x, y, z], got %d", len(items))
-		}
-		vals := make([]float64, 3)
+		cog = make([]float64, len(items))
 		for i, item := range items {
 			v, err := utils.AssertType[float64](item)
 			if err != nil {
-				return tcpLoad{}, fmt.Errorf("tcp load center_of_gravity_mm[%d]: %w", i, err)
+				return tcpLoad{}, fmt.Errorf("center_of_gravity_mm[%d]: %w", i, err)
 			}
-			vals[i] = v
+			cog[i] = v
 		}
-		l.cogMM = r3.Vector{X: vals[0], Y: vals[1], Z: vals[2]}
 	}
 
-	if err := l.validate(); err != nil {
-		return tcpLoad{}, err
+	return tcpLoadFrom(mass, cog, "")
+}
+
+// requesterFor resolves the name attributed to a tcp load write: an explicit
+// params["requester"] wins (a gripper identifying itself), otherwise the
+// DoCommand key that carried the request stands in.
+func requesterFor(key string, params map[string]any) string {
+	if r, ok := params["requester"].(string); ok && r != "" {
+		return r
 	}
-	return l, nil
+	return key
+}
+
+// applyTCPLoadCommand handles one payload-writing DoCommand key (set_tcp_load
+// or set_default_tcp_load): it type-asserts the params map, parses it, and
+// applies it with the given source. Factored out so the source↔key pairing
+// lives at one call site per key instead of being duplicated in DoCommand,
+// and so it is directly unit-testable without a live DoCommand round trip.
+func (x *xArm) applyTCPLoadCommand(ctx context.Context, key string, val any, src tcpLoadSource) error {
+	params, ok := val.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a map with keys mass_kg and optionally center_of_gravity_mm; got %T",
+			key, val)
+	}
+	l, err := parseTCPLoadRequest(params)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	return x.applyTCPLoad(ctx, l, src, requesterFor(key, params))
 }
 
 // tcpLoadResponse renders the cached payload for get_tcp_load. When nothing has
-// been written the numeric fields are omitted entirely — reporting 0 kg would
-// be indistinguishable from a real zero payload.
+// been written the numeric fields (and requester) are omitted entirely —
+// reporting 0 kg would be indistinguishable from a real zero payload.
+//
+// requester lets a gripper pushing set_default_tcp_load tell its own default
+// apart from a competing gripper's default that got there first: both report
+// source "gripper_default", but only requester says whose.
 func (x *xArm) tcpLoadResponse() map[string]any {
 	x.confLock.Lock()
-	l, src := x.tcpLoad, x.tcpLoadSource
+	l, src, requester := x.tcpLoad, x.tcpLoadSource, x.tcpLoadRequester
 	x.confLock.Unlock()
 
 	resp := map[string]any{"source": src.String()}
@@ -474,5 +525,6 @@ func (x *xArm) tcpLoadResponse() map[string]any {
 	}
 	resp["mass_kg"] = l.massKg
 	resp["center_of_gravity_mm"] = []float64{l.cogMM.X, l.cogMM.Y, l.cogMM.Z}
+	resp["requester"] = requester
 	return resp
 }

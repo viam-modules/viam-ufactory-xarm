@@ -990,16 +990,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	}
 
 	if val, ok := cmd[setTCPLoadKey]; ok {
-		params, ok := val.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("%s must be a map with keys mass_kg and optionally center_of_gravity_mm; got %T",
-				setTCPLoadKey, val)
-		}
-		l, err := parseTCPLoadRequest(params)
-		if err != nil {
-			return nil, err
-		}
-		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceDoCommand, setTCPLoadKey); err != nil {
+		if err := x.applyTCPLoadCommand(ctx, setTCPLoadKey, val, tcpLoadSourceDoCommand); err != nil {
 			return nil, err
 		}
 		resp[tcpLoadKey] = x.tcpLoadResponse()
@@ -1010,20 +1001,7 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	// It is applied only when this module has written nothing yet, so it can
 	// never overwrite a config value or a runtime set_tcp_load.
 	if val, ok := cmd[setDefaultTCPLoadKey]; ok {
-		params, ok := val.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("%s must be a map with keys mass_kg and optionally center_of_gravity_mm; got %T",
-				setDefaultTCPLoadKey, val)
-		}
-		l, err := parseTCPLoadRequest(params)
-		if err != nil {
-			return nil, err
-		}
-		requester := setDefaultTCPLoadKey
-		if r, ok := params["requester"].(string); ok && r != "" {
-			requester = r
-		}
-		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceGripperDefault, requester); err != nil {
+		if err := x.applyTCPLoadCommand(ctx, setDefaultTCPLoadKey, val, tcpLoadSourceGripperDefault); err != nil {
 			return nil, err
 		}
 		resp[tcpLoadKey] = x.tcpLoadResponse()
