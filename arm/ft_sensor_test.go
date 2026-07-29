@@ -11,6 +11,7 @@ import (
 // fakeArm embeds arm.Arm so only DoCommand needs implementing.
 type fakeArm struct {
 	arm.Arm
+
 	lastCmd map[string]any
 	resp    map[string]any
 	err     error
