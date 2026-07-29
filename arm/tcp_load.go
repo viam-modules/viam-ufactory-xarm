@@ -150,8 +150,61 @@ func gripperDefaultTCPLoad(model resource.Model) (tcpLoad, bool) {
 	}
 }
 
+// tcpLoadSource records where the currently-cached payload came from. It is
+// what enforces precedence between config, runtime writes, and gripper defaults.
+type tcpLoadSource int
+
+const (
+	tcpLoadSourceUnset          tcpLoadSource = iota // this module has written nothing
+	tcpLoadSourceConfig                              // the tcp_load config attribute
+	tcpLoadSourceDoCommand                           // a runtime set_tcp_load
+	tcpLoadSourceGripperDefault                      // pushed by a gripper component
+)
+
+func (s tcpLoadSource) String() string {
+	switch s {
+	case tcpLoadSourceConfig:
+		return "config"
+	case tcpLoadSourceDoCommand:
+		return "do_command"
+	case tcpLoadSourceGripperDefault:
+		return "gripper_default"
+	case tcpLoadSourceUnset:
+		return "unset"
+	default:
+		return "unset"
+	}
+}
+
+// shouldApplyTCPLoad decides whether a write from `incoming` may overwrite a
+// payload currently sourced from `current`.
+//
+// Explicit writes (config, set_tcp_load) always apply. A gripper default
+// applies only when this module has written nothing at all.
+//
+// That asymmetry is the point. Gripper components are AlwaysRebuild and are
+// reconstructed whenever their OWN config changes (gripper_speed,
+// vacuum_length_mm, connection_type) with no arm change involved. Without this
+// rule, editing vacuum_length_mm while the arm holds a 1.2 kg workpiece would
+// push the 0.61 kg gripper default and leave the controller compensating for
+// the wrong mass under load.
+//
+// Only a new arm instance re-arms defaults: the arm is AlwaysRebuild, so an arm
+// config change resets the cache to unset and the next gripper push applies.
+func shouldApplyTCPLoad(current, incoming tcpLoadSource) bool {
+	if incoming == tcpLoadSourceGripperDefault {
+		return current == tcpLoadSourceUnset
+	}
+	return true
+}
+
 // setTCPLoad writes the payload to the controller. It does not validate, check
 // the arm's rating, or update the cache — callers own that policy.
+//
+// Unused until the apply path (decideTCPLoad / DoCommand wiring) lands in a
+// later task.
+//
+//nolint:unused
 func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
 	c := x.newCmd(regMap["SetTCPLoad"])
 	c.params = append(c.params, encodeTCPLoad(l, firmwareUsesMillimeters(x.detectedArm.firmwareVersion))...)

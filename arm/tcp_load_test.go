@@ -141,3 +141,35 @@ func TestGripperDefaultsAreFinite(t *testing.T) {
 		test.That(t, l.validate(), test.ShouldBeNil)
 	}
 }
+
+func TestApplyTCPLoadPrecedence(t *testing.T) {
+	// A default applies only when nothing has been written yet.
+	t.Run("default applies when unset", func(t *testing.T) {
+		test.That(t, shouldApplyTCPLoad(tcpLoadSourceUnset, tcpLoadSourceGripperDefault), test.ShouldBeTrue)
+	})
+	t.Run("default suppressed by config", func(t *testing.T) {
+		test.That(t, shouldApplyTCPLoad(tcpLoadSourceConfig, tcpLoadSourceGripperDefault), test.ShouldBeFalse)
+	})
+	// The case that corrupts a live grasp if it regresses: a gripper rebuild
+	// must not clobber a runtime set_tcp_load.
+	t.Run("default suppressed by runtime set", func(t *testing.T) {
+		test.That(t, shouldApplyTCPLoad(tcpLoadSourceDoCommand, tcpLoadSourceGripperDefault), test.ShouldBeFalse)
+	})
+	t.Run("default suppressed by earlier default", func(t *testing.T) {
+		test.That(t, shouldApplyTCPLoad(tcpLoadSourceGripperDefault, tcpLoadSourceGripperDefault), test.ShouldBeFalse)
+	})
+	// Explicit writes always win, from any prior state.
+	for _, prior := range []tcpLoadSource{
+		tcpLoadSourceUnset, tcpLoadSourceConfig, tcpLoadSourceDoCommand, tcpLoadSourceGripperDefault,
+	} {
+		test.That(t, shouldApplyTCPLoad(prior, tcpLoadSourceDoCommand), test.ShouldBeTrue)
+		test.That(t, shouldApplyTCPLoad(prior, tcpLoadSourceConfig), test.ShouldBeTrue)
+	}
+}
+
+func TestTCPLoadSourceString(t *testing.T) {
+	test.That(t, tcpLoadSourceUnset.String(), test.ShouldEqual, "unset")
+	test.That(t, tcpLoadSourceConfig.String(), test.ShouldEqual, "config")
+	test.That(t, tcpLoadSourceDoCommand.String(), test.ShouldEqual, "do_command")
+	test.That(t, tcpLoadSourceGripperDefault.String(), test.ShouldEqual, "gripper_default")
+}
