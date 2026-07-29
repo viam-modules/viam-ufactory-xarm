@@ -171,12 +171,6 @@ func (s *ftSensor) DoCommand(ctx context.Context, cmd map[string]any) (map[strin
 	if _, ok := cmd[tareKey]; ok {
 		return s.arm.DoCommand(ctx, map[string]any{ftSensorZeroKey: true})
 	}
-	// clear_error forwards to the arm's controller error-clear. Note: this only
-	// clears the controller error box; a sensor overload latch (get_ft_sensor_error
-	// 64-71) can only be cleared by power-cycling the controller.
-	if _, ok := cmd[clearErrorKey]; ok {
-		return s.arm.DoCommand(ctx, map[string]any{clearErrorKey: true})
-	}
 	return map[string]any{}, nil
 }
 

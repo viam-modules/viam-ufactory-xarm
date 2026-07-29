@@ -394,8 +394,8 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
 > **Overloaded sensor:** If reads are all-zero and the sensor's error register is
 > non-zero (over-limit on any axis), the sensor has latched an overload fault. This
-> can only be cleared by **power-cycling the controller** — `clear_error` clears the
-> controller error box but not the sensor's own fault latch.
+> can only be cleared by **power-cycling the controller**; no software command
+> clears the sensor's own fault latch.
 
 ### Configuration
 
@@ -432,7 +432,6 @@ that (disconnected, or an overload latch that only a power-cycle clears),
 | Command | Effect |
 |---------|--------|
 | `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
-| `{"clear_error": true}` | Clear the arm controller's error/warning state. Does **not** clear a sensor overload latch (that needs a controller power-cycle). |
 
 ## UFactory xArm Resources
 

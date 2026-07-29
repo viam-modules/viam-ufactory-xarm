@@ -102,15 +102,6 @@ func TestFTSensorReadingsOverloadSurfaced(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "power-cycle")
 }
 
-func TestFTSensorDoCommandClearError(t *testing.T) {
-	fa := &fakeArm{resp: map[string]any{}}
-	s := &ftSensor{arm: fa}
-
-	_, err := s.DoCommand(context.Background(), map[string]any{clearErrorKey: true})
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, fa.lastCmd[clearErrorKey], test.ShouldEqual, true)
-}
-
 func TestFTSensorConstructsWithoutEnabling(t *testing.T) {
 	// Construction only resolves the arm dep; it must NOT enable (that's the
 	// Readings self-heal's job) and must NOT fail on hardware state.
