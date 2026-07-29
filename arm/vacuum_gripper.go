@@ -89,17 +89,23 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	mf, err := loadGripperModel(config.Model.Name)
-	if err != nil {
-		return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
+	var mf referenceframe.Model
+	if newConf.UseURDFs {
+		mf, err = loadGripperModel(config.Model.Name, newConf.MeshDecimationRatio)
+		if err != nil {
+			return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
+		}
+	} else {
+		mf = referenceframe.NewSimpleModel(config.Model.Name)
 	}
 
 	g := &myVacuumGripper{
-		name:   config.ResourceName(),
-		conf:   newConf,
-		logger: logger,
-		model:  config.Model,
-		mf:     mf,
+		name:     config.ResourceName(),
+		conf:     newConf,
+		logger:   logger,
+		model:    config.Model,
+		mf:       mf,
+		useURDFs: newConf.UseURDFs,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -117,10 +123,11 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
-	name  resource.Name
-	conf  *GripperConfig
-	model resource.Model
-	mf    referenceframe.Model
+	name     resource.Name
+	conf     *GripperConfig
+	model    resource.Model
+	mf       referenceframe.Model
+	useURDFs bool
 
 	arm arm.Arm
 
@@ -201,26 +208,64 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
-	if err != nil {
-		return nil, err
-	}
-	geoms := gif.Geometries()
-
-	// The vacuum suction tube length is configurable per deployment; reflect
-	// it as an additional thin collision body extending past the model's TCP.
-	if g.conf.VacuumLengthMM > 0 {
-		tube, err := spatialmath.NewBox(
-			spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: g.conf.VacuumLengthMM / 2}),
-			r3.Vector{X: 5, Y: 5, Z: g.conf.VacuumLengthMM},
-			"vacuum-gripper-tube")
+	if g.useURDFs {
+		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err
 		}
-		geoms = append(geoms, tube)
+		geoms := gif.Geometries()
+
+		// The vacuum suction tube length is configurable per deployment; reflect
+		// it as an additional thin collision body extending past the model's TCP.
+		if g.conf.VacuumLengthMM > 0 {
+			tube, err := spatialmath.NewBox(
+				spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: g.conf.VacuumLengthMM / 2}),
+				r3.Vector{X: 5, Y: 5, Z: g.conf.VacuumLengthMM},
+				"vacuum-gripper-tube")
+			if err != nil {
+				return nil, err
+			}
+			geoms = append(geoms, tube)
+		}
+
+		return geoms, nil
+	}
+	return vacuumGripperGeometries(g.model, g.conf.VacuumLengthMM)
+}
+
+// Hand-authored case dimensions for the vacuum gripper family.
+var (
+	vacuumCaseBoxSize     = r3.Vector{X: 70, Y: 93, Z: 117}
+	vacuumLiteCaseBoxSize = r3.Vector{X: 51, Y: 51, Z: 54}
+)
+
+// vacuumGripperGeometries returns hand-authored housing + suction-tube
+// boxes for the vacuum gripper family. Used when use_urdfs is false.
+func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]spatialmath.Geometry, error) {
+	var caseSize r3.Vector
+	switch model {
+	case VacuumGripperModel:
+		caseSize = vacuumCaseBoxSize
+	case VacuumGripperModelLite:
+		caseSize = vacuumLiteCaseBoxSize
+	default:
+		return nil, fmt.Errorf("unsupported model %s", model)
 	}
 
-	return geoms, nil
+	caseBox, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM + caseSize.Z/2)}),
+		caseSize, "vacuum-gripper-box")
+	if err != nil {
+		return nil, err
+	}
+	tube, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM / 2)}),
+		r3.Vector{X: 5, Y: 5, Z: max(5, vacuumLengthMM)},
+		"vacuum-gripper-tube")
+	if err != nil {
+		return nil, err
+	}
+	return []spatialmath.Geometry{caseBox, tube}, nil
 }
 
 func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {

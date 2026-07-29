@@ -67,10 +67,33 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
 }
 
-func loadGripperModel(modelName string) (referenceframe.Model, error) {
+// gripperDefaultMeshDecimationRatio is the value used when the caller passes
+// nil. Not user-configurable; live below 1.0 so the RDK URDF parser takes
+// the re-serialization path (see the 1.0 note below).
+const gripperDefaultMeshDecimationRatio = 0.1
+
+// loadGripperModel parses the URDF for a gripper model. Each gripper URDF
+// has exactly one mesh, so a single decimation ratio suffices.
+//
+// A nil ratio means "caller did not specify" and the internal default
+// applies. Config validation is expected to reject 0 before we get here.
+//
+// A ratio of 1.0 hits an RDK bug: the URDF parser skips decimation entirely
+// and ships the raw source bytes (STL) mislabelled as PLY, which the client
+// then fails to parse with "Invalid ply file". We clamp to just under 1.0 so
+// the parser takes the TrianglesToPLYBytes re-serialization path. Anything
+// strictly less than 1.0 is safe.
+func loadGripperModel(modelName string, meshDecimationRatio *float64) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
 		return nil, err
 	}
-	return makeModelFrameFromURDF(artifact.urdfBasename, modelName, nil)
+	ratio := gripperDefaultMeshDecimationRatio
+	if meshDecimationRatio != nil {
+		ratio = *meshDecimationRatio
+		if ratio >= 1.0 {
+			ratio = 0.9999
+		}
+	}
+	return makeModelFrameFromURDF(artifact.urdfBasename, modelName, []float64{ratio})
 }

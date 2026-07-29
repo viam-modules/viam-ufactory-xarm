@@ -144,12 +144,6 @@
       <mass value="0.17"/>
       <inertia ixx="9.3e-05" ixy="-0.0" ixz="-0.0" iyy="5.87e-05" iyz="-3.6e-06" izz="0.000132"/>
     </inertial>
-    <collision>
-      <geometry>
-        <mesh filename="package://description/meshes/xarm6_1305meshes/link6.stl"/>
-      </geometry>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-    </collision>
   </link>
 
   <joint name="joint6" type="revolute">

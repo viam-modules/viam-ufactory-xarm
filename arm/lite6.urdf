@@ -144,12 +144,6 @@
       <mass value="0.13"/>
       <inertia ixx="7.726e-05" ixy="-1e-06" ixz="-4e-07" iyy="8.5665e-05" iyz="6e-07" izz="0.00014813999999999997"/>
     </inertial>
-    <collision>
-      <geometry>
-        <mesh filename="package://description/meshes/lite6meshes/link6.stl"/>
-      </geometry>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-    </collision>
   </link>
 
   <joint name="joint6" type="revolute">
@@ -161,4 +155,11 @@
     <dynamics damping="1.0" friction="1.0"/>
   </joint>
 
+  <link name="link_eef"/>
+
+  <joint name="joint_eef" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="link6"/>
+    <child link="link_eef"/>
+  </joint>
 </robot>

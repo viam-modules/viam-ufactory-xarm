@@ -178,4 +178,11 @@
     <dynamics damping="2" friction="1"/>
   </joint>
 
+  <link name="link_eef"/>
+
+  <joint name="joint_eef" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="link7"/>
+    <child link="link_eef"/>
+  </joint>
 </robot>

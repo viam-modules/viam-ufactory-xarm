@@ -473,6 +473,11 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 
 	if newConf.UseURDFs && len(newConf.MeshDecimationRatios) == 0 {
+		// Every arm URDF has exactly numJoints mesh refs: link_base +
+		// link1..link(N-1). The terminal revolute link (link6 on 6-DOF,
+		// link7 on 7-DOF) is deliberately mesh-less — it's the tool-mount
+		// flange, physically occupied by any attached tool, and gets a
+		// fixed link_eef past it as a clean TCP frame.
 		numJoints := 7
 		if modelName == ModelName6DOF || modelName == ModelNameLite {
 			numJoints = 6
