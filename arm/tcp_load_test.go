@@ -12,10 +12,26 @@ import (
 	"github.com/golang/geo/r3"
 	"go.viam.com/test"
 
+	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	rutils "go.viam.com/rdk/utils"
 )
+
+// tcpLoadRecorderArm captures DoCommand calls. Embeds arm.Arm so only
+// DoCommand needs implementing.
+type tcpLoadRecorderArm struct {
+	arm.Arm
+
+	onDo func(map[string]any)
+}
+
+func (f *tcpLoadRecorderArm) DoCommand(_ context.Context, cmd map[string]any) (map[string]any, error) {
+	if f.onDo != nil {
+		f.onDo(cmd)
+	}
+	return map[string]any{}, nil
+}
 
 func TestValidateTCPLoad(t *testing.T) {
 	for _, tc := range []struct {
@@ -669,4 +685,58 @@ func TestDoCommandTCPLoadKeys(t *testing.T) {
 			"requester":            "set_tcp_load",
 		})
 	})
+}
+
+func TestPushGripperDefaultSkipsUnknownModel(t *testing.T) {
+	// A model with no preset must not produce a DoCommand at all.
+	called := false
+	fake := &tcpLoadRecorderArm{onDo: func(map[string]any) { called = true }}
+
+	pushGripperDefaultTCPLoad(context.Background(), fake, GripperModelLite, logging.NewTestLogger(t))
+	test.That(t, called, test.ShouldBeFalse)
+
+	pushGripperDefaultTCPLoad(context.Background(), fake, VacuumGripperModelLite, logging.NewTestLogger(t))
+	test.That(t, called, test.ShouldBeFalse)
+}
+
+func TestPushGripperDefaultSendsPreset(t *testing.T) {
+	for _, tc := range []struct {
+		model   resource.Model
+		wantKg  float64
+		wantCog []any
+	}{
+		{GripperModel, 0.82, []any{0.0, 0.0, 48.0}},
+		{VacuumGripperModel, 0.61, []any{0.0, 0.0, 53.0}},
+	} {
+		t.Run(tc.model.String(), func(t *testing.T) {
+			var got map[string]any
+			fake := &tcpLoadRecorderArm{onDo: func(cmd map[string]any) { got = cmd }}
+
+			pushGripperDefaultTCPLoad(context.Background(), fake, tc.model, logging.NewTestLogger(t))
+
+			params, ok := got[setDefaultTCPLoadKey].(map[string]any)
+			test.That(t, ok, test.ShouldBeTrue)
+			test.That(t, params["mass_kg"], test.ShouldAlmostEqual, tc.wantKg, 1e-9)
+			test.That(t, params["center_of_gravity_mm"], test.ShouldResemble, tc.wantCog)
+			test.That(t, params["requester"], test.ShouldEqual, tc.model.String())
+		})
+	}
+}
+
+// The pushed map must survive the real parser — otherwise a shape mismatch
+// between the producer and consumer only surfaces on hardware.
+func TestPushedGripperDefaultParses(t *testing.T) {
+	for _, model := range []resource.Model{GripperModel, VacuumGripperModel} {
+		var got map[string]any
+		fake := &tcpLoadRecorderArm{onDo: func(cmd map[string]any) { got = cmd }}
+		pushGripperDefaultTCPLoad(context.Background(), fake, model, logging.NewTestLogger(t))
+
+		params := got[setDefaultTCPLoadKey].(map[string]any)
+		parsed, err := parseTCPLoadRequest(params)
+		test.That(t, err, test.ShouldBeNil)
+
+		want, ok := gripperDefaultTCPLoad(model)
+		test.That(t, ok, test.ShouldBeTrue)
+		test.That(t, parsed, test.ShouldResemble, want)
+	}
 }

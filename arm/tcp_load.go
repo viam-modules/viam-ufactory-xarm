@@ -18,6 +18,8 @@ import (
 
 	"github.com/golang/geo/r3"
 
+	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/utils"
 )
@@ -527,4 +529,26 @@ func (x *xArm) tcpLoadResponse() map[string]any {
 	resp["center_of_gravity_mm"] = []float64{l.cogMM.X, l.cogMM.Y, l.cogMM.Z}
 	resp["requester"] = requester
 	return resp
+}
+
+// pushGripperDefaultTCPLoad offers this gripper's known payload to the arm.
+//
+// The arm applies it only when nothing else has set a payload, so this is
+// always safe to call and never overwrites a user's value. Failures are logged,
+// not returned: a default the user never typed must not fail construction of
+// the gripper.
+func pushGripperDefaultTCPLoad(ctx context.Context, a arm.Arm, model resource.Model, logger logging.Logger) {
+	l, ok := gripperDefaultTCPLoad(model)
+	if !ok {
+		return
+	}
+	if _, err := a.DoCommand(ctx, map[string]any{
+		setDefaultTCPLoadKey: map[string]any{
+			"mass_kg":              l.massKg,
+			"center_of_gravity_mm": []any{l.cogMM.X, l.cogMM.Y, l.cogMM.Z},
+			"requester":            model.String(),
+		},
+	}); err != nil {
+		logger.Warnf("could not apply default tcp load for %s: %v", model, err)
+	}
 }
