@@ -914,13 +914,8 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		}
 		validCommand = true
 	}
-	if v, ok := cmd[ftSensorEnableKey]; ok {
-		// Default to enabling; only an explicit false disables the stream.
-		enable := true
-		if b, isBool := v.(bool); isBool {
-			enable = b
-		}
-		if err := x.setFTSensorEnable(ctx, enable); err != nil {
+	if _, ok := cmd[ftSensorEnableKey]; ok {
+		if err := x.setFTSensorEnable(ctx); err != nil {
 			return nil, err
 		}
 		validCommand = true

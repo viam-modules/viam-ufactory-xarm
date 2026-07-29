@@ -1350,13 +1350,9 @@ func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	return err
 }
 
-func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
+func (x *xArm) setFTSensorEnable(ctx context.Context) error {
 	c := x.newCmd(regMap["FTSensorEnable"])
-	on := byte(0)
-	if enable {
-		on = 1
-	}
-	c.params = append(c.params, on)
+	c.params = append(c.params, 1) // 1 = enable
 	_, err := x.send(ctx, c, true)
 	return err
 }
