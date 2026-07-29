@@ -466,3 +466,57 @@ func TestApplyTCPLoadIsAtomicAgainstConcurrentApply(t *testing.T) {
 	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceDoCommand)
 	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
 }
+
+func TestParseTCPLoadRequest(t *testing.T) {
+	l, err := parseTCPLoadRequest(map[string]any{
+		"mass_kg":              0.82,
+		"center_of_gravity_mm": []any{1.0, 2.0, 48.0},
+	})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.massKg, test.ShouldAlmostEqual, 0.82, 1e-9)
+	test.That(t, l.cogMM.X, test.ShouldAlmostEqual, 1, 1e-9)
+	test.That(t, l.cogMM.Y, test.ShouldAlmostEqual, 2, 1e-9)
+	test.That(t, l.cogMM.Z, test.ShouldAlmostEqual, 48, 1e-9)
+
+	// CoG optional.
+	l, err = parseTCPLoadRequest(map[string]any{"mass_kg": 1.0})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.cogMM, test.ShouldResemble, r3.Vector{})
+
+	// Explicit zero mass is legal — it means "no payload".
+	l, err = parseTCPLoadRequest(map[string]any{"mass_kg": 0.0})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.massKg, test.ShouldAlmostEqual, 0, 1e-9)
+
+	// Rejections.
+	for _, bad := range []map[string]any{
+		{},                   // missing mass
+		{"mass_kg": "heavy"}, // wrong type
+		{"mass_kg": -1.0},    // negative
+		{"mass_kg": 1.0, "center_of_gravity_mm": []any{1.0, 2.0}},      // short
+		{"mass_kg": 1.0, "center_of_gravity_mm": []any{1.0, 2.0, "z"}}, // wrong element type
+	} {
+		_, err := parseTCPLoadRequest(bad)
+		test.That(t, err, test.ShouldNotBeNil)
+	}
+}
+
+func TestTCPLoadResponse(t *testing.T) {
+	// Unset: numeric fields must be omitted entirely. Reporting 0 kg would be
+	// indistinguishable from a real zero payload.
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	resp := x.tcpLoadResponse()
+	test.That(t, resp["source"], test.ShouldEqual, "unset")
+	_, hasMass := resp["mass_kg"]
+	test.That(t, hasMass, test.ShouldBeFalse)
+	_, hasCog := resp["center_of_gravity_mm"]
+	test.That(t, hasCog, test.ShouldBeFalse)
+
+	// After a write, everything is reported.
+	x.tcpLoad = tcpLoad{massKg: 1.2, cogMM: r3.Vector{X: 1, Y: 2, Z: 48}}
+	x.tcpLoadSource = tcpLoadSourceDoCommand
+	resp = x.tcpLoadResponse()
+	test.That(t, resp["source"], test.ShouldEqual, "do_command")
+	test.That(t, resp["mass_kg"], test.ShouldAlmostEqual, 1.2, 1e-9)
+	test.That(t, resp["center_of_gravity_mm"], test.ShouldResemble, []float64{1, 2, 48})
+}

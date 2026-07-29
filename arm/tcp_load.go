@@ -10,6 +10,7 @@ package arm
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"github.com/golang/geo/r3"
 
 	"go.viam.com/rdk/resource"
+	"go.viam.com/rdk/utils"
 )
 
 // tcpLoad is a payload description: mass at a center of gravity expressed in
@@ -417,4 +419,60 @@ func (x *xArm) applyTCPLoadWith(
 		l.massKg, l.cogMM.X, l.cogMM.Y, l.cogMM.Z, src, requester,
 	)
 	return nil
+}
+
+// parseTCPLoadRequest reads the nested-map payload shared by set_tcp_load and
+// set_default_tcp_load. JSON numbers arrive as float64 over the wire.
+func parseTCPLoadRequest(params map[string]any) (tcpLoad, error) {
+	raw, ok := params["mass_kg"]
+	if !ok {
+		return tcpLoad{}, errors.New("tcp load request requires mass_kg")
+	}
+	mass, err := utils.AssertType[float64](raw)
+	if err != nil {
+		return tcpLoad{}, fmt.Errorf("tcp load mass_kg: %w", err)
+	}
+	l := tcpLoad{massKg: mass}
+
+	if rawCog, ok := params["center_of_gravity_mm"]; ok {
+		items, err := utils.AssertType[[]any](rawCog)
+		if err != nil {
+			return tcpLoad{}, fmt.Errorf("tcp load center_of_gravity_mm: %w", err)
+		}
+		if len(items) != 3 {
+			return tcpLoad{}, fmt.Errorf(
+				"tcp load center_of_gravity_mm must have exactly 3 elements [x, y, z], got %d", len(items))
+		}
+		vals := make([]float64, 3)
+		for i, item := range items {
+			v, err := utils.AssertType[float64](item)
+			if err != nil {
+				return tcpLoad{}, fmt.Errorf("tcp load center_of_gravity_mm[%d]: %w", i, err)
+			}
+			vals[i] = v
+		}
+		l.cogMM = r3.Vector{X: vals[0], Y: vals[1], Z: vals[2]}
+	}
+
+	if err := l.validate(); err != nil {
+		return tcpLoad{}, err
+	}
+	return l, nil
+}
+
+// tcpLoadResponse renders the cached payload for get_tcp_load. When nothing has
+// been written the numeric fields are omitted entirely — reporting 0 kg would
+// be indistinguishable from a real zero payload.
+func (x *xArm) tcpLoadResponse() map[string]any {
+	x.confLock.Lock()
+	l, src := x.tcpLoad, x.tcpLoadSource
+	x.confLock.Unlock()
+
+	resp := map[string]any{"source": src.String()}
+	if src == tcpLoadSourceUnset {
+		return resp
+	}
+	resp["mass_kg"] = l.massKg
+	resp["center_of_gravity_mm"] = []float64{l.cogMM.X, l.cogMM.Y, l.cogMM.Z}
+	return resp
 }

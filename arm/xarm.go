@@ -67,6 +67,10 @@ const (
 	getFTSensorDataKey       = "get_ft_sensor_data"
 	ftSensorZeroKey          = "ft_sensor_zero"
 	ftSensorDataKey          = "ft_sensor_data"
+	setTCPLoadKey            = "set_tcp_load"
+	getTCPLoadKey            = "get_tcp_load"
+	setDefaultTCPLoadKey     = "set_default_tcp_load"
+	tcpLoadKey               = "tcp_load"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -982,6 +986,52 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if err := x.setFTSensorZero(ctx); err != nil {
 			return nil, err
 		}
+		validCommand = true
+	}
+
+	if val, ok := cmd[setTCPLoadKey]; ok {
+		params, ok := val.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a map with keys mass_kg and optionally center_of_gravity_mm; got %T",
+				setTCPLoadKey, val)
+		}
+		l, err := parseTCPLoadRequest(params)
+		if err != nil {
+			return nil, err
+		}
+		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceDoCommand, setTCPLoadKey); err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = x.tcpLoadResponse()
+		validCommand = true
+	}
+
+	// set_default_tcp_load is how gripper components offer their known payload.
+	// It is applied only when this module has written nothing yet, so it can
+	// never overwrite a config value or a runtime set_tcp_load.
+	if val, ok := cmd[setDefaultTCPLoadKey]; ok {
+		params, ok := val.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a map with keys mass_kg and optionally center_of_gravity_mm; got %T",
+				setDefaultTCPLoadKey, val)
+		}
+		l, err := parseTCPLoadRequest(params)
+		if err != nil {
+			return nil, err
+		}
+		requester := setDefaultTCPLoadKey
+		if r, ok := params["requester"].(string); ok && r != "" {
+			requester = r
+		}
+		if err := x.applyTCPLoad(ctx, l, tcpLoadSourceGripperDefault, requester); err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = x.tcpLoadResponse()
+		validCommand = true
+	}
+
+	if _, ok := cmd[getTCPLoadKey]; ok {
+		resp[tcpLoadKey] = x.tcpLoadResponse()
 		validCommand = true
 	}
 
