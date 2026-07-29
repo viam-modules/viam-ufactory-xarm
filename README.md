@@ -54,6 +54,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `3` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
+| `tcp_load` | object | Optional | — | Payload the arm is carrying, used by the controller for gravity compensation, collision detection, and manual mode. Example: `{"mass_kg": 0.82, "center_of_gravity_mm": [0, 0, 48]}`. `mass_kg` is required; the center of gravity is relative to the **flange center** and may be omitted, defaulting to the origin. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
 | `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. |
@@ -274,6 +275,76 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 
 > [!CAUTION]
 > Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
+
+### TCP Payload
+
+The controller uses the payload's mass and center of gravity to compute its dynamic model, which drives gravity compensation, collision detection, and manual mode. A payload that doesn't match what's actually attached causes false collision trips and drift in manual mode (see the caution above).
+
+Set a starting payload with the `tcp_load` attribute (see [Attributes](#attributes)):
+
+```json
+{
+  "tcp_load": {
+    "mass_kg": 0.82,
+    "center_of_gravity_mm": [0, 0, 48]
+  }
+}
+```
+
+`mass_kg` is required — even a zero payload must be written explicitly, since an omitted `mass_kg` is rejected as an error rather than defaulting to `0`. `center_of_gravity_mm` is `[x, y, z]` relative to the **flange center** and may be omitted, defaulting to the origin.
+
+As the arm picks up and sets down items, adjust the payload at runtime with `set_tcp_load`:
+
+```go
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "set_tcp_load": map[string]interface{}{
+        "mass_kg":              1.2,
+        "center_of_gravity_mm": []float64{0, 0, 60},
+    },
+})
+```
+
+Read back what this module last wrote with `get_tcp_load`:
+
+```go
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_tcp_load": true})
+// resp["tcp_load"] == map[string]interface{}{
+//     "source":               "do_command",
+//     "mass_kg":               1.2,
+//     "center_of_gravity_mm": []float64{0, 0, 60},
+//     "requester":            "set_tcp_load",
+// }
+```
+
+`source` reports where the current payload came from: `config` (the `tcp_load` attribute), `do_command` (a runtime `set_tcp_load`), `gripper_default` (pushed by an attached gripper, see below), or `unset` if nothing has been written yet — in which case the response is just `{"source": "unset"}` with no other fields. `requester` names whoever set it; both `set_tcp_load` and `set_default_tcp_load` accept an optional `requester` string, defaulting to the DoCommand key name if omitted.
+
+> [!NOTE]
+> `set_default_tcp_load` is also available directly rather than hidden, since it writes a payload to the controller like `set_tcp_load` does. It exists for gripper components to offer a known payload without overwriting one you set explicitly (see [Gripper Defaults](#gripper-defaults) below) — user code driving the arm should use `set_tcp_load`.
+
+#### Gripper Defaults
+
+Attaching a gripper component pushes a preset payload to its arm, using UFactory's published presets:
+
+| Gripper | Mass | Center of Gravity |
+|---------|------|--------------------|
+| `gripper` (standard two-finger) | 0.82 kg | `[0, 0, 48]` mm |
+| `vacuum_gripper` | 0.61 kg | `[0, 0, 53]` mm |
+| `gripper_lite` | — | not pushed (no published UFactory preset) |
+| `vacuum_gripper_lite` | — | not pushed (the xArm presets would exceed the Lite 6's 0.5 kg rated payload) |
+
+A gripper default only applies if nothing has set a payload yet (`source` is `unset`). Both a config `tcp_load` and a runtime `set_tcp_load` suppress it — the latter is what stops a gripper rebuild (e.g. changing `vacuum_length_mm`) from overwriting the payload of a workpiece being held mid-grasp. Only rebuilding the arm itself re-arms the defaults.
+
+#### Staleness and Persistence
+
+The controller has no register to read the payload back from, so `get_tcp_load` can only report what this module last wrote — not necessarily what the controller is currently using:
+
+- Changing the payload from UFactory Studio makes this module's cached value stale.
+- Rebuilding the arm resets the module's cache to `unset`, even though the controller still holds the previously-written payload in RAM until something overwrites it.
+
+The payload lives in the controller's RAM and is lost on a controller restart. This module never calls the controller's `save_conf`, so nothing written here survives a power cycle on its own — a `tcp_load` set in config is simply reapplied each time the arm is rebuilt; a payload set only via `set_tcp_load` or a gripper default is not saved anywhere and must be set again if it still applies after a restart or rebuild.
+
+> [!NOTE]
+> UFactory Studio pairs each payload preset with a TCP offset, but this module deliberately does not write one to the controller. Viam's frame system already owns the tool transform — writing the same offset to the controller too would double-count it in every motion plan. Configure your tool's geometry through the [frame system](#using-within-a-frame-system) instead.
 
 ## UFactory Studio Proxy
 
