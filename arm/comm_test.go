@@ -4,8 +4,11 @@ import (
 	"encoding/binary"
 	"math"
 	"testing"
+	"time"
 
+	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
@@ -27,6 +30,52 @@ func TestParseFTSensorData(t *testing.T) {
 
 	_, err = parseFTSensorData(make([]byte, 4))
 	test.That(t, err, test.ShouldNotBeNil)
+}
+
+func TestTrajectoryStreamValidator(t *testing.T) {
+	// point builds a trajectory point at time `d` with `dof` zeroed joint positions.
+	point := func(d time.Duration, dof int) arm.TrajectoryPoint {
+		return arm.TrajectoryPoint{Time: d, Positions: make([]referenceframe.Input, dof)}
+	}
+	// pointWithVel is `point` plus a declared `Velocities` entry on each joint.
+	pointWithVel := func(d time.Duration, dof int, vel float64) arm.TrajectoryPoint {
+		p := point(d, dof)
+		vels := make([]float64, dof)
+		for i := range vels {
+			vels[i] = vel
+		}
+		p.Constraints = &arm.KinematicConstraints{Velocities: vels}
+		return p
+	}
+
+	// The validator carries state across a stream, so each case feeds a whole sequence and asserts
+	// where, if anywhere, the first rejection lands. A `failAtIdx` of -1 means the sequence is valid.
+	for _, tc := range []struct {
+		name      string
+		points    []arm.TrajectoryPoint
+		failAtIdx int
+	}{
+		{"valid increasing stream", []arm.TrajectoryPoint{point(0, 6), point(10*time.Millisecond, 6), point(20*time.Millisecond, 6)}, -1},
+		{"first point must be t=0", []arm.TrajectoryPoint{point(5*time.Millisecond, 6)}, 0},
+		{"time must strictly increase", []arm.TrajectoryPoint{point(0, 6), point(10*time.Millisecond, 6), point(10*time.Millisecond, 6)}, 2},
+		{"time may not move backwards", []arm.TrajectoryPoint{point(0, 6), point(10*time.Millisecond, 6), point(5*time.Millisecond, 6)}, 2},
+		{"dof must stay consistent", []arm.TrajectoryPoint{point(0, 6), point(10*time.Millisecond, 7)}, 1},
+		{"positions must be non-empty", []arm.TrajectoryPoint{point(0, 0)}, 0},
+		{"first point must be at rest", []arm.TrajectoryPoint{pointWithVel(0, 6, 0.5)}, 0},
+		{"first point at rest with zero velocity is fine", []arm.TrajectoryPoint{pointWithVel(0, 6, 0), pointWithVel(10*time.Millisecond, 6, 0.5)}, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := newTrajectoryStreamValidator()
+			firstErrIdx := -1
+			for i, pt := range tc.points {
+				if err := v.validate(pt); err != nil {
+					firstErrIdx = i
+					break
+				}
+			}
+			test.That(t, firstErrIdx, test.ShouldEqual, tc.failAtIdx)
+		})
+	}
 }
 
 func TestCreateRawJointSteps1(t *testing.T) {

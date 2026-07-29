@@ -5,7 +5,8 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  pull_request_target:
+  # plain pull_request: fork runs get no secrets and a read-only token
+  pull_request:
     branches: [ 'main' ]
     
 jobs:
