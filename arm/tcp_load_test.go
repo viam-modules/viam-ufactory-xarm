@@ -25,6 +25,8 @@ func TestValidateTCPLoad(t *testing.T) {
 		{"Inf mass", tcpLoad{massKg: math.Inf(1)}, true},
 		{"NaN in cog", tcpLoad{massKg: 1, cogMM: r3.Vector{X: math.NaN()}}, true},
 		{"Inf in cog", tcpLoad{massKg: 1, cogMM: r3.Vector{Z: math.Inf(-1)}}, true},
+		{"mass beyond float32 range", tcpLoad{massKg: 3.5e38}, true},
+		{"cog beyond float32 range", tcpLoad{massKg: 1, cogMM: r3.Vector{Y: -3.5e38}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.load.validate()
@@ -63,6 +65,14 @@ func TestFirmwareUsesMillimeters(t *testing.T) {
 	}
 }
 
+func TestSetTCPLoadOpcode(t *testing.T) {
+	// Pins the opcode transcribed from the external SDK. regMap already has a
+	// legitimate duplicate (SetBound/EnableBound both 0x34), so a typo here
+	// (e.g. to 0x25) would silently alias Sensitivity and misdirect the wire
+	// payload instead of failing loudly.
+	test.That(t, regMap["SetTCPLoad"], test.ShouldEqual, byte(0x24))
+}
+
 func TestEncodeTCPLoad(t *testing.T) {
 	l := tcpLoad{massKg: 0.82, cogMM: r3.Vector{X: 1, Y: 2, Z: 48}}
 
@@ -76,6 +86,7 @@ func TestEncodeTCPLoad(t *testing.T) {
 
 	// Legacy firmware: center of gravity converted to meters, mass untouched.
 	got = encodeTCPLoad(l, false)
+	test.That(t, len(got), test.ShouldEqual, 16)
 	for i, want := range []float64{0.82, 0.001, 0.002, 0.048} {
 		f := rutils.Float32FromBytesLE(got[i*4 : i*4+4])
 		test.That(t, float64(f), test.ShouldAlmostEqual, want, 1e-7)
@@ -125,16 +136,18 @@ func TestGripperDefaultTCPLoad(t *testing.T) {
 			got, ok := gripperDefaultTCPLoad(tc.model)
 			test.That(t, ok, test.ShouldEqual, tc.ok)
 			if tc.ok {
-				test.That(t, got.massKg, test.ShouldAlmostEqual, tc.want.massKg, 1e-9)
-				test.That(t, got.cogMM.Z, test.ShouldAlmostEqual, tc.want.cogMM.Z, 1e-9)
+				test.That(t, got, test.ShouldResemble, tc.want)
 			}
 		})
 	}
 }
 
-// Guards the invariant that makes the lite skip safe: no default may exceed the
-// smallest rated payload it could ever be applied to without being caught.
-func TestGripperDefaultsAreFinite(t *testing.T) {
+// Checks that the published gripper presets pass tcpLoad.validate() (finite,
+// non-negative mass). It does NOT check them against any arm's rated payload —
+// both presets (0.82, 0.61) in fact exceed the Lite6's 0.5 kg rating, which is
+// exactly why gripperDefaultTCPLoad refuses to return a default for the Lite
+// variants, and why Task 6 adds a separate rating-refusal check.
+func TestGripperDefaultsValidate(t *testing.T) {
 	for _, m := range []resource.Model{GripperModel, VacuumGripperModel} {
 		l, ok := gripperDefaultTCPLoad(m)
 		test.That(t, ok, test.ShouldBeTrue)

@@ -174,13 +174,14 @@ type xArm struct {
 
 	// tcpLoad caches the payload this module last wrote to the controller, and
 	// where it came from. The controller has no register to read the payload
-	// back, so this cache is the only answer get_tcp_load can give.
+	// back, so this cache is the only answer get_tcp_load can give. Guarded by
+	// confLock, same as speed/acceleration above.
 	//
 	// Unused until the apply path lands in a later task; see setTCPLoad in
 	// tcp_load.go for the same note.
 	tcpLoad          tcpLoad       //nolint:unused
 	tcpLoadSource    tcpLoadSource //nolint:unused
-	tcpLoadRequester string        // who set it, for suppression and conflict logging //nolint:unused
+	tcpLoadRequester string        //nolint:unused // who set it, for suppression and conflict logging
 }
 
 func init() {

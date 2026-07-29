@@ -38,12 +38,18 @@ func (l tcpLoad) validate() error {
 	if l.massKg < 0 {
 		return fmt.Errorf("tcp load mass cannot be negative, got %v", l.massKg)
 	}
+	if math.IsInf(float64(float32(l.massKg)), 0) {
+		return fmt.Errorf("tcp load mass is not representable as float32, got %v", l.massKg)
+	}
 	for _, c := range []struct {
 		name string
 		v    float64
 	}{{"x", l.cogMM.X}, {"y", l.cogMM.Y}, {"z", l.cogMM.Z}} {
 		if math.IsNaN(c.v) || math.IsInf(c.v, 0) {
 			return fmt.Errorf("tcp load center of gravity %s must be a finite number, got %v", c.name, c.v)
+		}
+		if math.IsInf(float64(float32(c.v)), 0) {
+			return fmt.Errorf("tcp load center of gravity %s is not representable as float32, got %v", c.name, c.v)
 		}
 	}
 	return nil
@@ -91,11 +97,9 @@ func encodeTCPLoad(l tcpLoad, useMM bool) []byte {
 	if !useMM {
 		scale = 0.001
 	}
-	out := make([]byte, 0, 16)
-	for _, v := range []float64{l.massKg, l.cogMM.X * scale, l.cogMM.Y * scale, l.cogMM.Z * scale} {
-		b := make([]byte, 4)
-		binary.LittleEndian.PutUint32(b, math.Float32bits(float32(v)))
-		out = append(out, b...)
+	out := make([]byte, 16)
+	for i, v := range [...]float64{l.massKg, l.cogMM.X * scale, l.cogMM.Y * scale, l.cogMM.Z * scale} {
+		binary.LittleEndian.PutUint32(out[i*4:], math.Float32bits(float32(v)))
 	}
 	return out
 }
@@ -172,7 +176,7 @@ func (s tcpLoadSource) String() string {
 	case tcpLoadSourceUnset:
 		return "unset"
 	default:
-		return "unset"
+		return fmt.Sprintf("unknown(%d)", int(s))
 	}
 }
 
