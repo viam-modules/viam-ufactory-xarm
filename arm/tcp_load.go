@@ -108,6 +108,35 @@ func encodeTCPLoad(l tcpLoad, useMM bool) []byte {
 	return out
 }
 
+// hardwareModelFromConfiguredModelName maps a config-derived modelName (the
+// modelName parameter NewXArm is called with, e.g. ModelNameLite) to the
+// corresponding hardwareModel. It exists as a fallback rating-check model for
+// when hardware detection fails: x.detectArm's error path never assigns
+// x.detectedArm (see NewXArm), leaving detectedArm.model at hardwareModel's
+// zero value "" — which is NOT hardwareModelUnknown, matches no case in
+// ratedPayloadKg, and would otherwise let exceedsRating pass every payload
+// unchecked.
+//
+// Unlike a hardware probe, config.Model cannot fail to be known, so this
+// mapping is a signal that cannot fail for any resource actually constructed
+// through this module's registered models. There is no hardwareModelXArm5
+// config option (xArm5 is reachable only via hardware detection), so that
+// case falls to hardwareModelUnknown here, same as any unrecognized name.
+func hardwareModelFromConfiguredModelName(modelName string) hardwareModel {
+	switch modelName {
+	case ModelName6DOF:
+		return hardwareModelXArm6
+	case ModelName7DOF:
+		return hardwareModelXArm7
+	case ModelNameLite:
+		return hardwareModelLite6
+	case ModelName850:
+		return hardwareModelXArm850
+	default:
+		return hardwareModelUnknown
+	}
+}
+
 // ratedPayloadKg returns the manufacturer's rated payload for a model. The
 // second return is false when the model is unknown, in which case no rating
 // check can be made.
@@ -262,12 +291,22 @@ func shouldApplyTCPLoad(current, incoming tcpLoadSource) bool {
 	return true
 }
 
+// buildSetTCPLoadCmd constructs the SET_LOAD_PARAM command for a payload,
+// without touching the wire: it selects the opcode, decides the
+// firmware-gated unit via firmwareUsesMillimeters, and encodes the 16-byte
+// payload. Extracted from setTCPLoad purely so this — the only code in the
+// feature that touches the wire — can be pinned by a test without a
+// controller connection; see TestBuildSetTCPLoadCmd.
+func (x *xArm) buildSetTCPLoadCmd(l tcpLoad) cmd {
+	c := x.newCmd(regMap["SetTCPLoad"])
+	c.params = append(c.params, encodeTCPLoad(l, firmwareUsesMillimeters(x.detectedArm.firmwareVersion))...)
+	return c
+}
+
 // setTCPLoad writes the payload to the controller. It does not validate, check
 // the arm's rating, or update the cache — callers own that policy.
 func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
-	c := x.newCmd(regMap["SetTCPLoad"])
-	c.params = append(c.params, encodeTCPLoad(l, firmwareUsesMillimeters(x.detectedArm.firmwareVersion))...)
-	_, err := x.send(ctx, c, true)
+	_, err := x.send(ctx, x.buildSetTCPLoadCmd(l), true)
 	return err
 }
 
@@ -359,11 +398,50 @@ func (x *xArm) applyTCPLoadWith(
 	current, currentRequester, currentMassKg := x.tcpLoadSource, x.tcpLoadRequester, x.tcpLoad.massKg
 	x.confLock.Unlock()
 
+	// A config-sourced tcp_load may have been requested but failed to write
+	// (see the exception documented above the applyConfigTCPLoad call in
+	// NewXArm: a failed write is downgraded to a warning when the arm never
+	// started, so construction can continue). applyTCPLoadWith only caches a
+	// payload after a successful write, so `current` is still
+	// tcpLoadSourceUnset in that case — indistinguishable, from the cache
+	// alone, from "nothing was ever requested". Checked here, ahead of
+	// decideTCPLoad, rather than folded into shouldApplyTCPLoad: that function
+	// is a pure decision over the two *sources* it is given and is tested
+	// exhaustively as such, whereas this is arm-instance state (was a write
+	// ever requested at all) that has no source value of its own to compare
+	// against. Gating it here also means a successful config write is
+	// unaffected — `current` becomes tcpLoadSourceConfig and the normal
+	// precedence path below reports the correct "already set by config"
+	// suppression instead of this one.
+	if src == tcpLoadSourceGripperDefault && current == tcpLoadSourceUnset && x.tcpLoadConfigRequested {
+		x.logger.Warnf(
+			"tcp load default from %q (%.3f kg) not applied: this arm's config requested a tcp_load "+
+				"that failed to write, so a gripper default must not silently take its place; "+
+				"clear the arm's error state and reconfigure to retry the configured tcp_load",
+			requester, l.massKg,
+		)
+		return nil
+	}
+
 	// detectedArm is written exactly once, during construction, before the arm
 	// is published (see the field comment in xarm.go), so reading it here
 	// without confLock is safe. Captured once since the value is used below in
 	// more than one place.
 	model := x.detectedArm.model
+	if model == hardwareModelUnknown || model == "" {
+		// Hardware detection failed (or never ran) and left detectedArm.model
+		// at the zero value. Fall back to the model implied by config, which
+		// cannot fail to be known — see hardwareModelFromConfiguredModelName.
+		// This closes the gap where a plain `gripper`/`vacuum_gripper`
+		// component (not the *_lite variant, so gripperDefaultTCPLoad's
+		// config.Model keying does not catch it) configured against a Lite6
+		// whose detection failed would otherwise reach decideTCPLoad with
+		// model == "", match no case in ratedPayloadKg, and be applied with no
+		// rating check at all.
+		if fallback := hardwareModelFromConfiguredModelName(x.configuredModelName); fallback != hardwareModelUnknown {
+			model = fallback
+		}
+	}
 
 	switch d := decideTCPLoad(l, src, current, model); d.action {
 	case tcpLoadActionSuppress:
@@ -542,13 +620,23 @@ func pushGripperDefaultTCPLoad(ctx context.Context, a arm.Arm, model resource.Mo
 	if !ok {
 		return
 	}
-	if _, err := a.DoCommand(ctx, map[string]any{
+	resp, err := a.DoCommand(ctx, map[string]any{
 		setDefaultTCPLoadKey: map[string]any{
 			"mass_kg":              l.massKg,
 			"center_of_gravity_mm": []any{l.cogMM.X, l.cogMM.Y, l.cogMM.Z},
 			"requester":            model.String(),
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		logger.Warnf("could not apply default tcp load for %s: %v", model, err)
+		return
+	}
+	// Log the resolved state so the caller can tell whether its default was
+	// accepted or suppressed (e.g. by a config tcp_load, a runtime
+	// set_tcp_load, or another gripper's default that got there first) — the
+	// arm-side decision is otherwise invisible from here, since a suppressed
+	// default is not an error.
+	if resolved, ok := resp[tcpLoadKey]; ok {
+		logger.Debugf("tcp load default push for %s resolved to: %v", model, resolved)
 	}
 }

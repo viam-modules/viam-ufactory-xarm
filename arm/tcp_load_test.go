@@ -80,6 +80,11 @@ func TestFirmwareUsesMillimeters(t *testing.T) {
 		{"garbage", true}, // unparseable defaults to mm
 		{"2.5", true},     // malformed defaults to mm
 		{"-1.0.0", true},  // negative component defaults to mm
+		// Whitespace around a component must be trimmed before parsing, not
+		// left to fail Atoi and fall through to the "unparseable" default of
+		// true. Without strings.TrimSpace, " 1" fails to parse and this case
+		// would incorrectly return true instead of false.
+		{"0. 1.9", false},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.version), func(t *testing.T) {
 			test.That(t, firmwareUsesMillimeters(tc.version), test.ShouldEqual, tc.want)
@@ -87,12 +92,57 @@ func TestFirmwareUsesMillimeters(t *testing.T) {
 	}
 }
 
+// TestSetTCPLoadOpcode pins only the regMap constant transcribed from the
+// external SDK, so a typo there (e.g. to 0x25, aliasing Sensitivity) fails
+// loudly. It does NOT observe setTCPLoad's (or buildSetTCPLoadCmd's) use of
+// this map: an assertion of regMap["SetTCPLoad"] against a literal never
+// changes if the call site is edited to read a different map key entirely
+// (e.g. regMap["SetBound"]). That call-site guard is TestBuildSetTCPLoadCmd
+// below, which asserts the opcode actually placed on a constructed cmd.
 func TestSetTCPLoadOpcode(t *testing.T) {
-	// Pins the opcode transcribed from the external SDK. regMap already has a
-	// legitimate duplicate (SetBound/EnableBound both 0x34), so a typo here
-	// (e.g. to 0x25) would silently alias Sensitivity and misdirect the wire
-	// payload instead of failing loudly.
 	test.That(t, regMap["SetTCPLoad"], test.ShouldEqual, byte(0x24))
+}
+
+// TestBuildSetTCPLoadCmd exercises setTCPLoad's command construction — the
+// only code in this feature that touches the wire — via the extracted pure
+// builder, without a controller connection. It pins three things a mutation
+// test found unpinned by the rest of the suite:
+//
+//   - the opcode actually placed on the constructed cmd (not just the regMap
+//     constant in isolation, see TestSetTCPLoadOpcode above);
+//   - that buildSetTCPLoadCmd's firmware argument really is
+//     firmwareUsesMillimeters(x.detectedArm.firmwareVersion), by checking the
+//     legacy-firmware case is scaled to meters rather than passed through as
+//     mm (a call site hardcoding `true` would pass the modern-firmware case
+//     here but fail the legacy one); and
+//   - the 16 payload bytes for a known detectedArm.
+func TestBuildSetTCPLoadCmd(t *testing.T) {
+	l := tcpLoad{massKg: 0.82, cogMM: r3.Vector{X: 1, Y: 2, Z: 48}}
+
+	for _, tc := range []struct {
+		name       string
+		firmware   string
+		wantValues []float64 // mass, cx, cy, cz as actually placed on the wire
+	}{
+		{"modern firmware: mm passed through", "2.5.0", []float64{0.82, 1, 2, 48}},
+		{"legacy firmware: cog scaled to meters", "0.1.9", []float64{0.82, 0.001, 0.002, 0.048}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := &xArm{
+				logger:      logging.NewTestLogger(t),
+				cmdConn:     newModbusConn("unused", logging.NewTestLogger(t), nil),
+				detectedArm: detectedArm{firmwareVersion: tc.firmware},
+			}
+			c := x.buildSetTCPLoadCmd(l)
+
+			test.That(t, c.reg, test.ShouldEqual, byte(0x24))
+			test.That(t, len(c.params), test.ShouldEqual, 16)
+			for i, want := range tc.wantValues {
+				f := rutils.Float32FromBytesLE(c.params[i*4 : i*4+4])
+				test.That(t, float64(f), test.ShouldAlmostEqual, want, 1e-7)
+			}
+		})
+	}
 }
 
 func TestEncodeTCPLoad(t *testing.T) {
@@ -139,6 +189,30 @@ func TestRatedPayloadKg(t *testing.T) {
 			if tc.ok {
 				test.That(t, got, test.ShouldAlmostEqual, tc.want, 1e-9)
 			}
+		})
+	}
+}
+
+// TestHardwareModelFromConfiguredModelName pins the mapping applyTCPLoadWith
+// falls back to when hardware detection fails and leaves detectedArm.model at
+// its zero value (see TestApplyTCPLoadFallsBackToConfiguredModelWhenDetectionFailed).
+// There is no hardwareModelXArm5 config option — xArm5 is reachable only via
+// hardware detection — so any name outside the four registered models must
+// land on hardwareModelUnknown, same as an empty or garbage name.
+func TestHardwareModelFromConfiguredModelName(t *testing.T) {
+	for _, tc := range []struct {
+		modelName string
+		want      hardwareModel
+	}{
+		{ModelName6DOF, hardwareModelXArm6},
+		{ModelName7DOF, hardwareModelXArm7},
+		{ModelNameLite, hardwareModelLite6},
+		{ModelName850, hardwareModelXArm850},
+		{"", hardwareModelUnknown},
+		{"bogus", hardwareModelUnknown},
+	} {
+		t.Run(tc.modelName, func(t *testing.T) {
+			test.That(t, hardwareModelFromConfiguredModelName(tc.modelName), test.ShouldEqual, tc.want)
 		})
 	}
 }
@@ -387,6 +461,91 @@ func TestApplyTCPLoadAppliesOverRatingExplicitWrite(t *testing.T) {
 	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 0.61, 1e-9)
 }
 
+// TestApplyTCPLoadSuppressesGripperDefaultAfterFailedConfigWrite is the
+// regression test for the bug where a failed config write let a gripper
+// default silently supersede a user's explicit tcp_load: NewXArm downgrades a
+// config-write failure to a warning when the arm never started (see the
+// comment above the applyConfigTCPLoad call), but applyTCPLoadWith only
+// caches a payload after a successful write, so tcpLoadSource stayed unset —
+// indistinguishable from "nothing was ever requested" — and a gripper
+// constructed afterward would push its default straight through.
+//
+// x.tcpLoadConfigRequested = true with the cache left at its zero value
+// reproduces exactly that post-failed-write state (see the field comment on
+// tcpLoadConfigRequested and NewXArm's use of it). Before the fix this test
+// fails: wrote becomes true and tcpLoadSource ends up
+// tcpLoadSourceGripperDefault.
+func TestApplyTCPLoadSuppressesGripperDefaultAfterFailedConfigWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.tcpLoadConfigRequested = true // config asked for a tcp_load; its write failed, cache is still unset
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.82, cogMM: r3.Vector{Z: 48}},
+		tcpLoadSourceGripperDefault, "gripper",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
+}
+
+// TestApplyTCPLoadConfigRequestedDoesNotBlockAfterSuccessfulWrite is the
+// companion to the failed-write test above: once a config write actually
+// succeeds, the cache itself (tcpLoadSourceConfig, via ordinary precedence in
+// decideTCPLoad) is what suppresses a later gripper default — not the
+// tcpLoadConfigRequested guard, which only fires while the cache is still
+// unset. This guards against the fix over-triggering and permanently
+// disabling gripper defaults for any arm with a tcp_load in its config,
+// success or not.
+func TestApplyTCPLoadConfigRequestedDoesNotBlockAfterSuccessfulWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.tcpLoadConfigRequested = true
+	x.tcpLoad = tcpLoad{massKg: 1.5}
+	x.tcpLoadSource = tcpLoadSourceConfig
+	x.tcpLoadRequester = "config"
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.82},
+		tcpLoadSourceGripperDefault, "gripper",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceConfig)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.5, 1e-9)
+}
+
+// TestApplyTCPLoadFallsBackToConfiguredModelWhenDetectionFailed is the
+// regression test for the Lite6 rating guard failing open when hardware
+// detection fails: x.detectArm's error path never assigns x.detectedArm
+// (NewXArm only logs a warning), leaving detectedArm.model at hardwareModel's
+// zero value "" — which matches no case in ratedPayloadKg, so exceedsRating
+// returned false unconditionally and any mass passed unchecked. Nothing in
+// GripperConfig.Validate ties the plain `gripper`/`vacuum_gripper` component
+// (as opposed to the *_lite variants, which gripperDefaultTCPLoad's
+// config.Model keying already refuses) to a particular arm model, so this was
+// reachable by simply configuring a non-lite gripper against a Lite6 whose
+// detection happened to fail.
+//
+// x.configuredModelName is set (from config, which cannot fail to be known)
+// while x.detectedArm is left at its zero value, reproducing exactly that
+// state. Before the fix this test fails: wrote becomes true and the
+// GripperModel preset (0.82 kg) reaches a "rated" 0.5 kg Lite6 unchecked.
+func TestApplyTCPLoadFallsBackToConfiguredModelWhenDetectionFailed(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.configuredModelName = ModelNameLite
+	// x.detectedArm intentionally left at its zero value.
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.82, cogMM: r3.Vector{Z: 48}},
+		tcpLoadSourceGripperDefault, "gripper",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
+}
+
 // TestApplyTCPLoadIsAtomicAgainstConcurrentApply drives a deterministic
 // interleaving of a gripper-default apply and a concurrent explicit apply
 // through the injected-writer seam, rather than hoping a race turns up.
@@ -430,7 +589,12 @@ func TestApplyTCPLoadIsAtomicAgainstConcurrentApply(t *testing.T) {
 				writesMu.Unlock()
 				return nil
 			})
-		test.That(t, err, test.ShouldBeNil)
+		// test.That routes failures to tb.Fatal (FailNow/runtime.Goexit), which
+		// is documented as not allowed from a non-test goroutine; t.Errorf is
+		// goroutine-safe and still fails the test.
+		if err != nil {
+			t.Errorf("gripper apply: %v", err)
+		}
 	}()
 
 	select {
@@ -453,7 +617,10 @@ func TestApplyTCPLoadIsAtomicAgainstConcurrentApply(t *testing.T) {
 				writesMu.Unlock()
 				return nil
 			})
-		test.That(t, err, test.ShouldBeNil)
+		// Same goroutine-safety reasoning as the gripper goroutine above.
+		if err != nil {
+			t.Errorf("explicit apply: %v", err)
+		}
 	}()
 
 	close(release)

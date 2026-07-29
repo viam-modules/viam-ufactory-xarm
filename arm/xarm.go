@@ -179,6 +179,34 @@ type xArm struct {
 	// a second writer.
 	detectedArm detectedArm
 
+	// configuredModelName is the config-derived modelName NewXArm was called
+	// with (e.g. ModelNameLite). Unlike detectedArm.model, it cannot fail to be
+	// populated: it comes from the resource.Model the user configured, not a
+	// hardware probe. Written once, before publish, same as detectedArm — safe
+	// to read without confLock.
+	//
+	// Used as a fallback rating-check model when hardware detection fails
+	// (detectArm's error path never assigns detectedArm, leaving its model at
+	// the zero value "", which matches no case in ratedPayloadKg and would
+	// otherwise let exceedsRating pass everything unchecked). See
+	// hardwareModelFromConfiguredModelName.
+	configuredModelName string
+
+	// tcpLoadConfigRequested records that this arm's config asked for a
+	// tcp_load, independent of whether the write to the controller actually
+	// succeeded. Written once, in NewXArm before publish, and never changes
+	// afterward — same safe-to-read-without-confLock reasoning as detectedArm.
+	//
+	// applyTCPLoadWith only caches a payload after a successful write (see its
+	// comment), so a write that fails (e.g. because the arm never started)
+	// leaves tcpLoadSource at tcpLoadSourceUnset. Without this flag, a gripper
+	// constructed afterward would see "unset" and push its default, silently
+	// superseding the user's explicit — but failed — config write. This is
+	// deliberately NOT folded into the tcpLoad cache itself: the design's rule
+	// that "a failed write leaves the cache untouched" (so get_tcp_load never
+	// reports a value the controller refused) must survive.
+	tcpLoadConfigRequested bool
+
 	// tcpLoad caches the payload this module last wrote to the controller, and
 	// where it came from. The controller has no register to read the payload
 	// back, so this cache is the only answer get_tcp_load can give. Guarded by
@@ -426,6 +454,8 @@ func NewXArm(ctx context.Context, name resource.Name,
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
+
+		configuredModelName: modelName,
 	}
 	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
@@ -559,6 +589,14 @@ func NewXArm(ctx context.Context, name resource.Name,
 	// told the user to use. A config instruction cannot be honored on a
 	// non-operational arm anyway, so warn and continue instead of failing
 	// construction.
+	// Set before the write is attempted, not after it succeeds: this is what
+	// lets a gripper constructed later tell "config asked for a tcp_load"
+	// apart from "nothing was ever requested", even when the write below fails
+	// and the cache stays unset. See the field comment on
+	// tcpLoadConfigRequested.
+	if newConf.TCPLoad != nil {
+		x.tcpLoadConfigRequested = true
+	}
 	if err := applyConfigTCPLoad(ctx, newConf.TCPLoad, x.applyTCPLoad); err != nil {
 		wrapped := fmt.Errorf("applying tcp_load from config: %w", err)
 		if startErr != nil {
