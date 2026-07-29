@@ -170,6 +170,9 @@ type xArm struct {
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
 
+	// detectedArm is written exactly once, inside NewXArm, before the arm is
+	// published to callers. It is safe to read without confLock: there is never
+	// a second writer.
 	detectedArm detectedArm
 
 	// tcpLoad caches the payload this module last wrote to the controller, and
@@ -179,6 +182,14 @@ type xArm struct {
 	tcpLoad          tcpLoad
 	tcpLoadSource    tcpLoadSource
 	tcpLoadRequester string // who set it, for suppression and conflict logging
+
+	// tcpLoadApplyLock serializes whole payload applies. confLock protects the
+	// cache fields; this one makes decide→write→cache atomic against a
+	// concurrent applier, so a gripper default cannot be admitted on a stale
+	// `current` and then land after an explicit write. Held across the
+	// controller write by design; only ever contended by payload writes, which
+	// are rare.
+	tcpLoadApplyLock sync.Mutex
 }
 
 func init() {

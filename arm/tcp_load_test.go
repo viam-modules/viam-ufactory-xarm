@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/test"
@@ -109,6 +111,10 @@ func TestRatedPayloadKg(t *testing.T) {
 		{hardwareModelXArm6, 5.0, true},
 		{hardwareModelXArm850, 5.0, true},
 		{hardwareModelUnknown, 0, false},
+		// "" is the actual value x.detectedArm.model holds when detectArm fails
+		// (xarm.go discards the returned detectedArm on error); hardwareModelUnknown
+		// is never reached on that path. Both must land on ratedPayloadKg's default.
+		{hardwareModel(""), 0, false},
 	} {
 		t.Run(string(tc.model), func(t *testing.T) {
 			got, ok := ratedPayloadKg(tc.model)
@@ -272,5 +278,137 @@ func TestApplyTCPLoadSuppressedDefaultDoesNotWrite(t *testing.T) {
 	// held payload must survive: this is the mid-grasp overwrite case.
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
+}
+
+func TestApplyTCPLoadRefusesOverRatingDefault(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.detectedArm = detectedArm{model: hardwareModelLite6}
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.61},
+		tcpLoadSourceGripperDefault, "vacuum_gripper",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	// Refusal must not fail the gripper's construction, must not reach the
+	// controller, and must not be cached.
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
+}
+
+func TestApplyTCPLoadAppliesOverRatingExplicitWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.detectedArm = detectedArm{model: hardwareModelLite6}
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.61},
+		tcpLoadSourceDoCommand, "set_tcp_load",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	// The mirror of the refusal test above: the very same over-rating mass
+	// reaches the controller and is cached when it arrives as an explicit
+	// write rather than a pushed default — decideTCPLoad only warns, it never
+	// blocks. This pins the asymmetry where it actually matters.
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeTrue)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceDoCommand)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 0.61, 1e-9)
+}
+
+// TestApplyTCPLoadIsAtomicAgainstConcurrentApply drives a deterministic
+// interleaving of a gripper-default apply and a concurrent explicit apply
+// through the injected-writer seam, rather than hoping a race turns up.
+//
+// The gripper's write callback parks on a channel so the test can hold it
+// mid-apply — inside the critical section if tcpLoadApplyLock is held across
+// the write, as it must be — while the explicit apply is launched. If the two
+// applies are not serialized, the explicit apply's read of `current` can land
+// while the gripper's is still in flight, both decide Apply, and whichever
+// write reaches the controller last "wins" independent of cache order —
+// exactly the mid-grasp corruption in the plan's motivating example. With
+// serialization, the explicit apply cannot even start until the gripper's
+// entire decide-write-cache sequence has completed, so it always sees the
+// gripper's result as `current` and, per shouldApplyTCPLoad, still applies
+// (explicit writes always do) — landing strictly after, in both the
+// controller writes and the cache.
+func TestApplyTCPLoadIsAtomicAgainstConcurrentApply(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.detectedArm = detectedArm{model: hardwareModelXArm6}
+
+	var writesMu sync.Mutex
+	var writes []float64
+
+	gripperEntered := make(chan struct{})
+	release := make(chan struct{})
+	gripperDone := make(chan struct{})
+	userDone := make(chan struct{})
+
+	go func() {
+		defer close(gripperDone)
+		err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.61},
+			tcpLoadSourceGripperDefault, "vacuum_gripper",
+			func(context.Context, tcpLoad) error {
+				close(gripperEntered)
+				<-release
+				// Widen the window a broken (unsynchronized) implementation would need
+				// to let the concurrent explicit write interleave ahead of this one.
+				time.Sleep(5 * time.Millisecond)
+				writesMu.Lock()
+				writes = append(writes, 0.61)
+				writesMu.Unlock()
+				return nil
+			})
+		test.That(t, err, test.ShouldBeNil)
+	}()
+
+	select {
+	case <-gripperEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gripper goroutine never entered its write callback")
+	}
+
+	// Launched while the gripper's apply is still in flight (parked in its
+	// write callback). If tcpLoadApplyLock serializes applies, this call
+	// cannot proceed past Lock() until the gripper's entire apply — including
+	// its cache update — has completed.
+	go func() {
+		defer close(userDone)
+		err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 1.2},
+			tcpLoadSourceDoCommand, "set_tcp_load",
+			func(context.Context, tcpLoad) error {
+				writesMu.Lock()
+				writes = append(writes, 1.2)
+				writesMu.Unlock()
+				return nil
+			})
+		test.That(t, err, test.ShouldBeNil)
+	}()
+
+	close(release)
+
+	select {
+	case <-gripperDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gripper goroutine never finished")
+	}
+	select {
+	case <-userDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("user goroutine never finished")
+	}
+
+	writesMu.Lock()
+	gotWrites := append([]float64(nil), writes...)
+	writesMu.Unlock()
+
+	// The explicit write must land last, both on the controller and in the
+	// cache: they must agree, and the value must be the one a human actually
+	// typed, not the stale default that raced in behind it.
+	test.That(t, gotWrites, test.ShouldResemble, []float64{0.61, 1.2})
+
+	x.confLock.Lock()
+	defer x.confLock.Unlock()
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceDoCommand)
 	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
 }

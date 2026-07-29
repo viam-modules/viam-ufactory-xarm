@@ -262,13 +262,25 @@ func decideTCPLoad(l tcpLoad, incoming, current tcpLoadSource, model hardwareMod
 // controller, and updates the cache. It is the single entry point for every
 // payload write; nothing else should call setTCPLoad directly.
 //
-// Caller must NOT hold confLock.
+// See applyTCPLoadWith for the locking contract.
 func (x *xArm) applyTCPLoad(ctx context.Context, l tcpLoad, src tcpLoadSource, requester string) error {
 	return x.applyTCPLoadWith(ctx, l, src, requester, x.setTCPLoad)
 }
 
 // applyTCPLoadWith is applyTCPLoad with the controller write injected, so the
 // policy and caching behavior can be tested without a socket.
+//
+// Locking contract: caller must NOT hold confLock. This method takes
+// tcpLoadApplyLock for its entire body, including across the controller
+// write, and releases it on return. That makes the decide→write→cache
+// sequence atomic against a second, concurrent applier: without it, two
+// callers can both read the same stale `current`, both decide Apply, and
+// interleave their writes so the cache ends up disagreeing with whichever
+// write actually reached the controller last. There is no read-back
+// register, so that disagreement would be silent and permanent — the exact
+// mid-grasp corruption the precedence rule in shouldApplyTCPLoad exists to
+// prevent. Only payload writes ever contend on this lock, and they are rare,
+// so holding it across the (Modbus) write is an acceptable cost.
 func (x *xArm) applyTCPLoadWith(
 	ctx context.Context,
 	l tcpLoad,
@@ -280,41 +292,65 @@ func (x *xArm) applyTCPLoadWith(
 		return err
 	}
 
+	x.tcpLoadApplyLock.Lock()
+	defer x.tcpLoadApplyLock.Unlock()
+
 	x.confLock.Lock()
-	current, currentRequester := x.tcpLoadSource, x.tcpLoadRequester
+	current, currentRequester, currentMassKg := x.tcpLoadSource, x.tcpLoadRequester, x.tcpLoad.massKg
 	x.confLock.Unlock()
 
-	switch d := decideTCPLoad(l, src, current, x.detectedArm.model); d.action {
+	// detectedArm is written exactly once, during construction, before the arm
+	// is published (see the field comment in xarm.go), so reading it here
+	// without confLock is safe. Captured once since the value is used below in
+	// more than one place.
+	model := x.detectedArm.model
+
+	switch d := decideTCPLoad(l, src, current, model); d.action {
 	case tcpLoadActionSuppress:
 		// Two gripper components on one arm is a config the user should fix, and
-		// which one wins depends on non-deterministic construction order — so warn
-		// and name both. Any other suppression is the rule working as intended.
+		// which one wins depends on non-deterministic construction order — so warn,
+		// name both, and report the mass currently in effect. Any other suppression
+		// is the rule working as intended.
 		if current == tcpLoadSourceGripperDefault {
 			x.logger.Warnf(
-				"tcp load default from %q ignored: %q already set a gripper default; "+
+				"tcp load default from %q (%.3f kg) ignored: %q already set a gripper default of %.3f kg; "+
 					"two grippers on one arm is ambiguous, set tcp_load on the arm to be explicit",
-				requester, currentRequester,
+				requester, l.massKg, currentRequester, currentMassKg,
 			)
 		} else {
 			x.logger.Infof(
-				"tcp load default from %q (%.3f kg) not applied: payload already set by %q (source: %s)",
-				requester, l.massKg, currentRequester, current,
+				"tcp load default from %q (%.3f kg, cog [%.2f %.2f %.2f] mm) not applied: "+
+					"payload already set by %q (source: %s)",
+				requester, l.massKg, l.cogMM.X, l.cogMM.Y, l.cogMM.Z, currentRequester, current,
 			)
 		}
 		return nil
 	case tcpLoadActionRefuse:
 		x.logger.Warnf(
 			"tcp load default from %q (%.3f kg) exceeds the %s rated payload of %.3f kg; not applying",
-			requester, l.massKg, x.detectedArm.model, d.ratedKg,
+			requester, l.massKg, model, d.ratedKg,
 		)
 		return nil
 	case tcpLoadActionApply:
-		if d.warnOverRating {
+		switch {
+		case d.warnOverRating:
 			x.logger.Warnf(
 				"tcp load %.3f kg from %q exceeds the %s rated payload of %.3f kg; applying anyway",
-				l.massKg, requester, x.detectedArm.model, d.ratedKg,
+				l.massKg, requester, model, d.ratedKg,
 			)
+		default:
+			if _, ok := ratedPayloadKg(model); !ok {
+				x.logger.Debugf(
+					"tcp load %.3f kg from %q applied without a rating check: %s rated payload is unknown",
+					l.massKg, requester, model,
+				)
+			}
 		}
+	default:
+		// decideTCPLoad only ever returns the three actions above; this exists so
+		// a future action added there fails loudly here instead of silently
+		// falling out of the switch and reaching the controller unchecked.
+		return fmt.Errorf("unhandled tcp load decision %d for %q", d.action, requester)
 	}
 
 	if err := write(ctx, l); err != nil {
