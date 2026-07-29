@@ -13,6 +13,7 @@ import (
 	"go.viam.com/test"
 
 	"go.viam.com/rdk/components/arm"
+	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	rutils "go.viam.com/rdk/utils"
@@ -739,4 +740,79 @@ func TestPushedGripperDefaultParses(t *testing.T) {
 		test.That(t, ok, test.ShouldBeTrue)
 		test.That(t, parsed, test.ShouldResemble, want)
 	}
+}
+
+// TestNewVacuumGripperPinsConfigModelToPush pins that newVacuumGripper forwards
+// config.Model — not a hardcoded model — into pushGripperDefaultTCPLoad.
+//
+// Both VacuumGripperModel and VacuumGripperModelLite are genuinely registered
+// against this single constructor (see the two RegisterComponent calls in this
+// file's init), so this is not a hypothetical: a hardcoded model at that call
+// site would silently push the 0.61 kg xArm preset onto a Lite6 rated for
+// 0.5 kg total — the exact bug gripperDefaultTCPLoad's doc comment exists to
+// prevent. Nothing else in the suite constructs newVacuumGripper, so without
+// this test the call site was unpinned.
+//
+// probeGripper's utils.AssertType[*xArm] fails against the fake and returns
+// unknownGripper() without touching the wire, so with GripperSpeed left at 0
+// the only DoCommand issued during construction is the one under test.
+func TestNewVacuumGripperPinsConfigModelToPush(t *testing.T) {
+	for _, tc := range []struct {
+		model    resource.Model
+		wantPush bool
+	}{
+		{VacuumGripperModel, true},
+		{VacuumGripperModelLite, false},
+	} {
+		t.Run(tc.model.String(), func(t *testing.T) {
+			var got map[string]any
+			fake := &tcpLoadRecorderArm{onDo: func(cmd map[string]any) { got = cmd }}
+			deps := resource.Dependencies{arm.Named("myarm"): fake}
+			conf := resource.Config{
+				Name:                "g1",
+				API:                 gripper.API,
+				Model:               tc.model,
+				ConvertedAttributes: &GripperConfig{Arm: "myarm"},
+			}
+
+			_, err := newVacuumGripper(context.Background(), deps, conf, logging.NewTestLogger(t))
+			test.That(t, err, test.ShouldBeNil)
+
+			if !tc.wantPush {
+				test.That(t, got, test.ShouldBeNil)
+				return
+			}
+			params, ok := got[setDefaultTCPLoadKey].(map[string]any)
+			test.That(t, ok, test.ShouldBeTrue)
+			test.That(t, params["mass_kg"], test.ShouldAlmostEqual, 0.61, 1e-9)
+			test.That(t, params["requester"], test.ShouldEqual, tc.model.String())
+		})
+	}
+}
+
+// TestNewGripperPinsConfigModelToPush is a white-box pairing: GripperModelLite
+// is never actually registered against newGripper in production — this file's
+// init registers newGripper only for GripperModel, with newGripperLite serving
+// GripperModelLite separately. But a hardcoded GripperModel inside newGripper's
+// push call would pass any assertion that only ever constructs it with
+// GripperModel, since that value does have a preset and would push regardless
+// of whether it came from config.Model or a literal. Driving newGripper with
+// the one model it is never actually configured with, and asserting nothing
+// pushes, is what proves the value forwarded to pushGripperDefaultTCPLoad is
+// genuinely config.Model.
+func TestNewGripperPinsConfigModelToPush(t *testing.T) {
+	var got map[string]any
+	fake := &tcpLoadRecorderArm{onDo: func(cmd map[string]any) { got = cmd }}
+	deps := resource.Dependencies{arm.Named("myarm"): fake}
+	conf := resource.Config{
+		Name:                "g1",
+		API:                 gripper.API,
+		Model:               GripperModelLite,
+		ConvertedAttributes: &GripperConfig{Arm: "myarm"},
+	}
+
+	_, err := newGripper(context.Background(), deps, conf, logging.NewTestLogger(t))
+	test.That(t, err, test.ShouldBeNil)
+
+	test.That(t, got, test.ShouldBeNil)
 }
