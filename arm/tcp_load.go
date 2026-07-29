@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/golang/geo/r3"
+
+	"go.viam.com/rdk/resource"
 )
 
 // tcpLoad is a payload description: mass at a center of gravity expressed in
@@ -115,6 +117,36 @@ func ratedPayloadKg(m hardwareModel) (float64, bool) {
 		return 0, false
 	default:
 		return 0, false
+	}
+}
+
+// gripperDefaultTCPLoad returns the payload preset for a gripper's registered
+// resource model, and whether one exists.
+//
+// Keyed on the registered model rather than the Go type or the probe result,
+// deliberately:
+//
+//   - newVacuumGripper is the constructor for BOTH VacuumGripperModel and
+//     VacuumGripperModelLite, so the Go type cannot tell them apart.
+//   - probeGripper returns submodel "" on any probe error, and
+//     vacuumGripperSubmodel falls back to v1 when arm detection failed, so the
+//     detected submodel fails toward "not lite" — which would push 0.61 kg onto
+//     a Lite6 rated for 0.5 kg total.
+//
+// config.Model is config-derived and cannot fail, so it is the only signal here.
+//
+// The Lite variants have no published UFactory preset and intentionally return
+// false. The xArm BIO Gripper preset (0.72 kg) is also absent: no component in
+// this module is specific to it — myGripperLite is the sole consumer of
+// detectBioGripper. Add it if a distinct bio-gripper component ever exists.
+func gripperDefaultTCPLoad(model resource.Model) (tcpLoad, bool) {
+	switch model {
+	case GripperModel:
+		return tcpLoad{massKg: 0.82, cogMM: r3.Vector{Z: 48}}, true
+	case VacuumGripperModel:
+		return tcpLoad{massKg: 0.61, cogMM: r3.Vector{Z: 53}}, true
+	default:
+		return tcpLoad{}, false
 	}
 }
 

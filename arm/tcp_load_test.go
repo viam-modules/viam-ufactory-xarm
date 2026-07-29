@@ -8,6 +8,7 @@ import (
 	"github.com/golang/geo/r3"
 	"go.viam.com/test"
 
+	"go.viam.com/rdk/resource"
 	rutils "go.viam.com/rdk/utils"
 )
 
@@ -102,5 +103,41 @@ func TestRatedPayloadKg(t *testing.T) {
 				test.That(t, got, test.ShouldAlmostEqual, tc.want, 1e-9)
 			}
 		})
+	}
+}
+
+func TestGripperDefaultTCPLoad(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		model resource.Model
+		want  tcpLoad
+		ok    bool
+	}{
+		{"standard gripper", GripperModel, tcpLoad{massKg: 0.82, cogMM: r3.Vector{Z: 48}}, true},
+		{"vacuum gripper", VacuumGripperModel, tcpLoad{massKg: 0.61, cogMM: r3.Vector{Z: 53}}, true},
+		// Lite variants have no published preset and must never push a default:
+		// the xArm presets would exceed the Lite6's 0.5 kg total rating.
+		{"vacuum gripper lite", VacuumGripperModelLite, tcpLoad{}, false},
+		{"gripper lite", GripperModelLite, tcpLoad{}, false},
+		{"unrelated model", FTSensorModel, tcpLoad{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := gripperDefaultTCPLoad(tc.model)
+			test.That(t, ok, test.ShouldEqual, tc.ok)
+			if tc.ok {
+				test.That(t, got.massKg, test.ShouldAlmostEqual, tc.want.massKg, 1e-9)
+				test.That(t, got.cogMM.Z, test.ShouldAlmostEqual, tc.want.cogMM.Z, 1e-9)
+			}
+		})
+	}
+}
+
+// Guards the invariant that makes the lite skip safe: no default may exceed the
+// smallest rated payload it could ever be applied to without being caught.
+func TestGripperDefaultsAreFinite(t *testing.T) {
+	for _, m := range []resource.Model{GripperModel, VacuumGripperModel} {
+		l, ok := gripperDefaultTCPLoad(m)
+		test.That(t, ok, test.ShouldBeTrue)
+		test.That(t, l.validate(), test.ShouldBeNil)
 	}
 }
