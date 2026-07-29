@@ -42,6 +42,7 @@ var regMap = map[string]byte{
 	"ClearError":     0x10,
 	"ClearWarn":      0x11,
 	"SetMode":        0x13,
+	"SetTCPLoad":     0x24,
 	"P2PJoint":       0x17,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,

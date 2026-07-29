@@ -8,6 +8,8 @@ package arm
 // collision trips and drift in manual mode.
 
 import (
+	"context"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
@@ -75,4 +77,32 @@ func firmwareUsesMillimeters(version string) bool {
 		}
 	}
 	return true // exactly minMillimeterFirmware
+}
+
+// encodeTCPLoad packs the four little-endian float32 values the controller
+// expects for SET_LOAD_PARAM: [mass, cx, cy, cz].
+//
+// When useMM is false the center of gravity is converted to meters; mass is
+// always kilograms regardless of firmware.
+func encodeTCPLoad(l tcpLoad, useMM bool) []byte {
+	scale := 1.0
+	if !useMM {
+		scale = 0.001
+	}
+	out := make([]byte, 0, 16)
+	for _, v := range []float64{l.massKg, l.cogMM.X * scale, l.cogMM.Y * scale, l.cogMM.Z * scale} {
+		b := make([]byte, 4)
+		binary.LittleEndian.PutUint32(b, math.Float32bits(float32(v)))
+		out = append(out, b...)
+	}
+	return out
+}
+
+// setTCPLoad writes the payload to the controller. It does not validate, check
+// the arm's rating, or update the cache — callers own that policy.
+func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
+	c := x.newCmd(regMap["SetTCPLoad"])
+	c.params = append(c.params, encodeTCPLoad(l, firmwareUsesMillimeters(x.detectedArm.firmwareVersion))...)
+	_, err := x.send(ctx, c, true)
+	return err
 }

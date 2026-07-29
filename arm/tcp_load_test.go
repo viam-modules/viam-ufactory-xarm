@@ -7,6 +7,8 @@ import (
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/test"
+
+	rutils "go.viam.com/rdk/utils"
 )
 
 func TestValidateTCPLoad(t *testing.T) {
@@ -57,5 +59,24 @@ func TestFirmwareUsesMillimeters(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", tc.version), func(t *testing.T) {
 			test.That(t, firmwareUsesMillimeters(tc.version), test.ShouldEqual, tc.want)
 		})
+	}
+}
+
+func TestEncodeTCPLoad(t *testing.T) {
+	l := tcpLoad{massKg: 0.82, cogMM: r3.Vector{X: 1, Y: 2, Z: 48}}
+
+	// Modern firmware: mm passed through unchanged.
+	got := encodeTCPLoad(l, true)
+	test.That(t, len(got), test.ShouldEqual, 16)
+	for i, want := range []float64{0.82, 1, 2, 48} {
+		f := rutils.Float32FromBytesLE(got[i*4 : i*4+4])
+		test.That(t, float64(f), test.ShouldAlmostEqual, want, 1e-5)
+	}
+
+	// Legacy firmware: center of gravity converted to meters, mass untouched.
+	got = encodeTCPLoad(l, false)
+	for i, want := range []float64{0.82, 0.001, 0.002, 0.048} {
+		f := rutils.Float32FromBytesLE(got[i*4 : i*4+4])
+		test.That(t, float64(f), test.ShouldAlmostEqual, want, 1e-7)
 	}
 }
