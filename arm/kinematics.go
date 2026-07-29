@@ -1,7 +1,9 @@
 package arm
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 
 	"go.viam.com/rdk/referenceframe"
 )
@@ -65,6 +67,17 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 		return base, nil
 	}
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
+}
+
+func countArmURDFMeshes(urdfBasename string) (int, error) {
+	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
+	path := fmt.Sprintf("%s/arm/%s.urdf", moduleRoot, urdfBasename)
+	//nolint:gosec // path is composed from module-owned constants.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("countArmURDFMeshes: read %s: %w", path, err)
+	}
+	return bytes.Count(data, []byte("<mesh ")), nil
 }
 
 // gripperDefaultMeshDecimationRatio is the value used when the caller passes

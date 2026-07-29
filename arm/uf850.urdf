@@ -103,7 +103,14 @@
     <limit lower="-2.1642" upper="2.1642" velocity="3.14"/>
   </joint>
 
-  <link name="link6"/>
+  <link name="link6">
+    <collision>
+      <geometry>
+        <mesh filename="package://description/meshes/uf850meshes/link6.stl"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </collision>
+  </link>
 
   <joint name="joint6" type="revolute">
     <parent link="link5"/>
