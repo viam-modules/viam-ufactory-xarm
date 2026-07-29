@@ -80,3 +80,27 @@ func TestEncodeTCPLoad(t *testing.T) {
 		test.That(t, float64(f), test.ShouldAlmostEqual, want, 1e-7)
 	}
 }
+
+func TestRatedPayloadKg(t *testing.T) {
+	for _, tc := range []struct {
+		model hardwareModel
+		want  float64
+		ok    bool
+	}{
+		{hardwareModelLite6, 0.5, true},
+		{hardwareModelXArm5, 3.0, true},
+		{hardwareModelXArm7, 3.5, true},
+		{hardwareModelXArm7T, 3.5, true},
+		{hardwareModelXArm6, 5.0, true},
+		{hardwareModelXArm850, 5.0, true},
+		{hardwareModelUnknown, 0, false},
+	} {
+		t.Run(string(tc.model), func(t *testing.T) {
+			got, ok := ratedPayloadKg(tc.model)
+			test.That(t, ok, test.ShouldEqual, tc.ok)
+			if tc.ok {
+				test.That(t, got, test.ShouldAlmostEqual, tc.want, 1e-9)
+			}
+		})
+	}
+}

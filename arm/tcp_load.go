@@ -98,6 +98,26 @@ func encodeTCPLoad(l tcpLoad, useMM bool) []byte {
 	return out
 }
 
+// ratedPayloadKg returns the manufacturer's rated payload for a model. The
+// second return is false when the model is unknown, in which case no rating
+// check can be made.
+func ratedPayloadKg(m hardwareModel) (float64, bool) {
+	switch m {
+	case hardwareModelLite6:
+		return 0.5, true
+	case hardwareModelXArm5:
+		return 3.0, true
+	case hardwareModelXArm7, hardwareModelXArm7T:
+		return 3.5, true
+	case hardwareModelXArm6, hardwareModelXArm850:
+		return 5.0, true
+	case hardwareModelUnknown:
+		return 0, false
+	default:
+		return 0, false
+	}
+}
+
 // setTCPLoad writes the payload to the controller. It does not validate, check
 // the arm's rating, or update the cache — callers own that policy.
 func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
