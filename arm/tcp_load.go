@@ -34,21 +34,28 @@ func (l tcpLoad) validate() error {
 	if l.massKg < 0 {
 		return fmt.Errorf("tcp load mass cannot be negative, got %v", l.massKg)
 	}
-	for name, v := range map[string]float64{"x": l.cogMM.X, "y": l.cogMM.Y, "z": l.cogMM.Z} {
-		if math.IsNaN(v) || math.IsInf(v, 0) {
-			return fmt.Errorf("tcp load center of gravity %s must be a finite number, got %v", name, v)
+	for _, c := range []struct {
+		name string
+		v    float64
+	}{{"x", l.cogMM.X}, {"y", l.cogMM.Y}, {"z", l.cogMM.Z}} {
+		if math.IsNaN(c.v) || math.IsInf(c.v, 0) {
+			return fmt.Errorf("tcp load center of gravity %s must be a finite number, got %v", c.name, c.v)
 		}
 	}
 	return nil
 }
 
+// minMillimeterFirmware is the oldest firmware that expects CoG in mm.
+var minMillimeterFirmware = [3]int{0, 2, 1}
+
 // firmwareUsesMillimeters reports whether the controller expects the center of
-// gravity in mm. Firmware >= 0.2.1 uses mm; older firmware uses meters (the
-// xArm SDK divides by 1000 below that version).
+// gravity in mm. Firmware >= minMillimeterFirmware uses mm; older firmware
+// uses meters (the xArm SDK divides by 1000 below that version).
 //
 // Unknown or unparseable versions default to mm. Every deployed controller is
-// far above 0.2.1, so mm is the safe guess; assuming meters would under-report
-// the center of gravity by 1000x on the overwhelmingly likely path.
+// far above minMillimeterFirmware, so mm is the safe guess; assuming meters
+// would under-report the center of gravity by 1000x on the overwhelmingly
+// likely path.
 func firmwareUsesMillimeters(version string) bool {
 	parts := strings.Split(version, ".")
 	if len(parts) != 3 {
@@ -57,16 +64,15 @@ func firmwareUsesMillimeters(version string) bool {
 	nums := make([]int, 3)
 	for i, p := range parts {
 		n, err := strconv.Atoi(strings.TrimSpace(p))
-		if err != nil {
+		if err != nil || n < 0 {
 			return true
 		}
 		nums[i] = n
 	}
-	// Compare against 0.2.1.
-	for i, min := range []int{0, 2, 1} {
-		if nums[i] != min {
-			return nums[i] > min
+	for i, want := range minMillimeterFirmware {
+		if nums[i] != want {
+			return nums[i] > want
 		}
 	}
-	return true // exactly 0.2.1
+	return true // exactly minMillimeterFirmware
 }

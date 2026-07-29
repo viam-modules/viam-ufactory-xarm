@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -44,11 +45,16 @@ func TestFirmwareUsesMillimeters(t *testing.T) {
 		{"0.2.0", false}, // just below
 		{"0.1.9", false},
 		{"0.0.0", false},
+		{"0.10.0", true},  // 10 > 2 numerically, but "0.10.0" < "0.2.1" as a string
+		{"0.2.10", true},  // 10 > 1 numerically, but "0.2.10" < "0.2.1" as a string
+		{"0.3.0", true},   // just above the boundary on the minor
+		{"0.2.2", true},   // just above the boundary on the patch
 		{"", true},        // unknown defaults to mm
 		{"garbage", true}, // unparseable defaults to mm
 		{"2.5", true},     // malformed defaults to mm
+		{"-1.0.0", true},  // negative component defaults to mm
 	} {
-		t.Run(tc.version, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%q", tc.version), func(t *testing.T) {
 			test.That(t, firmwareUsesMillimeters(tc.version), test.ShouldEqual, tc.want)
 		})
 	}
