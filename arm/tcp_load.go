@@ -204,14 +204,132 @@ func shouldApplyTCPLoad(current, incoming tcpLoadSource) bool {
 
 // setTCPLoad writes the payload to the controller. It does not validate, check
 // the arm's rating, or update the cache — callers own that policy.
-//
-// Unused until the apply path (decideTCPLoad / DoCommand wiring) lands in a
-// later task.
-//
-//nolint:unused
 func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
 	c := x.newCmd(regMap["SetTCPLoad"])
 	c.params = append(c.params, encodeTCPLoad(l, firmwareUsesMillimeters(x.detectedArm.firmwareVersion))...)
 	_, err := x.send(ctx, c, true)
 	return err
+}
+
+// exceedsRating reports whether a payload is above the model's rated capacity,
+// and what that rating is. Always false for unknown models.
+func exceedsRating(l tcpLoad, m hardwareModel) (bool, float64) {
+	rated, ok := ratedPayloadKg(m)
+	if !ok {
+		return false, 0
+	}
+	return l.massKg > rated, rated
+}
+
+// tcpLoadAction is what decideTCPLoad concluded should happen to a write.
+type tcpLoadAction int
+
+const (
+	tcpLoadActionApply    tcpLoadAction = iota // write it
+	tcpLoadActionSuppress                      // precedence: something already set the payload
+	tcpLoadActionRefuse                        // a pushed default above the arm's rating
+)
+
+// tcpLoadDecision is the policy outcome for one write, computed without I/O so
+// it can be tested exhaustively.
+type tcpLoadDecision struct {
+	action         tcpLoadAction
+	warnOverRating bool // apply, but the mass exceeds the rating
+	ratedKg        float64
+}
+
+// decideTCPLoad applies precedence first, then the rating rule.
+//
+// Over-rating is a warning for explicit writes (config, set_tcp_load) — the
+// user typed that number and may know something we don't — but a hard refusal
+// for a pushed default, which nobody typed. That refusal is the independent
+// second guard against a mis-keyed default reaching a Lite6.
+func decideTCPLoad(l tcpLoad, incoming, current tcpLoadSource, model hardwareModel) tcpLoadDecision {
+	if !shouldApplyTCPLoad(current, incoming) {
+		return tcpLoadDecision{action: tcpLoadActionSuppress}
+	}
+	over, rated := exceedsRating(l, model)
+	if !over {
+		return tcpLoadDecision{action: tcpLoadActionApply}
+	}
+	if incoming == tcpLoadSourceGripperDefault {
+		return tcpLoadDecision{action: tcpLoadActionRefuse, ratedKg: rated}
+	}
+	return tcpLoadDecision{action: tcpLoadActionApply, warnOverRating: true, ratedKg: rated}
+}
+
+// applyTCPLoad validates, checks precedence and rating, writes to the
+// controller, and updates the cache. It is the single entry point for every
+// payload write; nothing else should call setTCPLoad directly.
+//
+// Caller must NOT hold confLock.
+func (x *xArm) applyTCPLoad(ctx context.Context, l tcpLoad, src tcpLoadSource, requester string) error {
+	return x.applyTCPLoadWith(ctx, l, src, requester, x.setTCPLoad)
+}
+
+// applyTCPLoadWith is applyTCPLoad with the controller write injected, so the
+// policy and caching behavior can be tested without a socket.
+func (x *xArm) applyTCPLoadWith(
+	ctx context.Context,
+	l tcpLoad,
+	src tcpLoadSource,
+	requester string,
+	write func(context.Context, tcpLoad) error,
+) error {
+	if err := l.validate(); err != nil {
+		return err
+	}
+
+	x.confLock.Lock()
+	current, currentRequester := x.tcpLoadSource, x.tcpLoadRequester
+	x.confLock.Unlock()
+
+	switch d := decideTCPLoad(l, src, current, x.detectedArm.model); d.action {
+	case tcpLoadActionSuppress:
+		// Two gripper components on one arm is a config the user should fix, and
+		// which one wins depends on non-deterministic construction order — so warn
+		// and name both. Any other suppression is the rule working as intended.
+		if current == tcpLoadSourceGripperDefault {
+			x.logger.Warnf(
+				"tcp load default from %q ignored: %q already set a gripper default; "+
+					"two grippers on one arm is ambiguous, set tcp_load on the arm to be explicit",
+				requester, currentRequester,
+			)
+		} else {
+			x.logger.Infof(
+				"tcp load default from %q (%.3f kg) not applied: payload already set by %q (source: %s)",
+				requester, l.massKg, currentRequester, current,
+			)
+		}
+		return nil
+	case tcpLoadActionRefuse:
+		x.logger.Warnf(
+			"tcp load default from %q (%.3f kg) exceeds the %s rated payload of %.3f kg; not applying",
+			requester, l.massKg, x.detectedArm.model, d.ratedKg,
+		)
+		return nil
+	case tcpLoadActionApply:
+		if d.warnOverRating {
+			x.logger.Warnf(
+				"tcp load %.3f kg from %q exceeds the %s rated payload of %.3f kg; applying anyway",
+				l.massKg, requester, x.detectedArm.model, d.ratedKg,
+			)
+		}
+	}
+
+	if err := write(ctx, l); err != nil {
+		return err
+	}
+
+	// Cache only after the controller accepts, so get_tcp_load never reports a
+	// value the write refused.
+	x.confLock.Lock()
+	x.tcpLoad, x.tcpLoadSource, x.tcpLoadRequester = l, src, requester
+	x.confLock.Unlock()
+
+	x.logger.Infof(
+		"tcp load set to %.3f kg, cog [%.2f %.2f %.2f] mm (source: %s, requester: %q)",
+		l.massKg, l.cogMM.X, l.cogMM.Y, l.cogMM.Z, src, requester,
+	)
+	return nil
 }

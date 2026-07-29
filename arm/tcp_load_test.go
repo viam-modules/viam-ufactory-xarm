@@ -1,6 +1,8 @@
 package arm
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -8,6 +10,7 @@ import (
 	"github.com/golang/geo/r3"
 	"go.viam.com/test"
 
+	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	rutils "go.viam.com/rdk/utils"
 )
@@ -185,4 +188,89 @@ func TestTCPLoadSourceString(t *testing.T) {
 	test.That(t, tcpLoadSourceConfig.String(), test.ShouldEqual, "config")
 	test.That(t, tcpLoadSourceDoCommand.String(), test.ShouldEqual, "do_command")
 	test.That(t, tcpLoadSourceGripperDefault.String(), test.ShouldEqual, "gripper_default")
+}
+
+func TestExceedsRating(t *testing.T) {
+	// Over rating on a known model.
+	over, rated := exceedsRating(tcpLoad{massKg: 0.61}, hardwareModelLite6)
+	test.That(t, over, test.ShouldBeTrue)
+	test.That(t, rated, test.ShouldAlmostEqual, 0.5, 1e-9)
+
+	// At the rating exactly is not over.
+	over, _ = exceedsRating(tcpLoad{massKg: 0.5}, hardwareModelLite6)
+	test.That(t, over, test.ShouldBeFalse)
+
+	// Unknown model cannot be checked.
+	over, _ = exceedsRating(tcpLoad{massKg: 99}, hardwareModelUnknown)
+	test.That(t, over, test.ShouldBeFalse)
+}
+
+func TestDecideTCPLoad(t *testing.T) {
+	// The asymmetry the spec requires: over-rating warns for explicit writes but
+	// refuses outright for a pushed default.
+	t.Run("over-rating warns for config", func(t *testing.T) {
+		d := decideTCPLoad(tcpLoad{massKg: 9}, tcpLoadSourceConfig, tcpLoadSourceUnset, hardwareModelLite6)
+		test.That(t, d.action, test.ShouldEqual, tcpLoadActionApply)
+		test.That(t, d.warnOverRating, test.ShouldBeTrue)
+	})
+	t.Run("over-rating warns for do_command", func(t *testing.T) {
+		d := decideTCPLoad(tcpLoad{massKg: 9}, tcpLoadSourceDoCommand, tcpLoadSourceUnset, hardwareModelLite6)
+		test.That(t, d.action, test.ShouldEqual, tcpLoadActionApply)
+		test.That(t, d.warnOverRating, test.ShouldBeTrue)
+	})
+	t.Run("over-rating refuses a pushed default", func(t *testing.T) {
+		d := decideTCPLoad(tcpLoad{massKg: 0.61}, tcpLoadSourceGripperDefault, tcpLoadSourceUnset, hardwareModelLite6)
+		test.That(t, d.action, test.ShouldEqual, tcpLoadActionRefuse)
+	})
+	t.Run("in-rating default applies", func(t *testing.T) {
+		d := decideTCPLoad(tcpLoad{massKg: 0.61}, tcpLoadSourceGripperDefault, tcpLoadSourceUnset, hardwareModelXArm6)
+		test.That(t, d.action, test.ShouldEqual, tcpLoadActionApply)
+		test.That(t, d.warnOverRating, test.ShouldBeFalse)
+	})
+	// Precedence is checked before rating, so a suppressed default never warns.
+	t.Run("suppression beats rating", func(t *testing.T) {
+		d := decideTCPLoad(tcpLoad{massKg: 9}, tcpLoadSourceGripperDefault, tcpLoadSourceDoCommand, hardwareModelLite6)
+		test.That(t, d.action, test.ShouldEqual, tcpLoadActionSuppress)
+	})
+}
+
+func TestApplyTCPLoadDoesNotCacheFailedWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	boom := errors.New("controller rejected the write")
+
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 1.2}, tcpLoadSourceDoCommand, "test",
+		func(context.Context, tcpLoad) error { return boom })
+
+	test.That(t, err, test.ShouldNotBeNil)
+	// The getter must never report a value the controller refused.
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 0, 1e-9)
+}
+
+func TestApplyTCPLoadCachesSuccessfulWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 1.2}, tcpLoadSourceDoCommand, "test",
+		func(context.Context, tcpLoad) error { return nil })
+
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceDoCommand)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
+}
+
+func TestApplyTCPLoadSuppressedDefaultDoesNotWrite(t *testing.T) {
+	x := &xArm{logger: logging.NewTestLogger(t)}
+	x.tcpLoad = tcpLoad{massKg: 1.2}
+	x.tcpLoadSource = tcpLoadSourceDoCommand
+	x.tcpLoadRequester = "set_tcp_load"
+
+	wrote := false
+	err := x.applyTCPLoadWith(context.Background(), tcpLoad{massKg: 0.61}, tcpLoadSourceGripperDefault, "vacuum_gripper",
+		func(context.Context, tcpLoad) error { wrote = true; return nil })
+
+	// Suppression is not an error, but nothing may reach the controller and the
+	// held payload must survive: this is the mid-grasp overwrite case.
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, wrote, test.ShouldBeFalse)
+	test.That(t, x.tcpLoad.massKg, test.ShouldAlmostEqual, 1.2, 1e-9)
 }

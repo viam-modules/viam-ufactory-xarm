@@ -176,12 +176,9 @@ type xArm struct {
 	// where it came from. The controller has no register to read the payload
 	// back, so this cache is the only answer get_tcp_load can give. Guarded by
 	// confLock, same as speed/acceleration above.
-	//
-	// Unused until the apply path lands in a later task; see setTCPLoad in
-	// tcp_load.go for the same note.
-	tcpLoad          tcpLoad       //nolint:unused
-	tcpLoadSource    tcpLoadSource //nolint:unused
-	tcpLoadRequester string        //nolint:unused // who set it, for suppression and conflict logging
+	tcpLoad          tcpLoad
+	tcpLoadSource    tcpLoadSource
+	tcpLoadRequester string // who set it, for suppression and conflict logging
 }
 
 func init() {
