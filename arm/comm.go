@@ -1100,9 +1100,19 @@ func (x *xArm) IsMoving(ctx context.Context) (bool, error) {
 	return x.opMgr.OpRunning(), nil
 }
 
+// setupGripper puts the gripper in the state a plain Fn700 position move expects.
+//
+// Touching the FnCxx control-mode block resets the gripper's Fn303 speed, so the control-mode
+// clear is conditional and is followed by re-applying the configured speed. Clearing it on every
+// gripper operation silently discards whatever `gripper_speed` the user asked for.
 func (x *xArm) setupGripper(ctx context.Context) error {
-	if err := x.disableGripperControlMode(ctx); err != nil {
-		return err
+	if x.gripperControlMode.Load() {
+		if err := x.disableGripperControlMode(ctx); err != nil {
+			return err
+		}
+		if err := x.restoreGripperSpeed(ctx); err != nil {
+			return err
+		}
 	}
 	if err := x.enableGripper(ctx); err != nil {
 		return err
@@ -1116,6 +1126,7 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 // disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by graspWithTorque.
 // FnC00 enables the FnCxx block-write control mode (speed+torque+position); when left enabled,
 // subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
+// Writing the block also resets Fn303, so callers that need the configured speed must restore it.
 func (x *xArm) disableGripperControlMode(ctx context.Context) error {
 	c := x.gripperPreamble(true)
 	c.params = append(c.params, 0x0C, 0x00)
@@ -1123,8 +1134,21 @@ func (x *xArm) disableGripperControlMode(ctx context.Context) error {
 	c.params = append(c.params, 0x02)
 	c.params = append(c.params, 0x00, 0x00)
 	x.logger.Debugf("disableGripperControlMode")
-	_, err := x.send(ctx, c, true)
-	return err
+	if _, err := x.gripperSend(ctx, c); err != nil {
+		return err
+	}
+	x.gripperControlMode.Store(false)
+	return nil
+}
+
+// restoreGripperSpeed re-writes the last speed passed to setGripperSpeed. No-op if none was set,
+// in which case the gripper keeps its own default.
+func (x *xArm) restoreGripperSpeed(ctx context.Context) error {
+	speed := x.gripperSpeed.Load()
+	if speed == 0 {
+		return nil
+	}
+	return x.setGripperSpeed(ctx, uint16(speed)) //nolint:gosec
 }
 
 // gripperPreamble routes through gripperConn so that gripper-bus traffic
@@ -1199,8 +1223,11 @@ func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
 	binary.BigEndian.PutUint16(tmpBytes, speed)
 	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
 	c.params = append(c.params, tmpBytes...)
-	_, err := x.gripperSend(ctx, c)
-	return err
+	if _, err := x.gripperSend(ctx, c); err != nil {
+		return err
+	}
+	x.gripperSpeed.Store(uint32(speed))
+	return nil
 }
 
 func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
@@ -1249,9 +1276,10 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 	c.params = append(c.params, posBytes...)
 
 	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
-	if _, err := x.send(ctx, c, true); err != nil {
+	if _, err := x.gripperSend(ctx, c); err != nil {
 		return err
 	}
+	x.gripperControlMode.Store(true)
 
 	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
 }

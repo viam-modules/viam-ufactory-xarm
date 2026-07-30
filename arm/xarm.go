@@ -170,6 +170,14 @@ type xArm struct {
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
 
+	// gripperControlMode records whether the gripper's FnCxx block-write control mode may be
+	// enabled. Only graspWithTorque turns it on, but it survives a process restart, so it starts
+	// out true and the first gripper setup clears it.
+	gripperControlMode atomic.Bool
+	// gripperSpeed is the last speed written to the gripper's Fn303 register, or 0 if none was
+	// ever set. Clearing the FnCxx control mode resets Fn303, so we need this to put it back.
+	gripperSpeed atomic.Uint32
+
 	detectedArm detectedArm
 }
 
@@ -399,6 +407,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
+	x.gripperControlMode.Store(true)
 
 	if newConf.Motion != "" {
 		if deps == nil {
