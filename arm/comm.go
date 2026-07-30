@@ -1276,10 +1276,14 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 	c.params = append(c.params, posBytes...)
 
 	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
+	// Assume the mode is on before the write lands: a send that fails may still have enabled it,
+	// and wrongly believing it is off makes the next setupGripper skip the clear and the speed
+	// restore, which is the silent speed loss this whole path exists to avoid. Wrongly believing
+	// it is on only costs one extra register write.
+	x.gripperControlMode.Store(true)
 	if _, err := x.gripperSend(ctx, c); err != nil {
 		return err
 	}
-	x.gripperControlMode.Store(true)
 
 	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
 }
