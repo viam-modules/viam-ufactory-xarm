@@ -577,27 +577,18 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	// A config-sourced payload is the user's explicit instruction, so a failure
-	// here normally fails construction — same as collision sensitivity above.
-	// Note this also permanently suppresses gripper defaults for this arm
-	// instance.
+	// A config-sourced payload normally fails construction on error, same as
+	// collision sensitivity above. Exception: if the arm never started, the
+	// write fails on the arm's own latched error state, which would destroy the
+	// clear_error recovery path the warning above points at — so warn instead.
 	//
-	// Exception: if the arm never started (startErr != nil, e.g. a latched
-	// collision/overcurrent state), setTCPLoad's checkError inspects the arm's
-	// own state byte and would turn this into a hard failure too — destroying
-	// the only recovery path (the clear_error DoCommand) the warning above just
-	// told the user to use. A config instruction cannot be honored on a
-	// non-operational arm anyway, so warn and continue instead of failing
-	// construction.
-	// Set before the write is attempted, not after it succeeds: this is what
-	// lets a gripper constructed later tell "config asked for a tcp_load"
-	// apart from "nothing was ever requested", even when the write below fails
-	// and the cache stays unset. See the field comment on
-	// tcpLoadConfigRequested.
+	// The flag is set before the write is attempted so a gripper constructed
+	// later can tell "config asked for a tcp_load and it failed" apart from
+	// "nothing was ever requested".
 	if newConf.TCPLoad != nil {
 		x.tcpLoadConfigRequested = true
 	}
-	if err := applyConfigTCPLoad(ctx, newConf.TCPLoad, x.applyTCPLoad); err != nil {
+	if err := x.applyConfigTCPLoad(ctx, newConf.TCPLoad); err != nil {
 		wrapped := fmt.Errorf("applying tcp_load from config: %w", err)
 		if startErr != nil {
 			logger.Warnf("%v", wrapped)
@@ -1047,7 +1038,11 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 	}
 
 	if _, ok := cmd[getTCPLoadKey]; ok {
-		resp[tcpLoadKey] = x.tcpLoadResponse()
+		loaded, err := x.readTCPLoadResponse(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = loaded
 		validCommand = true
 	}
 

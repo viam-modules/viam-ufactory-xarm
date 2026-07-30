@@ -304,7 +304,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{
 })
 ```
 
-Read back what this module last wrote with `get_tcp_load`:
+Read the controller's current payload with `get_tcp_load`:
 
 ```go
 resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_tcp_load": true})
@@ -316,7 +316,9 @@ resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_tcp_load": t
 // }
 ```
 
-`source` reports where the current payload came from: `config` (the `tcp_load` attribute), `do_command` (a runtime `set_tcp_load`), `gripper_default` (pushed by an attached gripper, see below), or `unset` if nothing has been written yet — in which case the response is just `{"source": "unset"}` with no other fields. `requester` names whoever set it; both `set_tcp_load` and `set_default_tcp_load` accept an optional `requester` string, defaulting to the DoCommand key name if omitted.
+`mass_kg` and `center_of_gravity_mm` are read from the controller, so they reflect the payload actually in effect — including one set from UFactory Studio or another client. The controller stores them as scaled integers, so values are quantized to 1 g and 0.1 mm and may not round-trip a written value exactly.
+
+`source` and `requester` describe this module's own last write, not the origin of the values above: `config` (the `tcp_load` attribute), `do_command` (a runtime `set_tcp_load`), `gripper_default` (pushed by an attached gripper, see below), or `unset` if this module has written nothing — a `source` of `unset` alongside a non-zero mass means something outside this module set the payload. `requester` is omitted when `source` is `unset`; both `set_tcp_load` and `set_default_tcp_load` accept an optional `requester` string, defaulting to the DoCommand key name if omitted.
 
 > [!NOTE]
 > `set_default_tcp_load` is also available directly rather than hidden, since it writes a payload to the controller like `set_tcp_load` does. It exists for gripper components to offer a known payload without overwriting one you set explicitly (see [Gripper Defaults](#gripper-defaults) below) — user code driving the arm should use `set_tcp_load`.
@@ -336,10 +338,7 @@ A gripper default only applies if nothing has set a payload yet (`source` is `un
 
 #### Staleness and Persistence
 
-The controller has no register to read the payload back from, so `get_tcp_load` can only report what this module last wrote — not necessarily what the controller is currently using:
-
-- Changing the payload from UFactory Studio makes this module's cached value stale.
-- Rebuilding the arm resets the module's cache to `unset`, even though the controller still holds the previously-written payload in RAM until something overwrites it.
+`get_tcp_load` reads the controller directly, over the standard Modbus TCP register interface the controller serves on the same port as its command protocol. The `source` field is separate module state and can go stale relative to the payload itself — rebuilding the arm resets `source` to `unset` even though the controller still holds the previously-written payload.
 
 The payload lives in the controller's RAM and is lost on a controller restart. This module never calls the controller's `save_conf`, so nothing written here survives a power cycle on its own — a `tcp_load` set in config is simply reapplied each time the arm is rebuilt; a payload set only via `set_tcp_load` or a gripper default is not saved anywhere and must be set again if it still applies after a restart or rebuild.
 

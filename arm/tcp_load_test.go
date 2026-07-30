@@ -2,9 +2,12 @@ package arm
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -193,26 +196,14 @@ func TestRatedPayloadKg(t *testing.T) {
 	}
 }
 
-// TestHardwareModelFromConfiguredModelName pins the mapping applyTCPLoadWith
-// falls back to when hardware detection fails and leaves detectedArm.model at
-// its zero value (see TestApplyTCPLoadFallsBackToConfiguredModelWhenDetectionFailed).
-// There is no hardwareModelXArm5 config option — xArm5 is reachable only via
-// hardware detection — so any name outside the four registered models must
-// land on hardwareModelUnknown, same as an empty or garbage name.
-func TestHardwareModelFromConfiguredModelName(t *testing.T) {
-	for _, tc := range []struct {
-		modelName string
-		want      hardwareModel
-	}{
-		{ModelName6DOF, hardwareModelXArm6},
-		{ModelName7DOF, hardwareModelXArm7},
-		{ModelNameLite, hardwareModelLite6},
-		{ModelName850, hardwareModelXArm850},
-		{"", hardwareModelUnknown},
-		{"bogus", hardwareModelUnknown},
-	} {
-		t.Run(tc.modelName, func(t *testing.T) {
-			test.That(t, hardwareModelFromConfiguredModelName(tc.modelName), test.ShouldEqual, tc.want)
+// TestConfiguredModelNamesAreRatable pins the assumption applyTCPLoadWith's
+// fallback rests on: every registered model name is also a hardwareModel with a
+// known rating, so a detection failure never silently skips the rating check.
+func TestConfiguredModelNamesAreRatable(t *testing.T) {
+	for _, modelName := range []string{ModelName6DOF, ModelName7DOF, ModelNameLite, ModelName850} {
+		t.Run(modelName, func(t *testing.T) {
+			_, ok := ratedPayloadKg(hardwareModel(modelName))
+			test.That(t, ok, test.ShouldBeTrue)
 		})
 	}
 }
@@ -331,57 +322,21 @@ func TestDecideTCPLoad(t *testing.T) {
 	})
 }
 
-// TestApplyConfigTCPLoad pins the seam NewXArm calls: given a *TCPLoadConfig,
-// it must invoke apply with source tcpLoadSourceConfig and requester "config"
-// — not any other source, since that would invert the precedence model Tasks
-// 5-6 establish (e.g. a config-set payload on a Lite6 would be refused instead
-// of applied-with-warning, and config would stop suppressing gripper pushes).
-// A nil config must not call apply at all.
+// TestApplyConfigTCPLoad covers the paths that must return before any
+// controller write. These arms have no connection, so an attempted write would
+// fail the test rather than pass silently.
 func TestApplyConfigTCPLoad(t *testing.T) {
-	t.Run("nil config applies nothing", func(t *testing.T) {
-		called := false
-		err := applyConfigTCPLoad(context.Background(), nil,
-			func(context.Context, tcpLoad, tcpLoadSource, string) error {
-				called = true
-				return nil
-			})
-		test.That(t, err, test.ShouldBeNil)
-		test.That(t, called, test.ShouldBeFalse)
+	t.Run("nil config writes nothing", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		test.That(t, x.applyConfigTCPLoad(context.Background(), nil), test.ShouldBeNil)
+		test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
 	})
 
-	t.Run("wires source and requester", func(t *testing.T) {
-		var gotLoad tcpLoad
-		var gotSrc tcpLoadSource
-		var gotRequester string
-		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{MassKg: massKgPtr(0.82)},
-			func(_ context.Context, l tcpLoad, src tcpLoadSource, requester string) error {
-				gotLoad, gotSrc, gotRequester = l, src, requester
-				return nil
-			})
-		test.That(t, err, test.ShouldBeNil)
-		test.That(t, gotLoad.massKg, test.ShouldAlmostEqual, 0.82, 1e-9)
-		test.That(t, gotSrc, test.ShouldEqual, tcpLoadSourceConfig)
-		test.That(t, gotRequester, test.ShouldEqual, "config")
-	})
-
-	t.Run("propagates conversion errors without calling apply", func(t *testing.T) {
-		called := false
-		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{},
-			func(context.Context, tcpLoad, tcpLoadSource, string) error {
-				called = true
-				return nil
-			})
+	t.Run("propagates conversion errors without writing", func(t *testing.T) {
+		x := &xArm{logger: logging.NewTestLogger(t)}
+		err := x.applyConfigTCPLoad(context.Background(), &TCPLoadConfig{})
 		test.That(t, err, test.ShouldNotBeNil)
-		test.That(t, called, test.ShouldBeFalse)
-	})
-
-	t.Run("propagates apply errors", func(t *testing.T) {
-		boom := errors.New("write failed")
-		err := applyConfigTCPLoad(context.Background(), &TCPLoadConfig{MassKg: massKgPtr(0.82)},
-			func(context.Context, tcpLoad, tcpLoadSource, string) error {
-				return boom
-			})
-		test.That(t, errors.Is(err, boom), test.ShouldBeTrue)
+		test.That(t, x.tcpLoadSource, test.ShouldEqual, tcpLoadSourceUnset)
 	})
 }
 
@@ -797,25 +752,127 @@ func TestTCPLoadResponse(t *testing.T) {
 	test.That(t, resp["requester"], test.ShouldEqual, "set_tcp_load")
 }
 
+// tcpLoadRegisterBody builds a read-input-registers response body:
+// [function code, byte count, registers...].
+func tcpLoadRegisterBody(regs ...uint16) []byte {
+	body := []byte{modbusReadInputRegs, byte(len(regs) * 2)}
+	for _, r := range regs {
+		body = binary.BigEndian.AppendUint16(body, r)
+	}
+	return body
+}
+
+// tcpLoadRegisterResponse wraps a response body in its MBAP header.
+func tcpLoadRegisterResponse(regs ...uint16) []byte {
+	body := tcpLoadRegisterBody(regs...)
+	frame := binary.BigEndian.AppendUint16(nil, 1) // transaction id, unchecked by the reader
+	frame = binary.BigEndian.AppendUint16(frame, standardModbusProtocolID)
+	frame = binary.BigEndian.AppendUint16(frame, uint16(1+len(body)))
+	frame = append(frame, modbusUnitID)
+	return append(frame, body...)
+}
+
+// fakeModbusServer answers one request with resp and publishes the request
+// bytes for inspection. Requests are a fixed 12 bytes: MBAP header, unit id,
+// function code, start address, register count.
+func fakeModbusServer(t *testing.T, resp []byte) (string, <-chan []byte) {
+	t.Helper()
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	test.That(t, err, test.ShouldBeNil)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	requests := make(chan []byte, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		req := make([]byte, 12)
+		if _, err := io.ReadFull(conn, req); err != nil {
+			return
+		}
+		requests <- req
+		_, _ = conn.Write(resp)
+	}()
+	return ln.Addr().String(), requests
+}
+
+func TestParseTCPLoadRegisters(t *testing.T) {
+	t.Run("decodes scaled registers", func(t *testing.T) {
+		l, err := parseTCPLoadRegisters(tcpLoadRegisterBody(820, 0, 0, 480))
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, l.massKg, test.ShouldAlmostEqual, 0.82, 1e-9)
+		test.That(t, l.cogMM, test.ShouldResemble, r3.Vector{X: 0, Y: 0, Z: 48})
+	})
+
+	// A tool whose mass sits off the -X side of the flange is ordinary. Read as
+	// unsigned, -5 mm would come back as +6553.1.
+	t.Run("center of gravity registers are signed", func(t *testing.T) {
+		l, err := parseTCPLoadRegisters(tcpLoadRegisterBody(820, 0xFFCE, 0, 480))
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, l.cogMM.X, test.ShouldAlmostEqual, -5, 1e-9)
+	})
+
+	t.Run("rejects a modbus exception", func(t *testing.T) {
+		_, err := parseTCPLoadRegisters([]byte{0x84, 0x02})
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "exception")
+	})
+
+	t.Run("rejects a truncated response", func(t *testing.T) {
+		_, err := parseTCPLoadRegisters([]byte{modbusReadInputRegs})
+		test.That(t, err, test.ShouldNotBeNil)
+	})
+
+	t.Run("rejects a short register count", func(t *testing.T) {
+		_, err := parseTCPLoadRegisters(tcpLoadRegisterBody(820, 0, 0))
+		test.That(t, err, test.ShouldNotBeNil)
+	})
+
+	t.Run("rejects a byte count that overstates the data", func(t *testing.T) {
+		body := tcpLoadRegisterBody(820, 0, 0, 480)
+		_, err := parseTCPLoadRegisters(body[:len(body)-2])
+		test.That(t, err, test.ShouldNotBeNil)
+	})
+}
+
 // TestDoCommandTCPLoadKeys exercises set_tcp_load, set_default_tcp_load, and
-// get_tcp_load through the real DoCommand entry point, against a bare *xArm
-// with no socket. DoCommand has no connection-requiring preamble, so this
-// works as long as every path taken either errors out before reaching the
-// controller or is suppressed by precedence before applyTCPLoadWith calls
-// its injected write function — a real write would panic on the nil
-// connection. That constraint is what makes the last case below valuable: it
-// exercises the full set_default_tcp_load block, including which
-// tcpLoadSource it passes to applyTCPLoad, without needing a socket. Pin
-// wrong there (e.g. swapped with tcpLoadSourceDoCommand) and suppression
-// stops firing, the call reaches the controller, and the whole test binary
-// panics.
+// get_tcp_load through the real DoCommand entry point. Except for the read,
+// these arms have no socket, so every path must either error out or be
+// suppressed by precedence before reaching the controller. That is what makes
+// the set_default_tcp_load case below valuable: pin the wrong tcpLoadSource
+// there and suppression stops firing, the write is attempted, and the test
+// fails on the nil connection.
 func TestDoCommandTCPLoadKeys(t *testing.T) {
-	t.Run("get_tcp_load when unset", func(t *testing.T) {
-		x := &xArm{logger: logging.NewTestLogger(t)}
+	// get_tcp_load reads the controller, so it needs a socket; the fake answers
+	// one read-input-registers request. "source: unset" alongside a real mass is
+	// the case that matters: the payload was set outside this module.
+	t.Run("get_tcp_load reads the controller", func(t *testing.T) {
+		addr, requests := fakeModbusServer(t, tcpLoadRegisterResponse(820, 0, 0, 480))
+		logger := logging.NewTestLogger(t)
+		x := &xArm{logger: logger, cmdConn: newModbusConn(addr, logger, nil)}
+
 		resp, err := x.DoCommand(context.Background(), map[string]any{getTCPLoadKey: true})
 		test.That(t, err, test.ShouldBeNil)
-		test.That(t, resp, test.ShouldResemble, map[string]any{
-			tcpLoadKey: map[string]any{"source": "unset"},
+		test.That(t, resp[tcpLoadKey], test.ShouldResemble, map[string]any{
+			"mass_kg":              0.82,
+			"center_of_gravity_mm": []float64{0, 0, 48},
+			"source":               "unset",
+		})
+
+		// Asserted against literals, not the constants the request was built
+		// from: comparing a constant to itself can never fail.
+		req := <-requests
+		test.That(t, req, test.ShouldResemble, []byte{
+			req[0], req[1], // transaction id, allocated by the connection
+			0x00, 0x00, // protocol identifier: standard Modbus, not UFACTORY's private 0x0002
+			0x00, 0x06, // remaining length
+			0x01,       // unit id
+			0x04,       // read input registers
+			0x00, 0x49, // start address 73
+			0x00, 0x04, // register count
 		})
 	})
 

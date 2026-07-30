@@ -36,24 +36,26 @@ type tcpLoad struct {
 // validate rejects values that are malformed rather than merely unusual. Mass
 // above the arm's rating is a separate, softer check — see ratedPayloadKg.
 func (l tcpLoad) validate() error {
-	if math.IsNaN(l.massKg) || math.IsInf(l.massKg, 0) {
-		return fmt.Errorf("tcp load mass must be a finite number, got %v", l.massKg)
+	// encodeTCPLoad narrows to float32, where an out-of-range float64 silently
+	// becomes ±Inf, so the range check must happen after that conversion.
+	finite := func(name string, v float64) error {
+		if math.IsNaN(v) || math.IsInf(float64(float32(v)), 0) {
+			return fmt.Errorf("tcp load %s must be a finite number within float32 range, got %v", name, v)
+		}
+		return nil
+	}
+	if err := finite("mass", l.massKg); err != nil {
+		return err
 	}
 	if l.massKg < 0 {
 		return fmt.Errorf("tcp load mass cannot be negative, got %v", l.massKg)
-	}
-	if math.IsInf(float64(float32(l.massKg)), 0) {
-		return fmt.Errorf("tcp load mass is not representable as float32, got %v", l.massKg)
 	}
 	for _, c := range []struct {
 		name string
 		v    float64
 	}{{"x", l.cogMM.X}, {"y", l.cogMM.Y}, {"z", l.cogMM.Z}} {
-		if math.IsNaN(c.v) || math.IsInf(c.v, 0) {
-			return fmt.Errorf("tcp load center of gravity %s must be a finite number, got %v", c.name, c.v)
-		}
-		if math.IsInf(float64(float32(c.v)), 0) {
-			return fmt.Errorf("tcp load center of gravity %s is not representable as float32, got %v", c.name, c.v)
+		if err := finite("center of gravity "+c.name, c.v); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -108,34 +110,14 @@ func encodeTCPLoad(l tcpLoad, useMM bool) []byte {
 	return out
 }
 
-// hardwareModelFromConfiguredModelName maps a config-derived modelName (the
-// modelName parameter NewXArm is called with, e.g. ModelNameLite) to the
-// corresponding hardwareModel. It exists as a fallback rating-check model for
-// when hardware detection fails: x.detectArm's error path never assigns
-// x.detectedArm (see NewXArm), leaving detectedArm.model at hardwareModel's
-// zero value "" — which is NOT hardwareModelUnknown, matches no case in
-// ratedPayloadKg, and would otherwise let exceedsRating pass every payload
-// unchecked.
-//
-// Unlike a hardware probe, config.Model cannot fail to be known, so this
-// mapping is a signal that cannot fail for any resource actually constructed
-// through this module's registered models. There is no hardwareModelXArm5
-// config option (xArm5 is reachable only via hardware detection), so that
-// case falls to hardwareModelUnknown here, same as any unrecognized name.
-func hardwareModelFromConfiguredModelName(modelName string) hardwareModel {
-	switch modelName {
-	case ModelName6DOF:
-		return hardwareModelXArm6
-	case ModelName7DOF:
-		return hardwareModelXArm7
-	case ModelNameLite:
-		return hardwareModelLite6
-	case ModelName850:
-		return hardwareModelXArm850
-	default:
-		return hardwareModelUnknown
-	}
-}
+// Manufacturer-rated payloads, in kg.
+const (
+	ratedPayloadLite6Kg   = 0.5
+	ratedPayloadXArm5Kg   = 3.0
+	ratedPayloadXArm7Kg   = 3.5
+	ratedPayloadXArm6Kg   = 5.0
+	ratedPayloadXArm850Kg = 5.0
+)
 
 // ratedPayloadKg returns the manufacturer's rated payload for a model. The
 // second return is false when the model is unknown, in which case no rating
@@ -143,13 +125,15 @@ func hardwareModelFromConfiguredModelName(modelName string) hardwareModel {
 func ratedPayloadKg(m hardwareModel) (float64, bool) {
 	switch m {
 	case hardwareModelLite6:
-		return 0.5, true
+		return ratedPayloadLite6Kg, true
 	case hardwareModelXArm5:
-		return 3.0, true
+		return ratedPayloadXArm5Kg, true
 	case hardwareModelXArm7, hardwareModelXArm7T:
-		return 3.5, true
-	case hardwareModelXArm6, hardwareModelXArm850:
-		return 5.0, true
+		return ratedPayloadXArm7Kg, true
+	case hardwareModelXArm6:
+		return ratedPayloadXArm6Kg, true
+	case hardwareModelXArm850:
+		return ratedPayloadXArm850Kg, true
 	case hardwareModelUnknown:
 		return 0, false
 	default:
@@ -176,12 +160,20 @@ func ratedPayloadKg(m hardwareModel) (float64, bool) {
 // false. The xArm BIO Gripper preset (0.72 kg) is also absent: no component in
 // this module is specific to it — myGripperLite is the sole consumer of
 // detectBioGripper. Add it if a distinct bio-gripper component ever exists.
+// End-effector payload presets, transcribed from UFACTORY Studio.
+const (
+	gripperDefaultMassKg       = 0.82
+	gripperDefaultCoGZMM       = 48.0
+	vacuumGripperDefaultMassKg = 0.61
+	vacuumGripperDefaultCoGZMM = 53.0
+)
+
 func gripperDefaultTCPLoad(model resource.Model) (tcpLoad, bool) {
 	switch model {
 	case GripperModel:
-		return tcpLoad{massKg: 0.82, cogMM: r3.Vector{Z: 48}}, true
+		return tcpLoad{massKg: gripperDefaultMassKg, cogMM: r3.Vector{Z: gripperDefaultCoGZMM}}, true
 	case VacuumGripperModel:
-		return tcpLoad{massKg: 0.61, cogMM: r3.Vector{Z: 53}}, true
+		return tcpLoad{massKg: vacuumGripperDefaultMassKg, cogMM: r3.Vector{Z: vacuumGripperDefaultCoGZMM}}, true
 	default:
 		return tcpLoad{}, false
 	}
@@ -228,11 +220,8 @@ func (c *TCPLoadConfig) toTCPLoad() (tcpLoad, error) {
 	return tcpLoadFrom(*c.MassKg, c.CenterOfGravityMM, "tcp_load: ")
 }
 
-// applyConfigTCPLoad applies a config-sourced payload. apply is injected so the
-// source/requester wiring is testable without a controller.
-func applyConfigTCPLoad(ctx context.Context, c *TCPLoadConfig,
-	apply func(context.Context, tcpLoad, tcpLoadSource, string) error,
-) error {
+// applyConfigTCPLoad applies a config-sourced payload, if one is configured.
+func (x *xArm) applyConfigTCPLoad(ctx context.Context, c *TCPLoadConfig) error {
 	if c == nil {
 		return nil
 	}
@@ -240,7 +229,7 @@ func applyConfigTCPLoad(ctx context.Context, c *TCPLoadConfig,
 	if err != nil {
 		return err
 	}
-	return apply(ctx, l, tcpLoadSourceConfig, "config")
+	return x.applyTCPLoad(ctx, l, tcpLoadSourceConfig, "config")
 }
 
 // tcpLoadSource records where the currently-cached payload came from. It is
@@ -308,6 +297,61 @@ func (x *xArm) buildSetTCPLoadCmd(l tcpLoad) cmd {
 func (x *xArm) setTCPLoad(ctx context.Context, l tcpLoad) error {
 	_, err := x.send(ctx, x.buildSetTCPLoadCmd(l), true)
 	return err
+}
+
+// The private protocol has no register to read the payload back, but the
+// standard Modbus server on the same port exposes it as scaled input registers.
+const (
+	modbusUnitID        = 0x01
+	modbusReadInputRegs = 0x04
+	tcpLoadRegAddr      = 73
+	tcpLoadRegCount     = 4
+	tcpLoadMassScale    = 1000.0 // registers hold kg x1000
+	tcpLoadCoGScale     = 10.0   // registers hold mm x10
+)
+
+// readTCPLoad reads the payload the controller currently holds. That can differ
+// from what this module last wrote — UFACTORY Studio and other clients write it
+// too — so this, not the cache, is the source of truth.
+func (x *xArm) readTCPLoad(ctx context.Context) (tcpLoad, error) {
+	c := x.cmdConn.newStandardModbusCmd(modbusUnitID)
+	c.params = make([]byte, 5)
+	c.params[0] = modbusReadInputRegs
+	binary.BigEndian.PutUint16(c.params[1:3], tcpLoadRegAddr)
+	binary.BigEndian.PutUint16(c.params[3:5], tcpLoadRegCount)
+
+	// checkError reads a private-protocol state byte that a Modbus response
+	// does not carry; parseTCPLoadRegisters handles Modbus exceptions instead.
+	resp, err := x.send(ctx, c, false)
+	if err != nil {
+		return tcpLoad{}, err
+	}
+	return parseTCPLoadRegisters(resp.params)
+}
+
+// parseTCPLoadRegisters decodes a read-input-registers response body:
+// [function code, byte count, registers...]. Center-of-gravity registers are
+// signed; mass cannot be negative.
+func parseTCPLoadRegisters(params []byte) (tcpLoad, error) {
+	const wantBytes = tcpLoadRegCount * 2
+	if len(params) < 2 {
+		return tcpLoad{}, fmt.Errorf("tcp load read: response too short (%d bytes)", len(params))
+	}
+	if params[0] != modbusReadInputRegs {
+		return tcpLoad{}, fmt.Errorf("tcp load read: modbus exception 0x%02X (function 0x%02X)", params[1], params[0])
+	}
+	if int(params[1]) != wantBytes || len(params) < 2+wantBytes {
+		return tcpLoad{}, fmt.Errorf("tcp load read: want %d data bytes, got byte count %d in %d bytes",
+			wantBytes, params[1], len(params))
+	}
+	reg := func(i int) uint16 { return binary.BigEndian.Uint16(params[2+i*2:]) }
+	// Reinterpreting the register as signed is the point: the center of gravity
+	// can be negative on any axis.
+	signed := func(i int) float64 { return float64(int16(reg(i))) / tcpLoadCoGScale } //nolint:gosec
+	return tcpLoad{
+		massKg: float64(reg(0)) / tcpLoadMassScale,
+		cogMM:  r3.Vector{X: signed(1), Y: signed(2), Z: signed(3)},
+	}, nil
 }
 
 // exceedsRating reports whether a payload is above the model's rated capacity,
@@ -423,24 +467,14 @@ func (x *xArm) applyTCPLoadWith(
 		return nil
 	}
 
-	// detectedArm is written exactly once, during construction, before the arm
-	// is published (see the field comment in xarm.go), so reading it here
-	// without confLock is safe. Captured once since the value is used below in
-	// more than one place.
+	// detectedArm is written once during construction, before the arm is
+	// published, so reading it here without confLock is safe. When detection
+	// failed it holds no ratable model; the registered model names share the
+	// hardwareModel string space and cannot fail, so config stands in. Without
+	// this a Lite6 whose detection failed would skip the rating check entirely.
 	model := x.detectedArm.model
-	if model == hardwareModelUnknown || model == "" {
-		// Hardware detection failed (or never ran) and left detectedArm.model
-		// at the zero value. Fall back to the model implied by config, which
-		// cannot fail to be known — see hardwareModelFromConfiguredModelName.
-		// This closes the gap where a plain `gripper`/`vacuum_gripper`
-		// component (not the *_lite variant, so gripperDefaultTCPLoad's
-		// config.Model keying does not catch it) configured against a Lite6
-		// whose detection failed would otherwise reach decideTCPLoad with
-		// model == "", match no case in ratedPayloadKg, and be applied with no
-		// rating check at all.
-		if fallback := hardwareModelFromConfiguredModelName(x.configuredModelName); fallback != hardwareModelUnknown {
-			model = fallback
-		}
+	if _, ratable := ratedPayloadKg(model); !ratable {
+		model = hardwareModel(x.configuredModelName)
 	}
 
 	switch d := decideTCPLoad(l, src, current, model); d.action {
@@ -587,13 +621,33 @@ func (x *xArm) applyTCPLoadCommand(ctx context.Context, key string, val any, src
 	return x.applyTCPLoad(ctx, l, src, requesterFor(key, params))
 }
 
-// tcpLoadResponse renders the cached payload for get_tcp_load. When nothing has
-// been written the numeric fields (and requester) are omitted entirely —
-// reporting 0 kg would be indistinguishable from a real zero payload.
-//
-// requester lets a gripper pushing set_default_tcp_load tell its own default
-// apart from a competing gripper's default that got there first: both report
-// source "gripper_default", but only requester says whose.
+// readTCPLoadResponse answers get_tcp_load from the controller, with the
+// provenance of this module's last write alongside. A "source" of unset with
+// non-zero values means something outside this module set the payload.
+func (x *xArm) readTCPLoadResponse(ctx context.Context) (map[string]any, error) {
+	l, err := x.readTCPLoad(ctx)
+	if err != nil {
+		return nil, err
+	}
+	x.confLock.Lock()
+	src, requester := x.tcpLoadSource, x.tcpLoadRequester
+	x.confLock.Unlock()
+
+	resp := map[string]any{
+		"mass_kg":              l.massKg,
+		"center_of_gravity_mm": []float64{l.cogMM.X, l.cogMM.Y, l.cogMM.Z},
+		"source":               src.String(),
+	}
+	if src != tcpLoadSourceUnset {
+		resp["requester"] = requester
+	}
+	return resp, nil
+}
+
+// tcpLoadResponse renders what this module last wrote, for the reply to a
+// set_* command. When nothing has been written the numeric fields (and
+// requester) are omitted — reporting 0 kg would be indistinguishable from a
+// real zero payload.
 func (x *xArm) tcpLoadResponse() map[string]any {
 	x.confLock.Lock()
 	l, src, requester := x.tcpLoad, x.tcpLoadSource, x.tcpLoadRequester
