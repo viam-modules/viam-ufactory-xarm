@@ -197,9 +197,10 @@ type fakeController struct {
 	position uint32
 }
 
-func newFakeController(t *testing.T) *fakeController {
+func newFakeController(ctx context.Context, t *testing.T) *fakeController {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	test.That(t, err, test.ShouldBeNil)
 
 	f := &fakeController{ln: ln}
@@ -233,7 +234,7 @@ func (f *fakeController) serve() {
 }
 
 func (f *fakeController) handle(conn net.Conn) {
-	defer conn.Close() //nolint:errcheck
+	defer conn.Close()
 	for {
 		header := make([]byte, 7)
 		if _, err := io.ReadFull(conn, header); err != nil {
@@ -300,7 +301,7 @@ const (
 // silently discards the speed.
 func TestSetupGripperPreservesSpeed(t *testing.T) {
 	ctx := context.Background()
-	controller := newFakeController(t)
+	controller := newFakeController(ctx, t)
 	x := newTestArm(t, controller.addr(), controller.addr())
 
 	// First setup clears the control mode once, in case a previous process left it enabled.
@@ -326,7 +327,7 @@ func TestSetupGripperPreservesSpeed(t *testing.T) {
 // the configured speed back, because the clear resets it.
 func TestSetupGripperRestoresSpeedAfterTorqueGrasp(t *testing.T) {
 	ctx := context.Background()
-	controller := newFakeController(t)
+	controller := newFakeController(ctx, t)
 	controller.position = 100 // report the grasp target so waitForGripper returns promptly
 	x := newTestArm(t, controller.addr(), controller.addr())
 
@@ -347,8 +348,8 @@ func TestSetupGripperRestoresSpeedAfterTorqueGrasp(t *testing.T) {
 // lets the controller reorder a control-mode write past a speed write on the shared RS485 bus.
 func TestGripperTrafficStaysOnGripperConn(t *testing.T) {
 	ctx := context.Background()
-	cmdController := newFakeController(t)
-	gripperController := newFakeController(t)
+	cmdController := newFakeController(ctx, t)
+	gripperController := newFakeController(ctx, t)
 	gripperController.position = 100
 	x := newTestArm(t, cmdController.addr(), gripperController.addr())
 
