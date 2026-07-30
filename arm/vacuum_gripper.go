@@ -91,7 +91,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 
 	var mf referenceframe.Model
 	if newConf.UseURDFs {
-		mf, err = loadGripperModel(config.Model.Name, newConf.MeshDecimationRatio)
+		mf, err = loadGripperModel(config.Model.Name, newConf.MeshDecimationRatio, logger)
 		if err != nil {
 			return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
 		}

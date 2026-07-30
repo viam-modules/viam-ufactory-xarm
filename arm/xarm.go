@@ -473,16 +473,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 	}
 
 	if newConf.UseURDFs && len(newConf.MeshDecimationRatios) == 0 {
-
+		// Size the ratio slice to the URDF's mesh count so no mesh falls
+		// into RDK's "default 1.0 → raw STL as PLY" path.
 		artifact, err := resolveArmKinematicsArtifact(modelName, x.detectedArm)
 		if err != nil {
 			return nil, multierr.Combine(err, x.Close(ctx))
 		}
-		n, err := countArmURDFMeshes(artifact.urdfBasename)
-		if err != nil {
-			return nil, multierr.Combine(err, x.Close(ctx))
-		}
-		newConf.MeshDecimationRatios = make([]float64, n)
+		newConf.MeshDecimationRatios = make([]float64, artifact.numMeshes)
 		for i := range newConf.MeshDecimationRatios {
 			newConf.MeshDecimationRatios[i] = 0.1
 		}

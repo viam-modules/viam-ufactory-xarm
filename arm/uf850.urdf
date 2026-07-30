@@ -120,11 +120,4 @@
     <limit lower="-6.283185307179586" upper="6.283185307179586"/>
   </joint>
 
-  <link name="link_eef"/>
-
-  <joint name="joint_eef" type="fixed">
-    <origin rpy="0 0 0" xyz="0 0 0"/>
-    <parent link="link6"/>
-    <child link="link_eef"/>
-  </joint>
 </robot>

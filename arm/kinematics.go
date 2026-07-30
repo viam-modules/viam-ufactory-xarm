@@ -1,10 +1,9 @@
 package arm
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 
+	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 )
 
@@ -13,8 +12,10 @@ import (
 type kinematicsArtifact struct {
 	json         []byte
 	urdfBasename string
-	// variant is a short label used only in logs (empty string for the
-	// base variant of a model).
+	// numMeshes is the count of <mesh> refs in the URDF; 0 for grippers
+	// (which use a scalar ratio). Kept in sync with the URDF by hand.
+	numMeshes int
+	// variant is a short label used only in logs.
 	variant string
 }
 
@@ -23,22 +24,23 @@ type armVariantKey struct {
 	armTypeCode int
 }
 
-// armKinematicsBase is keyed by the resource model name. Used when no
-// variant lookup matches.
 var armKinematicsBase = map[string]kinematicsArtifact{
-	ModelName6DOF: {json: xArm6modeljson, urdfBasename: "xarm6"},
-	ModelName7DOF: {json: xArm7modeljson, urdfBasename: "xarm7"},
-	ModelNameLite: {json: lite6modeljson, urdfBasename: "lite6"},
-	ModelName850:  {json: xArm850modeljson, urdfBasename: "uf850"},
+	ModelName6DOF: {json: xArm6modeljson, urdfBasename: "xarm6", numMeshes: 6},
+	ModelName7DOF: {json: xArm7modeljson, urdfBasename: "xarm7", numMeshes: 7},
+	ModelNameLite: {json: lite6modeljson, urdfBasename: "lite6", numMeshes: 7},
+	ModelName850:  {json: xArm850modeljson, urdfBasename: "uf850", numMeshes: 7},
 }
 
+// armTypeCode1305 identifies the xArm6 1305 wrist variant (SN "XI1305…").
+const armTypeCode1305 = 1305
+
 // armKinematicsVariants overrides the base entry when the detected
-// hardware reports a known armTypeCode. xarm6 and xarm6_1305 share the
-// upstream kinematics chain (same joint origins and limits per
-// xarm6_default_kinematics.yaml) — only collision meshes differ, so the
-// variant routes to a distinct URDF but reuses the base JSON.
+// armTypeCode matches. xarm6 and xarm6_1305 share the JSON kinematics;
+// only collision meshes differ.
 var armKinematicsVariants = map[armVariantKey]kinematicsArtifact{
-	{ModelName6DOF, 1305}: {json: xArm6modeljson, urdfBasename: "xarm6_1305", variant: "1305"},
+	{ModelName6DOF, armTypeCode1305}: {
+		json: xArm6modeljson, urdfBasename: "xarm6_1305", numMeshes: 7, variant: "1305",
+	},
 }
 
 func resolveArmKinematicsArtifact(modelName string, detected detectedArm) (kinematicsArtifact, error) {
@@ -51,15 +53,11 @@ func resolveArmKinematicsArtifact(modelName string, detected detectedArm) (kinem
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for xarm model %s", modelName)
 }
 
-// gripperKinematicsBase is keyed by the gripper resource model name. The
-// "vacuum_gripper" and "vacuum_gripper_lite" model names are defined in
-// vacuum_gripper.go; we keep them as string literals here to avoid pulling
-// the Model literals into the registry.
 var gripperKinematicsBase = map[string]kinematicsArtifact{
-	ModelNameGripper:      {urdfBasename: "xarm_gripper"},
-	ModelNameGripperLite:  {urdfBasename: "uflite_gripper"},
-	"vacuum_gripper":      {urdfBasename: "vacuum_gripper"},
-	"vacuum_gripper_lite": {urdfBasename: "lite_vacuum_gripper"},
+	ModelNameGripper:           {urdfBasename: "xarm_gripper"},
+	ModelNameGripperLite:       {urdfBasename: "uflite_gripper"},
+	ModelNameVacuumGripper:     {urdfBasename: "vacuum_gripper"},
+	ModelNameVacuumGripperLite: {urdfBasename: "lite_vacuum_gripper"},
 }
 
 func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, error) {
@@ -69,34 +67,12 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
 }
 
-func countArmURDFMeshes(urdfBasename string) (int, error) {
-	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
-	path := fmt.Sprintf("%s/arm/%s.urdf", moduleRoot, urdfBasename)
-	//nolint:gosec // path is composed from module-owned constants.
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, fmt.Errorf("countArmURDFMeshes: read %s: %w", path, err)
-	}
-	return bytes.Count(data, []byte("<mesh ")), nil
-}
-
-// gripperDefaultMeshDecimationRatio is the value used when the caller passes
-// nil. Not user-configurable; live below 1.0 so the RDK URDF parser takes
-// the re-serialization path (see the 1.0 note below).
 const gripperDefaultMeshDecimationRatio = 0.1
 
-// loadGripperModel parses the URDF for a gripper model. Each gripper URDF
-// has exactly one mesh, so a single decimation ratio suffices.
-//
-// A nil ratio means "caller did not specify" and the internal default
-// applies. Config validation is expected to reject 0 before we get here.
-//
-// A ratio of 1.0 hits an RDK bug: the URDF parser skips decimation entirely
-// and ships the raw source bytes (STL) mislabelled as PLY, which the client
-// then fails to parse with "Invalid ply file". We clamp to just under 1.0 so
-// the parser takes the TrianglesToPLYBytes re-serialization path. Anything
-// strictly less than 1.0 is safe.
-func loadGripperModel(modelName string, meshDecimationRatio *float64) (referenceframe.Model, error) {
+// loadGripperModel parses the gripper URDF. Nil ratio → default.
+// Ratio ≥ 1.0 is clamped to 0.9999: RDK treats 1.0 as "skip decimation"
+// and ships raw STL labelled as PLY, which the client fails to parse.
+func loadGripperModel(modelName string, meshDecimationRatio *float64, logger logging.Logger) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
 		return nil, err
@@ -105,6 +81,9 @@ func loadGripperModel(modelName string, meshDecimationRatio *float64) (reference
 	if meshDecimationRatio != nil {
 		ratio = *meshDecimationRatio
 		if ratio >= 1.0 {
+			if logger != nil {
+				logger.Warnf("mesh_decimation_ratio for %s clamped from %.4f to 0.9999 (RDK bug on 1.0)", modelName, ratio)
+			}
 			ratio = 0.9999
 		}
 	}
