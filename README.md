@@ -420,11 +420,17 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
 **Supported arms:** `xArm6`, `xArm7`, and `xArm850`. The `lite6` is not supported.
 
-> **Prerequisite:** The sensor must be **enabled and calibrated in UFactory Studio
-> before use** (Externals → Torque Sensor: confirm a real SN/firmware appear, then run
-> payload identification / zeroing). This module only reads the sensor; it does not
-> enable or commission it. If the sensor is not enabled and calibrated, reads will
-> fail or return meaningless values.
+> **Prerequisite:** The sensor must be **commissioned in UFactory Studio before use**
+> (Externals → Torque Sensor: confirm a real SN/firmware appear, then run payload
+> identification / zeroing). The module enables the controller's data stream
+> on-demand from `Readings` (it defaults off after a controller boot, which
+> otherwise yields all-zero reads), but it does not run identification/zeroing —
+> do that in Studio first, or reads will return meaningless values.
+
+> **Overloaded sensor:** If reads are all-zero and the sensor's error register is
+> non-zero (over-limit on any axis), the sensor has latched an overload fault. This
+> can only be cleared by **power-cycling the controller**; no software command
+> clears the sensor's own fault latch.
 
 ### Configuration
 
@@ -449,6 +455,12 @@ through the arm's controller connection. Requires controller firmware >= 1.8.3.
 
 Forces (`Fx_N`, `Fy_N`, `Fz_N`) are in newtons; torques (`TRx_Nm`, `TRy_Nm`,
 `TRz_Nm`) are in newton-metres.
+
+If a read comes back all-zero (the signature of a stream that was disabled by a
+controller event), `Readings` attempts a one-shot re-enable and re-reads — so a
+disabled stream self-heals without a reconfigure. If it's still all-zero after
+that (disconnected, or an overload latch that only a power-cycle clears),
+`Readings` returns an error instead of silently reporting zeros.
 
 ### DoCommand
 

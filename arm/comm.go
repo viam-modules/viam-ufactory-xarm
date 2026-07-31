@@ -51,6 +51,7 @@ var regMap = map[string]byte{
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
 	"FTSensorData":   0xC8,
+	"FTSensorEnable": 0xC9,
 	"FTSensorZero":   0xCE,
 	"SetEEModel":     0x4E,
 	"ServoError":     0x6A,
@@ -1511,6 +1512,13 @@ func (x *xArm) getFTSensorData(ctx context.Context) ([]float64, error) {
 
 func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	c := x.newCmd(regMap["FTSensorZero"])
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+func (x *xArm) setFTSensorEnable(ctx context.Context) error {
+	c := x.newCmd(regMap["FTSensorEnable"])
+	c.params = append(c.params, 1) // 1 = enable
 	_, err := x.send(ctx, c, true)
 	return err
 }
