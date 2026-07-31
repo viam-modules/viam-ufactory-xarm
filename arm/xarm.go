@@ -68,6 +68,10 @@ const (
 	ftSensorZeroKey          = "ft_sensor_zero"
 	ftSensorEnableKey        = "ft_sensor_enable"
 	ftSensorDataKey          = "ft_sensor_data"
+	setTCPLoadKey            = "set_tcp_load"
+	getTCPLoadKey            = "get_tcp_load"
+	setDefaultTCPLoadKey     = "set_default_tcp_load"
+	tcpLoadKey               = "tcp_load"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -164,7 +168,54 @@ type xArm struct {
 	speed        float64    // speed=max joint radians per second
 	acceleration float64    // acceleration= joint radians per second increase per second
 
+	// detectedArm is written exactly once, inside NewXArm, before the arm is
+	// published to callers. It is safe to read without confLock: there is never
+	// a second writer.
 	detectedArm detectedArm
+
+	// configuredModelName is the config-derived modelName NewXArm was called
+	// with (e.g. ModelNameLite). Unlike detectedArm.model, it cannot fail to be
+	// populated: it comes from the resource.Model the user configured, not a
+	// hardware probe. Written once, before publish, same as detectedArm — safe
+	// to read without confLock.
+	//
+	// Used as a fallback rating-check model when hardware detection fails
+	// (detectArm's error path never assigns detectedArm, leaving its model at
+	// the zero value "", which matches no case in ratedPayloadKg and would
+	// otherwise let exceedsRating pass everything unchecked). See
+	// hardwareModelFromConfiguredModelName.
+	configuredModelName string
+
+	// tcpLoadConfigRequested records that this arm's config asked for a
+	// tcp_load, independent of whether the write to the controller actually
+	// succeeded. Written once, in NewXArm before publish, and never changes
+	// afterward — same safe-to-read-without-confLock reasoning as detectedArm.
+	//
+	// applyTCPLoadWith only caches a payload after a successful write (see its
+	// comment), so a write that fails (e.g. because the arm never started)
+	// leaves tcpLoadSource at tcpLoadSourceUnset. Without this flag, a gripper
+	// constructed afterward would see "unset" and push its default, silently
+	// superseding the user's explicit — but failed — config write. This is
+	// deliberately NOT folded into the tcpLoad cache itself: the design's rule
+	// that "a failed write leaves the cache untouched" (so get_tcp_load never
+	// reports a value the controller refused) must survive.
+	tcpLoadConfigRequested bool
+
+	// tcpLoad caches the payload this module last wrote to the controller, and
+	// where it came from. The controller has no register to read the payload
+	// back, so this cache is the only answer get_tcp_load can give. Guarded by
+	// confLock, same as speed/acceleration above.
+	tcpLoad          tcpLoad
+	tcpLoadSource    tcpLoadSource
+	tcpLoadRequester string // who set it, for suppression and conflict logging
+
+	// tcpLoadApplyLock serializes whole payload applies. confLock protects the
+	// cache fields; this one makes decide→write→cache atomic against a
+	// concurrent applier, so a gripper default cannot be admitted on a stale
+	// `current` and then land after an explicit write. Held across the
+	// controller write by design; only ever contended by payload writes, which
+	// are rare.
+	tcpLoadApplyLock sync.Mutex
 }
 
 func init() {
@@ -206,6 +257,7 @@ type Config struct {
 	Acceleration         float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
 	MoveHZ               float64        `json:"move_hz,omitempty"`
 	Sensitivity          *int           `json:"collision_sensitivity,omitempty"`
+	TCPLoad              *TCPLoadConfig `json:"tcp_load,omitempty"`
 	BadJoints            []int          `json:"bad-joints"`
 	Motion               string         `json:"motion"`
 	UseURDFs             bool           `json:"use_urdfs,omitempty"`
@@ -238,7 +290,13 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	}
 
 	if cfg.Sensitivity != nil && (*cfg.Sensitivity < 0 || *cfg.Sensitivity > 5) {
-		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", cfg.Sensitivity)
+		return nil, nil, fmt.Errorf("given collision sensitivity %d is invalid, must be 0-5", *cfg.Sensitivity)
+	}
+
+	if cfg.TCPLoad != nil {
+		if _, err := cfg.TCPLoad.toTCPLoad(); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	for i, r := range cfg.MeshDecimationRatios {
@@ -400,6 +458,8 @@ func NewXArm(ctx context.Context, name resource.Name,
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
+
+		configuredModelName: modelName,
 	}
 	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
@@ -473,9 +533,12 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	err = x.start(ctx, false)
-	if err != nil {
-		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
+	// Captured separately from err (rather than reusing it, as the surrounding
+	// code does) because err gets overwritten several times below before the
+	// tcp_load block needs to know whether the arm actually started.
+	startErr := x.start(ctx, false)
+	if startErr != nil {
+		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", startErr)
 	}
 
 	current := []referenceframe.Input{}
@@ -520,6 +583,26 @@ func NewXArm(ctx context.Context, name resource.Name,
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// A config-sourced payload normally fails construction on error, same as
+	// collision sensitivity above. Exception: if the arm never started, the
+	// write fails on the arm's own latched error state, which would destroy the
+	// clear_error recovery path the warning above points at — so warn instead.
+	//
+	// The flag is set before the write is attempted so a gripper constructed
+	// later can tell "config asked for a tcp_load and it failed" apart from
+	// "nothing was ever requested".
+	if newConf.TCPLoad != nil {
+		x.tcpLoadConfigRequested = true
+	}
+	if err := x.applyConfigTCPLoad(ctx, newConf.TCPLoad); err != nil {
+		wrapped := fmt.Errorf("applying tcp_load from config: %w", err)
+		if startErr != nil {
+			logger.Warnf("%v", wrapped)
+		} else {
+			return nil, multierr.Combine(wrapped, x.Close(ctx))
 		}
 	}
 
@@ -947,6 +1030,34 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		if err := x.setFTSensorEnable(ctx); err != nil {
 			return nil, err
 		}
+		validCommand = true
+	}
+
+	if val, ok := cmd[setTCPLoadKey]; ok {
+		if err := x.applyTCPLoadCommand(ctx, setTCPLoadKey, val, tcpLoadSourceDoCommand); err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = x.tcpLoadResponse()
+		validCommand = true
+	}
+
+	// set_default_tcp_load is how gripper components offer their known payload.
+	// It is applied only when this module has written nothing yet, so it can
+	// never overwrite a config value or a runtime set_tcp_load.
+	if val, ok := cmd[setDefaultTCPLoadKey]; ok {
+		if err := x.applyTCPLoadCommand(ctx, setDefaultTCPLoadKey, val, tcpLoadSourceGripperDefault); err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = x.tcpLoadResponse()
+		validCommand = true
+	}
+
+	if _, ok := cmd[getTCPLoadKey]; ok {
+		loaded, err := x.readTCPLoadResponse(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[tcpLoadKey] = loaded
 		validCommand = true
 	}
 

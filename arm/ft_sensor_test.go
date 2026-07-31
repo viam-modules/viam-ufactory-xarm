@@ -17,6 +17,7 @@ import (
 // otherwise it returns the static resp/err.
 type fakeArm struct {
 	arm.Arm
+
 	lastCmd map[string]any
 	resp    map[string]any
 	err     error

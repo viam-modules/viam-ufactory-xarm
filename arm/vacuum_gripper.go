@@ -117,6 +117,11 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 
 	g.connType = resolveGripperConnectionType(newConf.ConnectionType, g.detected.submodel, config.Model, logger)
 
+	// Keyed on config.Model, not detected.submodel: newVacuumGripper serves both
+	// the xArm and Lite6 vacuum models, and a failed probe reports submodel ""
+	// which would otherwise look like the xArm variant.
+	pushGripperDefaultTCPLoad(ctx, g.arm, config.Model, logger)
+
 	return g, nil
 }
 

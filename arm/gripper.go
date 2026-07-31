@@ -291,6 +291,8 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 
 	g.detected = probeGripper(ctx, g.arm, gripperKindStandard, logger)
 
+	pushGripperDefaultTCPLoad(ctx, g.arm, config.Model, logger)
+
 	if newConf.GripperSpeed != 0 {
 		if _, err := g.arm.DoCommand(ctx, map[string]any{
 			setGripperSpeedKey: float64(newConf.GripperSpeed),

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/utils"
@@ -254,4 +255,71 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
+}
+
+// f64 returns a pointer to v, for building TCPLoadConfig literals whose
+// MassKg field distinguishes "omitted" (nil) from "explicit zero" (massKgPtr(0)).
+func massKgPtr(v float64) *float64 { return &v }
+
+func TestTCPLoadConfigValidate(t *testing.T) {
+	base := func(l *TCPLoadConfig) *Config {
+		return &Config{Host: "1.2.3.4", TCPLoad: l}
+	}
+
+	// Absent (no tcp_load attribute at all) is fine.
+	_, _, err := base(nil).Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	// Valid values.
+	_, _, err = base(&TCPLoadConfig{MassKg: massKgPtr(0.82), CenterOfGravityMM: []float64{0, 0, 48}}).Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	// CoG may be omitted; defaults to origin.
+	_, _, err = base(&TCPLoadConfig{MassKg: massKgPtr(0.82)}).Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	// Explicit zero mass is a deliberate "no payload" instruction and is valid.
+	_, _, err = base(&TCPLoadConfig{MassKg: massKgPtr(0)}).Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	// Negative mass is rejected.
+	_, _, err = base(&TCPLoadConfig{MassKg: massKgPtr(-1)}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+
+	// Wrong-length CoG is rejected.
+	_, _, err = base(&TCPLoadConfig{MassKg: massKgPtr(1), CenterOfGravityMM: []float64{0, 48}}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+
+	// Omitted mass is rejected, distinctly from a nil *TCPLoadConfig above:
+	// `"tcp_load": {}` (present but empty) omits mass_kg and must fail, whereas
+	// omitting the tcp_load attribute entirely is a no-op.
+	_, _, err = base(&TCPLoadConfig{}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+
+	// Omitted mass is rejected even when CoG is present.
+	_, _, err = base(&TCPLoadConfig{CenterOfGravityMM: []float64{0, 0, 48}}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+}
+
+func TestTCPLoadConfigToLoad(t *testing.T) {
+	l, err := (&TCPLoadConfig{MassKg: massKgPtr(0.82), CenterOfGravityMM: []float64{1, 2, 48}}).toTCPLoad()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.massKg, test.ShouldAlmostEqual, 0.82, 1e-9)
+	test.That(t, l.cogMM.X, test.ShouldAlmostEqual, 1, 1e-9)
+	test.That(t, l.cogMM.Y, test.ShouldAlmostEqual, 2, 1e-9)
+	test.That(t, l.cogMM.Z, test.ShouldAlmostEqual, 48, 1e-9)
+
+	// Omitted CoG becomes the origin.
+	l, err = (&TCPLoadConfig{MassKg: massKgPtr(0.82)}).toTCPLoad()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.cogMM, test.ShouldResemble, r3.Vector{})
+
+	// Explicit zero mass is accepted and means a genuine zero payload.
+	l, err = (&TCPLoadConfig{MassKg: massKgPtr(0)}).toTCPLoad()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, l.massKg, test.ShouldAlmostEqual, 0, 1e-9)
+
+	// Omitted mass (nil pointer) is rejected, not silently treated as zero.
+	_, err = (&TCPLoadConfig{CenterOfGravityMM: []float64{0, 0, 48}}).toTCPLoad()
+	test.That(t, err, test.ShouldNotBeNil)
 }

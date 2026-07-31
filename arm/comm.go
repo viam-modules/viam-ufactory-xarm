@@ -46,6 +46,7 @@ var regMap = map[string]byte{
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
+	"SetTCPLoad":     0x24,
 	"Sensitivity":    0x25,
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
@@ -143,7 +144,22 @@ func (m *modbusConn) resetConnection() {
 
 func (m *modbusConn) newCmd(reg byte) cmd {
 	m.tid++
-	return cmd{tid: m.tid, prot: 2, reg: reg}
+	return cmd{tid: m.tid, prot: privateModbusProtocolID, reg: reg}
+}
+
+// The MBAP protocol identifier selects which protocol the controller answers
+// with on port 502: UFACTORY's private command set, or an ordinary Modbus TCP
+// server exposing the registers in doc/UF_ModbusTCP_Manual.md.
+const (
+	standardModbusProtocolID = 0
+	privateModbusProtocolID  = 2
+)
+
+// newStandardModbusCmd builds a frame for the standard Modbus server, where
+// reg carries the unit ID and params carry the function code and its data.
+func (m *modbusConn) newStandardModbusCmd(unitID byte) cmd {
+	m.tid++
+	return cmd{tid: m.tid, prot: standardModbusProtocolID, reg: unitID}
 }
 
 func (m *modbusConn) send(ctx context.Context, c cmd, checkError bool) (cmd, error) {
@@ -718,13 +734,9 @@ func (x *xArm) createTrajGenSteps(
 ) ([][]referenceframe.Input, error) {
 	nWaypoints := len(positions) + 1
 	waypoints := make([]float64, 0, nWaypoints*x.dof)
-	for _, inp := range curPos {
-		waypoints = append(waypoints, inp)
-	}
+	waypoints = append(waypoints, curPos...)
 	for _, wp := range positions {
-		for _, inp := range wp {
-			waypoints = append(waypoints, inp)
-		}
+		waypoints = append(waypoints, wp...)
 	}
 
 	x.confLock.Lock()
@@ -1254,7 +1266,7 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 		return err
 	}
 
-	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
+	return x.waitForGripper(ctx, int(position), stall)
 }
 
 // waitForGripper polls gripper position until it reaches goal (within 6),
