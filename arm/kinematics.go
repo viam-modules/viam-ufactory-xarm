@@ -70,8 +70,6 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 const gripperDefaultMeshDecimationRatio = 0.1
 
 // loadGripperModel parses the gripper URDF. Nil ratio → default.
-// Ratio ≥ 1.0 is clamped to 0.9999: RDK treats 1.0 as "skip decimation"
-// and ships raw STL labelled as PLY, which the client fails to parse.
 func loadGripperModel(modelName string, meshDecimationRatio *float64, logger logging.Logger) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
@@ -80,12 +78,6 @@ func loadGripperModel(modelName string, meshDecimationRatio *float64, logger log
 	ratio := gripperDefaultMeshDecimationRatio
 	if meshDecimationRatio != nil {
 		ratio = *meshDecimationRatio
-		if ratio >= 1.0 {
-			if logger != nil {
-				logger.Warnf("mesh_decimation_ratio for %s clamped from %.4f to 0.9999 (RDK bug on 1.0)", modelName, ratio)
-			}
-			ratio = 0.9999
-		}
 	}
-	return makeModelFrameFromURDF(artifact.urdfBasename, modelName, []float64{ratio})
+	return makeModelFrameFromURDF(artifact.urdfBasename, modelName, []float64{ratio}, logger)
 }

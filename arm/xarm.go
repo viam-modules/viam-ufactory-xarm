@@ -321,7 +321,7 @@ func MakeModelFrame(
 
 	var cfg *referenceframe.ModelConfigJSON
 	if useURDFs {
-		parsed, err := makeModelFrameFromURDF(artifact.urdfBasename, modelName, meshDecimationRatios)
+		parsed, err := makeModelFrameFromURDF(artifact.urdfBasename, modelName, meshDecimationRatios, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -356,10 +356,24 @@ func MakeModelFrame(
 	return cfg.ParseConfig(resourceName)
 }
 
-func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64) (referenceframe.Model, error) {
+// makeModelFrameFromURDF parses a URDF into a referenceframe.Model.
+// Ratios ≥ 1.0 are clamped to 0.9999: RDK treats 1.0 as "skip decimation"
+// and ships raw STL labelled as PLY, which the client fails to parse.
+// The input slice is not mutated.
+func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64, logger logging.Logger) (referenceframe.Model, error) {
+	ratios := append([]float64(nil), meshDecimationRatios...)
+	for i, r := range ratios {
+		if r < 1.0 {
+			continue
+		}
+		ratios[i] = 0.9999
+		if logger != nil {
+			logger.Warnf("mesh_decimation_ratio[%d]=%.4f for %s clamped to 0.9999 (RDK bug on 1.0)", i, r, modelName)
+		}
+	}
 	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
 	path := fmt.Sprintf("%s/arm/%s.urdf", moduleRoot, urdfBasename)
-	return referenceframe.ParseModelXMLFile(path, modelName, meshDecimationRatios)
+	return referenceframe.ParseModelXMLFile(path, modelName, ratios)
 }
 
 // newxArm returns a new xArm of the specified modelName.
