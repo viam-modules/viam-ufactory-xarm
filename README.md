@@ -410,7 +410,7 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `lite_vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
-| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `[0, 1]` for the gripper mesh; `0` (the default) keeps it at full fidelity. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
 ## Force Torque Sensor
 
