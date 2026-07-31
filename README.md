@@ -310,7 +310,7 @@ The standard two-finger gripper for xArm6/xArm7.
 | `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
 | `gripper_speed` | int | Optional | Default speed on startup (1–5000). Uses firmware default if omitted. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `xarm_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. |
-| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `[0, 1]` for the gripper mesh; `0` (the default) keeps it at full fidelity, `0.5` reduces it to 50% of its original triangle count. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity, `0.5` reduces it to 50% of its original triangle count. |
 
 ### DoCommand
 
