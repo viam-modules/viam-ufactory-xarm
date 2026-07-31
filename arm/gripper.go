@@ -44,6 +44,16 @@ type GripperConfig struct {
 	// ConnectionType overrides vacuum wiring detection: "plugin" or "contact".
 	// Empty means auto-detect from the arm model.
 	ConnectionType string `json:"connection_type,omitempty"`
+	// UseURDFs opts into URDF-derived mesh geometries. When false (the
+	// default) the gripper reports the hand-authored bounding boxes that
+	// shipped before mesh support landed.
+	UseURDFs bool `json:"use_urdfs,omitempty"`
+	// MeshDecimationRatio only applies when UseURDFs is true. Each gripper
+	// URDF has exactly one mesh, so a scalar is enough. Pointer so a
+	// missing field (nil) is distinguishable from an explicit value; the
+	// call site substitutes an internal default when nil. Must be in (0, 1]
+	// when set — 0 is a validation error (not a "use the default" sentinel).
+	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
 }
 
 // Validate validates the config.
@@ -58,6 +68,12 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	case "", string(connectionPlugin), string(connectionContact):
 	default:
 		return nil, nil, fmt.Errorf(`connection_type must be "plugin" or "contact", got %q`, cfg.ConnectionType)
+	}
+	if cfg.MeshDecimationRatio != nil {
+		r := *cfg.MeshDecimationRatio
+		if r <= 0 || r > 1 {
+			return nil, nil, fmt.Errorf("mesh_decimation_ratio must be in (0, 1] when set, got %f", r)
+		}
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -80,7 +96,9 @@ func init() {
 type myGripperLite struct {
 	resource.AlwaysRebuild
 
-	name resource.Name
+	name     resource.Name
+	mf       referenceframe.Model
+	useURDFs bool
 
 	arm      arm.Arm
 	isMoving atomic.Bool
@@ -96,8 +114,20 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
+	var mf referenceframe.Model
+	if newConf.UseURDFs {
+		mf, err = loadGripperModel(ModelNameGripperLite, newConf.MeshDecimationRatio, logger)
+		if err != nil {
+			return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
+		}
+	} else {
+		mf = referenceframe.NewSimpleModel(ModelNameGripperLite)
+	}
+
 	g := &myGripperLite{
 		name:     config.ResourceName(),
+		mf:       mf,
+		useURDFs: newConf.UseURDFs,
 		logger:   logger,
 		isMoving: atomic.Bool{},
 	}
@@ -188,27 +218,18 @@ func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 }
 
 func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
-	if err != nil {
-		return nil, err
+	if g.useURDFs {
+		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
+		if err != nil {
+			return nil, err
+		}
+		return gif.Geometries(), nil
 	}
-
-	clawSize := r3.Vector{X: 20, Y: 48, Z: 25} // size open
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}), clawSize, "claws")
-	if err != nil {
-		return nil, err
-	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return liteGripperGeometries()
 }
 
 func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return nil, errors.ErrUnsupported
+	return g.mf, nil
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
@@ -226,8 +247,9 @@ func (g *myGripperLite) Status(_ context.Context) (map[string]any, error) {
 type myGripper struct {
 	resource.AlwaysRebuild
 
-	name resource.Name
-	mf   referenceframe.Model
+	name     resource.Name
+	mf       referenceframe.Model
+	useURDFs bool
 
 	arm arm.Arm
 
@@ -245,10 +267,21 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	var mf referenceframe.Model
+	if newConf.UseURDFs {
+		mf, err = loadGripperModel(ModelNameGripper, newConf.MeshDecimationRatio, logger)
+		if err != nil {
+			return nil, fmt.Errorf("gripper kinematics: %w", err)
+		}
+	} else {
+		mf = referenceframe.NewSimpleModel(ModelNameGripper)
+	}
+
 	g := &myGripper{
-		name:   config.ResourceName(),
-		mf:     referenceframe.NewSimpleModel("xarm-gripper"),
-		logger: logger,
+		name:     config.ResourceName(),
+		mf:       mf,
+		useURDFs: newConf.UseURDFs,
+		logger:   logger,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -422,42 +455,18 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
-	caseBox, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}), caseBoxSize, "case-gripper")
-	if err != nil {
-		return nil, err
-	}
-
-	clawSize := r3.Vector{X: 40, Y: 170, Z: 105} // size open
-
-	if false {
-		// until geometries aren't cacheed or model frame works differently can't do this
-		pos, err := g.getPosition(ctx)
+	if g.useURDFs {
+		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err
 		}
-
-		if pos < 20 { // gripper is closed
-			clawSize.Y = 110
-			clawSize.Z = 130
-		}
+		return gif.Geometries(), nil
 	}
-
-	g.logger.Debugf("clawSize: %v", clawSize)
-
-	claws, err := spatialmath.NewBox(spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}), clawSize, "claws")
-	if err != nil {
-		return nil, err
-	}
-
-	return []spatialmath.Geometry{
-		caseBox,
-		claws,
-	}, nil
+	return standardGripperGeometries()
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, fmt.Errorf("temp hack because of issues")
+	return g.mf, nil
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
@@ -470,4 +479,43 @@ func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.I
 
 func (g *myGripper) Status(_ context.Context) (map[string]any, error) {
 	return map[string]any{}, nil
+}
+
+// standardGripperGeometries returns hand-authored bounding boxes for the
+// housing and open-jaw envelope. Used when use_urdfs is false.
+func standardGripperGeometries() ([]spatialmath.Geometry, error) {
+	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
+	caseBox, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}),
+		caseBoxSize, "case-gripper")
+	if err != nil {
+		return nil, err
+	}
+	clawSize := r3.Vector{X: 40, Y: 170, Z: 105}
+	claws, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{Z: 50 + (clawSize.Z / -2)}),
+		clawSize, "claws")
+	if err != nil {
+		return nil, err
+	}
+	return []spatialmath.Geometry{caseBox, claws}, nil
+}
+
+// liteGripperGeometries — hand-authored boxes for the Lite gripper.
+func liteGripperGeometries() ([]spatialmath.Geometry, error) {
+	caseBoxSize := r3.Vector{X: 30, Y: 60, Z: 55.5}
+	caseBox, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}),
+		caseBoxSize, "case-gripper")
+	if err != nil {
+		return nil, err
+	}
+	clawSize := r3.Vector{X: 20, Y: 48, Z: 25}
+	claws, err := spatialmath.NewBox(
+		spatialmath.NewPoseFromPoint(r3.Vector{Z: caseBoxSize.Z/2 + (clawSize.Z / -2)}),
+		clawSize, "claws")
+	if err != nil {
+		return nil, err
+	}
+	return []spatialmath.Geometry{caseBox, claws}, nil
 }

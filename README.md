@@ -56,7 +56,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
-| `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. |
+| `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. Hardware auto-detection selects a variant URDF when applicable — e.g. an xArm6 reporting arm-type code `1305` is loaded from `xarm6_1305.urdf` with its distinct link meshes; other arms use the base URDF for their model. Gripper meshes are opt-in separately via each gripper's own `use_urdfs` flag. |
 | `mesh_decimation_ratios` | []float64 | Optional | `0.1` per link | Per-link mesh simplification ratios when `use_urdfs` is `true`. Each value must be in `[0, 1]`; `0.5` reduces a link to 50% of its original triangle count. List length must match the number of joints (6 for xArm6/Lite6, 7 for xArm7/xArm850). |
 | `trajectory_generator` | object | Optional | — | Configuration for an external [trajectory generator](#trajectory-generator) ML model service. |
 | `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
@@ -309,6 +309,8 @@ The standard two-finger gripper for xArm6/xArm7.
 |------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
 | `gripper_speed` | int | Optional | Default speed on startup (1–5000). Uses firmware default if omitted. |
+| `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `xarm_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity, `0.5` reduces it to 50% of its original triangle count. |
 
 ### DoCommand
 
@@ -349,6 +351,12 @@ Two-finger gripper for the Lite 6.
 }
 ```
 
+| Name | Type | Inclusion | Description |
+|------|------|-----------|-------------|
+| `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
+| `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `uflite_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
+
 ### DoCommand
 
 ```go
@@ -383,6 +391,8 @@ For use with the standard xArm vacuum gripper. Both wiring interfaces are suppor
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
+| `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
 ## Vacuum Gripper Lite
 
@@ -394,6 +404,13 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
   "vacuum_length_mm": 48
 }
 ```
+
+| Attribute | Type | Inclusion | Description |
+|-----------|------|-----------|-------------|
+| `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
+| `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
+| `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `lite_vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
+| `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
 ## Force Torque Sensor
 

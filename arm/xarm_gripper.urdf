@@ -1,0 +1,39 @@
+<?xml version="1.0" ?>
+<robot name="xarm_gripper">
+
+  <link name="world"/>
+
+  <joint name="world_joint" type="fixed">
+    <parent link="world"/>
+    <child link="xarm_gripper_base_link"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+
+  <link name="xarm_gripper_base_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.00065489 -0.0018497 0.048028"/>
+      <mass value="0.54156"/>
+      <inertia ixx="0.00047106" ixy="3.9292E-07" ixz="2.6537E-06" iyy="0.00033072" iyz="-1.0975E-05" izz="0.00025642"/>
+    </inertial>
+    <collision>
+      <geometry>
+        <mesh filename="package://description/meshes/xarm_grippermeshes/base_link.stl"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </collision>
+    <collision>
+      <geometry>
+        <box size="0.04 0.17 0.105"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0.12"/>
+    </collision>
+  </link>
+
+  <link name="link_tcp"/>
+
+  <joint name="joint_tcp" type="fixed">
+    <parent link="xarm_gripper_base_link"/>
+    <child link="link_tcp"/>
+    <origin rpy="0 0 0" xyz="0 0 0.172"/>
+  </joint>
+</robot>
