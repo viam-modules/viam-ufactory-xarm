@@ -89,14 +89,14 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
+	// mf stays nil unless use_urdfs is set; see Kinematics for why the non-URDF
+	// path must not hand back a model.
 	var mf referenceframe.Model
 	if newConf.UseURDFs {
 		mf, err = loadGripperModel(config.Model.Name, newConf.MeshDecimationRatio, logger)
 		if err != nil {
 			return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
 		}
-	} else {
-		mf = referenceframe.NewSimpleModel(config.Model.Name)
 	}
 
 	g := &myVacuumGripper{
@@ -269,7 +269,7 @@ func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]sp
 }
 
 func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, nil
+	return gripperKinematics(g.mf)
 }
 
 func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {

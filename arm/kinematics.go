@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"errors"
 	"fmt"
 
 	"go.viam.com/rdk/logging"
@@ -65,6 +66,22 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 		return base, nil
 	}
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
+}
+
+// gripperKinematics reports a gripper's model to the frame system.
+//
+// A nil mf (use_urdfs unset) MUST surface as an error rather than an empty
+// model. RDK's gripper client only falls back to Geometries() + MakeModel —
+// the sole route by which the hand-authored bounding boxes reach the frame
+// system — when GetKinematics fails. An empty model succeeds instead: it has no
+// ModelConfig, so KinematicModelToProtobuf ships FORMAT_UNSPECIFIED with no
+// data, the client caches a geometry-less model, and the gripper lands in the
+// frame system with nothing to collide against.
+func gripperKinematics(mf referenceframe.Model) (referenceframe.Model, error) {
+	if mf == nil {
+		return nil, errors.ErrUnsupported
+	}
+	return mf, nil
 }
 
 const gripperDefaultMeshDecimationRatio = 0.1
