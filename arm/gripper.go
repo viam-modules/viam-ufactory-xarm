@@ -114,14 +114,14 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
+	// mf stays nil unless use_urdfs is set; see Kinematics for why the non-URDF
+	// path must not hand back a model.
 	var mf referenceframe.Model
 	if newConf.UseURDFs {
 		mf, err = loadGripperModel(ModelNameGripperLite, newConf.MeshDecimationRatio, logger)
 		if err != nil {
 			return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
 		}
-	} else {
-		mf = referenceframe.NewSimpleModel(ModelNameGripperLite)
 	}
 
 	g := &myGripperLite{
@@ -229,7 +229,7 @@ func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spa
 }
 
 func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, nil
+	return gripperKinematics(g.mf)
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
@@ -267,14 +267,14 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
+	// mf stays nil unless use_urdfs is set; see Kinematics for why the non-URDF
+	// path must not hand back a model.
 	var mf referenceframe.Model
 	if newConf.UseURDFs {
 		mf, err = loadGripperModel(ModelNameGripper, newConf.MeshDecimationRatio, logger)
 		if err != nil {
 			return nil, fmt.Errorf("gripper kinematics: %w", err)
 		}
-	} else {
-		mf = referenceframe.NewSimpleModel(ModelNameGripper)
 	}
 
 	g := &myGripper{
@@ -466,7 +466,7 @@ func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatial
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
-	return g.mf, nil
+	return gripperKinematics(g.mf)
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
