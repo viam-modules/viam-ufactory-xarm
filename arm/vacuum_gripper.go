@@ -89,14 +89,11 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	var mf referenceframe.Model
-	if newConf.UseURDFs {
-		mf, err = loadGripperModel(config.Model.Name, newConf.MeshDecimationRatio, logger)
-		if err != nil {
-			return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
-		}
-	} else {
-		mf = referenceframe.NewSimpleModel(config.Model.Name)
+	mf, err := newGripperKinematics(config.Model.Name, newConf, logger, func() ([]spatialmath.Geometry, error) {
+		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
 	}
 
 	g := &myVacuumGripper{

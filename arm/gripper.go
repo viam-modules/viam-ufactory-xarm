@@ -114,14 +114,9 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	var mf referenceframe.Model
-	if newConf.UseURDFs {
-		mf, err = loadGripperModel(ModelNameGripperLite, newConf.MeshDecimationRatio, logger)
-		if err != nil {
-			return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
-		}
-	} else {
-		mf = referenceframe.NewSimpleModel(ModelNameGripperLite)
+	mf, err := newGripperKinematics(ModelNameGripperLite, newConf, logger, liteGripperGeometries)
+	if err != nil {
+		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
 	}
 
 	g := &myGripperLite{
@@ -267,14 +262,9 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
-	var mf referenceframe.Model
-	if newConf.UseURDFs {
-		mf, err = loadGripperModel(ModelNameGripper, newConf.MeshDecimationRatio, logger)
-		if err != nil {
-			return nil, fmt.Errorf("gripper kinematics: %w", err)
-		}
-	} else {
-		mf = referenceframe.NewSimpleModel(ModelNameGripper)
+	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, standardGripperGeometries)
+	if err != nil {
+		return nil, fmt.Errorf("gripper kinematics: %w", err)
 	}
 
 	g := &myGripper{

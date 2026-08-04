@@ -1,10 +1,12 @@
 package arm
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
+	"go.viam.com/rdk/spatialmath"
 )
 
 // kinematicsArtifact identifies the kinematics files to use for an
@@ -65,6 +67,64 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 		return base, nil
 	}
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
+}
+
+// makeGeometryModel builds a zero-DoF kinematics model whose links carry geoms.
+// Each geometry gets its own link, chained parent-to-child, because a link
+// config holds at most one geometry.
+//
+// The config is marshalled into OriginalFile before being parsed. RDK forwards a
+// model over GetKinematics only when ModelConfig().OriginalFile is set (see
+// referenceframe.KinematicModelToProtobuf); without it the response carries no
+// kinematics data, the caller reconstructs an empty model, and the gripper lands
+// in the frame system with nothing to collide against.
+func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referenceframe.Model, error) {
+	if len(geoms) == 0 {
+		return nil, fmt.Errorf("no geometries to build a kinematics model for %s", name)
+	}
+
+	cfg := &referenceframe.ModelConfigJSON{Name: name}
+	parent := referenceframe.World
+	for _, geom := range geoms {
+		frame, err := referenceframe.NewStaticFrameWithGeometry(geom.Label(), spatialmath.NewZeroPose(), geom)
+		if err != nil {
+			return nil, err
+		}
+		link, err := referenceframe.NewLinkConfig(frame)
+		if err != nil {
+			return nil, err
+		}
+		link.Parent = parent
+		parent = geom.Label()
+		cfg.Links = append(cfg.Links, *link)
+	}
+
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.OriginalFile = &referenceframe.ModelFile{Bytes: raw, Extension: "json"}
+
+	return cfg.ParseConfig(name)
+}
+
+// newGripperKinematics builds the model a gripper reports to the frame system:
+// URDF-derived meshes when use_urdfs is set, otherwise a model carrying the
+// hand-authored bounding boxes that boxGeoms produces.
+func newGripperKinematics(
+	modelName string,
+	conf *GripperConfig,
+	logger logging.Logger,
+	boxGeoms func() ([]spatialmath.Geometry, error),
+) (referenceframe.Model, error) {
+	if conf.UseURDFs {
+		return loadGripperModel(modelName, conf.MeshDecimationRatio, logger)
+	}
+	geoms, err := boxGeoms()
+	if err != nil {
+		return nil, err
+	}
+	return makeGeometryModel(modelName, geoms)
 }
 
 const gripperDefaultMeshDecimationRatio = 0.1
