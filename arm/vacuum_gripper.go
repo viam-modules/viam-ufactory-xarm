@@ -2,7 +2,6 @@ package arm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -271,11 +270,11 @@ func (g *myVacuumGripper) Kinematics(ctx context.Context) (referenceframe.Model,
 }
 
 func (g *myVacuumGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	return nil, errors.ErrUnsupported
+	return []referenceframe.Input{}, nil
 }
 
 func (g *myVacuumGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	return nil
 }
 
 func (g *myVacuumGripper) Status(_ context.Context) (map[string]any, error) {
