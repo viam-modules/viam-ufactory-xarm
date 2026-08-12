@@ -89,9 +89,10 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
+	// Vacuum grippers stay 0 DoF pending a design decision on suction state.
 	mf, err := newGripperKinematics(config.Model.Name, newConf, logger, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
-	})
+	}, false)
 	if err != nil {
 		return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
 	}

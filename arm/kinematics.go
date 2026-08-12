@@ -69,7 +69,9 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
 }
 
-// makeGeometryModel builds a zero-DoF kinematics model whose links carry geoms.
+const gripperStateJointID = "open_close"
+
+// makeGeometryModel builds a kinematics model whose links carry geoms.
 // Each geometry gets its own link, chained parent-to-child, because a link
 // config holds at most one geometry.
 //
@@ -78,7 +80,7 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 // referenceframe.KinematicModelToProtobuf); without it the response carries no
 // kinematics data, the caller reconstructs an empty model, and the gripper lands
 // in the frame system with nothing to collide against.
-func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referenceframe.Model, error) {
+func makeGeometryModel(name string, geoms []spatialmath.Geometry, addStateJoint bool) (referenceframe.Model, error) {
 	if len(geoms) == 0 {
 		return nil, fmt.Errorf("no geometries to build a kinematics model for %s", name)
 	}
@@ -99,6 +101,20 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 		cfg.Links = append(cfg.Links, *link)
 	}
 
+	if addStateJoint {
+		// Side branch off the last geometry; pin the primary output to the last
+		// geometry so downstream transforms don't shift with the joint value.
+		cfg.Joints = append(cfg.Joints, referenceframe.JointConfig{
+			ID:     gripperStateJointID,
+			Type:   referenceframe.PrismaticJoint,
+			Parent: parent,
+			Axis:   spatialmath.AxisConfig{X: 0, Y: 0, Z: 1},
+			Min:    0,
+			Max:    1,
+		})
+		cfg.OutputFrames = []string{parent}
+	}
+
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -111,11 +127,15 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 // newGripperKinematics builds the model a gripper reports to the frame system:
 // URDF-derived meshes when use_urdfs is set, otherwise a model carrying the
 // hand-authored bounding boxes that boxGeoms produces.
+//
+// addStateJoint applies only to the non-URDF path; ParseModelXMLFile
+// requires a single leaf and does not honor output_frames.
 func newGripperKinematics(
 	modelName string,
 	conf *GripperConfig,
 	logger logging.Logger,
 	boxGeoms func() ([]spatialmath.Geometry, error),
+	addStateJoint bool,
 ) (referenceframe.Model, error) {
 	if conf.UseURDFs {
 		return loadGripperModel(modelName, conf.MeshDecimationRatio, logger)
@@ -124,7 +144,7 @@ func newGripperKinematics(
 	if err != nil {
 		return nil, err
 	}
-	return makeGeometryModel(modelName, geoms)
+	return makeGeometryModel(modelName, geoms, addStateJoint)
 }
 
 const gripperDefaultMeshDecimationRatio = 0.1

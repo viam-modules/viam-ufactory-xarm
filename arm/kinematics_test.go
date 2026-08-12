@@ -11,7 +11,7 @@ import (
 )
 
 func TestMakeGeometryModelRequiresGeometries(t *testing.T) {
-	_, err := makeGeometryModel(ModelNameGripper, nil)
+	_, err := makeGeometryModel(ModelNameGripper, nil, false)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
@@ -23,7 +23,7 @@ func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 		r3.Vector{X: 50, Y: 100, Z: 100}, "case-gripper")
 	test.That(t, err, test.ShouldBeNil)
 
-	mf, err := makeGeometryModel(ModelNameGripper, []spatialmath.Geometry{box})
+	mf, err := makeGeometryModel(ModelNameGripper, []spatialmath.Geometry{box}, false)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, mf.ModelConfig().OriginalFile, test.ShouldNotBeNil)
 	test.That(t, mf.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "json")
@@ -44,18 +44,24 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
 	for _, tc := range []struct {
-		name  string
-		geoms func() ([]spatialmath.Geometry, error)
+		name          string
+		geoms         func() ([]spatialmath.Geometry, error)
+		addStateJoint bool
+		wantDoF       int
 	}{
-		{ModelNameGripper, standardGripperGeometries},
-		{ModelNameGripperLite, liteGripperGeometries},
+		{ModelNameGripper, standardGripperGeometries, true, 1},
+		{ModelNameGripperLite, liteGripperGeometries, true, 1},
 		{
 			ModelNameVacuumGripper,
 			func() ([]spatialmath.Geometry, error) { return vacuumGripperGeometries(VacuumGripperModel, 30) },
+			false,
+			0,
 		},
 		{
 			ModelNameVacuumGripperLite,
 			func() ([]spatialmath.Geometry, error) { return vacuumGripperGeometries(VacuumGripperModelLite, 0) },
+			false,
+			0,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,12 +69,14 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, want, test.ShouldNotBeEmpty)
 
-			mf, err := newGripperKinematics(tc.name, &GripperConfig{}, logger, tc.geoms)
+			mf, err := newGripperKinematics(tc.name, &GripperConfig{}, logger, tc.geoms, tc.addStateJoint)
 			test.That(t, err, test.ShouldBeNil)
+			test.That(t, mf.DoF(), test.ShouldHaveLength, tc.wantDoF)
 
 			// Round-trip the way the module server and its caller do.
 			rebuilt, err := referenceframe.KinematicModelFromProtobuf(tc.name, referenceframe.KinematicModelToProtobuf(mf))
 			test.That(t, err, test.ShouldBeNil)
+			test.That(t, rebuilt.DoF(), test.ShouldHaveLength, tc.wantDoF)
 
 			got := modelGeometries(t, rebuilt)
 			test.That(t, got, test.ShouldHaveLength, len(want))
@@ -86,6 +94,29 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 				test.That(t, spatialmath.GeometriesAlmostEqual(got[i], before[i]), test.ShouldBeTrue)
 			}
 		})
+	}
+}
+
+// Geometry output must be invariant across the state joint's input range —
+// otherwise consumers parented to the gripper shift with jaw state.
+func TestMakeGeometryModelStateJointDoesNotWarpGeometry(t *testing.T) {
+	geoms, err := standardGripperGeometries()
+	test.That(t, err, test.ShouldBeNil)
+
+	mf, err := makeGeometryModel(ModelNameGripper, geoms, true)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, mf.DoF(), test.ShouldHaveLength, 1)
+
+	closed, err := mf.Geometries([]referenceframe.Input{gripperClosedInput})
+	test.That(t, err, test.ShouldBeNil)
+	open, err := mf.Geometries([]referenceframe.Input{gripperOpenInput})
+	test.That(t, err, test.ShouldBeNil)
+
+	closedGeoms := closed.Geometries()
+	openGeoms := open.Geometries()
+	test.That(t, closedGeoms, test.ShouldHaveLength, len(openGeoms))
+	for i := range closedGeoms {
+		test.That(t, spatialmath.GeometriesAlmostEqual(closedGeoms[i], openGeoms[i]), test.ShouldBeTrue)
 	}
 }
 
