@@ -2,7 +2,6 @@ package arm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -248,7 +247,7 @@ func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Inp
 }
 
 func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	return nil
 }
 
 func (g *myGripperLite) Status(_ context.Context) (map[string]any, error) {
@@ -491,7 +490,7 @@ func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, 
 }
 
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return errors.ErrUnsupported
+	return nil
 }
 
 func (g *myGripper) Status(_ context.Context) (map[string]any, error) {
