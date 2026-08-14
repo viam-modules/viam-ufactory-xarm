@@ -1120,8 +1120,8 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 	return nil
 }
 
-// disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by graspWithTorque.
-// FnC00 enables the FnCxx block-write control mode (speed+torque+position); when left enabled,
+// disableGripperControlMode clears the FnC00 "Control Enable" register (0x0C00) set by the force-control
+// block write. FnC00 enables that block-write control mode (speed+torque+position); when left enabled,
 // subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
 // Writing the block also resets Fn303, so callers that need the configured speed must restore it.
 func (x *xArm) disableGripperControlMode(ctx context.Context) error {
@@ -1246,6 +1246,9 @@ func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
 	return w[0], nil
 }
 
+// Standard-gripper status register (0x0000).
+const standardGripperStatusReg uint16 = 0x0000
+
 // gripperReadHeaderLen is the number of bytes ahead of the register payload in a
 // gripper-bus read response:
 // On a Modbus exception the function code comes back with its high bit set
@@ -1308,45 +1311,14 @@ func (r gripperRegRead) words() []uint16 {
 	return out
 }
 
-// graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
-// applies the requested grasp current/torque atomically with the position move. See section 4.2 of
-// the G2 manual — this mirrors the Python SDK's set_gripper_g2_position(position, speed, force).
-func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, position uint32, stall time.Duration) error {
-	// Clear FnC00 first so the firmware sees a 0->1 transition on the new write,
-	// otherwise back-to-back grasp commands may be ignored while a hold is active.
-	if err := x.disableGripperControlMode(ctx); err != nil {
-		return err
-	}
-
-	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x0C, 0x00)
-	c.params = append(c.params, 0x00, 0x05)
-	c.params = append(c.params, 0x0A)
-
-	buf := make([]byte, 2)
-	binary.BigEndian.PutUint16(buf, 1) // FnC00 enable
-	c.params = append(c.params, buf...)
-	binary.BigEndian.PutUint16(buf, speed) // FnC01
-	c.params = append(c.params, buf...)
-	binary.BigEndian.PutUint16(buf, torque) // FnC02
-	c.params = append(c.params, buf...)
-
-	posBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(posBytes, position) // FnC03 high, FnC04 low
-	c.params = append(c.params, posBytes...)
-
-	x.logger.Debugf("graspWithTorque speed=%d torque=%d position=%d stall=%s", speed, torque, position, stall)
-	// Assume the mode is on before the write lands: a send that fails may still have enabled it,
-	// and wrongly believing it is off makes the next setupGripper skip the clear and the speed
-	// restore, which is the silent speed loss this whole path exists to avoid. Wrongly believing
-	// it is on only costs one extra register write.
-	x.gripperControlMode.Store(true)
-	if _, err := x.gripperSend(ctx, c); err != nil {
-		return err
-	}
-
-	return x.waitForGripper(ctx, int(position), stall)
-}
+// Low two bits of the gripper status register.
+const (
+	gripperStateMask     uint16 = 0x03
+	gripperStateStop     uint16 = 0
+	gripperStateMotion   uint16 = 1
+	gripperStateDetected uint16 = 2
+	gripperStateFault    uint16 = 3
+)
 
 // waitForGripper polls gripper position until it reaches goal (within 6),
 // stalls (no movement >1 for >stall), or 10s elapses as an overall backstop.

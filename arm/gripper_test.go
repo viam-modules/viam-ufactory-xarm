@@ -18,3 +18,13 @@ func TestGripperConfigValidateConnectionType(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "connection_type")
 }
+
+func TestGripperConfigValidateVersionAndForce(t *testing.T) {
+	_, _, err := (&GripperConfig{Arm: "a", GripperVersion: "G3"}).Validate("p")
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "gripper_version")
+
+	_, _, err = (&GripperConfig{Arm: "a", GripperForce: 101}).Validate("p")
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "gripper_force")
+}

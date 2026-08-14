@@ -792,7 +792,10 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 			}
 			stall = time.Duration(stallF * float64(time.Second))
 		}
-		if err := x.graspWithTorque(ctx, uint16(speedF), uint16(torqueF), uint32(positionF), stall); err != nil {
+		if err := writeForceControlBlock(ctx, x, uint16(speedF), uint16(torqueF), uint32(positionF)); err != nil {
+			return nil, err
+		}
+		if err := x.waitForGripper(ctx, int(positionF), stall); err != nil {
 			return nil, err
 		}
 		validCommand = true

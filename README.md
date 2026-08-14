@@ -296,19 +296,26 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 ## Gripper
 
-The standard two-finger gripper for xArm6/xArm7.
+The standard two-finger gripper for xArm6/xArm7, in both the G1 and the current G2 (AG1200) generation.
+
+The generation is detected at startup by probing for force control: the module reads the G2 control block at `0x0C00`, and a gripper that rejects it with a Modbus exception is a G1. Set `gripper_version` to skip detection entirely.
+
+On a G2 the module uses the force block-write for `Grab`/`Open` and reads the gripper's own object-detected bit for `IsHoldingSomething`
 
 ```json
 {
   "arm": "my-xarm",
-  "gripper_speed": 2000
+  "gripper_speed": 2000,
+  "gripper_force": 50
 }
 ```
 
 | Name | Type | Inclusion | Description |
 |------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
-| `gripper_speed` | int | Optional | Default speed on startup (1–5000). Uses firmware default if omitted. |
+| `gripper_version` | string | Optional | `"g1"` or `"g2"`. Bypasses detection entirely. Omit to detect from firmware version. |
+| `gripper_speed` | int | Optional | Default speed on startup (1–5000). G2 defaults to 2000; G1 is left on its firmware default (1500) when omitted. |
+| `gripper_force` | int | Optional | G2 only. Grasp force as a percentage (1–100). Defaults to 50. Ignored on a G1, which has no force register. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `xarm_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity, `0.5` reduces it to 50% of its original triangle count. |
 

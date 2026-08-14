@@ -43,6 +43,8 @@ const (
 	submodelV1   = "v1"
 	submodelV2   = "v2"
 	submodelLite = "lite"
+	submodelG1   = "g1"
+	submodelG2   = "g2"
 )
 
 // Two-letter SN prefixes UFactory burns into the controller banner. These are
@@ -208,49 +210,35 @@ func (x *xArm) detectVersion(ctx context.Context) (versionInfo, error) {
 
 // Modbus register start addresses used by gripper probes.
 const (
-	standardGripperVersionReg uint16 = 0x0801 // SOFT_VER, 3 consecutive regs: major.minor.patch
+	standardGripperVersionReg uint16 = 0x0801
 	bioGripperSNReg           uint16 = 0x0B10 // BIO serial-number block, up to 16 regs
 )
 
 func (x *xArm) detectStandardGripper(ctx context.Context) (detectedGripper, error) {
-	const numRegs = 3
-	c := x.gripperPreamble(false)
-	c.params = binary.BigEndian.AppendUint16(c.params, standardGripperVersionReg)
-	c.params = binary.BigEndian.AppendUint16(c.params, numRegs)
-	res, err := x.gripperSend(ctx, c)
+	r, err := x.readGripperRegisters(ctx, standardGripperVersionReg, 3)
 	if err != nil {
 		return unknownGripper(), err
 	}
-	const headerLen = 5
-	wantLen := headerLen + 2*numRegs
-	if len(res.params) < wantLen {
-		return unknownGripper(),
-			fmt.Errorf("standard gripper version response too short: got %d, want %d (%v)", len(res.params), wantLen, res.params)
+	if r.exception != 0 {
+		return unknownGripper(), fmt.Errorf("standard gripper version read rejected with Modbus exception 0x%02X (%v)", r.exception, r.params)
 	}
-	data := res.params[headerLen : headerLen+2*numRegs]
-	major := binary.BigEndian.Uint16(data[0:2])
-	minor := binary.BigEndian.Uint16(data[2:4])
-	patch := binary.BigEndian.Uint16(data[4:6])
+	v := r.words()
+	if len(v) != 3 {
+		return unknownGripper(), fmt.Errorf("standard gripper version response malformed: %v (%v)", v, r.params)
+	}
 	return detectedGripper{
-		kind:     gripperKindStandard,
-		version:  fmt.Sprintf("%d.%d.%d", major, minor, patch),
-		submodel: standardGripperSubmodel(major, minor, patch),
+		kind:    gripperKindStandard,
+		version: fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2]),
 	}, nil
 }
 
-// standardGripperSubmodel splits at firmware >= 3.4.3, the gate for
-// status-register (0x0000) support on the standard gripper.
-func standardGripperSubmodel(major, minor, patch uint16) string {
-	switch {
-	case major > 3:
-		return submodelV2
-	case major == 3 && minor > 4:
-		return submodelV2
-	case major == 3 && minor == 4 && patch >= 3:
-		return submodelV2
-	default:
-		return submodelV1
+// submodelFromForceControlProbe turns a read of the FnCxx force-control block
+// into a G1 or G2 submodel.
+func submodelFromForceControlProbe(r gripperRegRead) string {
+	if r.exception != 0 {
+		return submodelG1
 	}
+	return submodelG2
 }
 
 // detectBioGripper: byteCount==2 means v1 (single-register response), 2*numRegs
@@ -284,6 +272,35 @@ func (x *xArm) detectBioGripper(ctx context.Context) (detectedGripper, error) {
 		return unknownGripper(),
 			fmt.Errorf("bio gripper unexpected byte count: %d (%v)", byteCount, res.params)
 	}
+}
+
+// resolveGripperSubmodel decides which hardware generation the standard gripper
+// is by probing for force control, and logs the firmware version on the way past.
+
+func resolveGripperSubmodel(ctx context.Context, x *xArm, logger logging.Logger) (detectedGripper, error) {
+	d := detectedGripper{kind: gripperKindStandard}
+
+	if fw, err := x.detectStandardGripper(ctx); err != nil {
+		logger.Warnf("standard gripper: could not read the firmware version: %v", err)
+	} else {
+		d = fw
+		logger.Infof("standard gripper: firmware %s", d.version)
+	}
+
+	r, err := x.readGripperRegisters(ctx, gripperControlModeReg, gripperForceControlRegs)
+	if err != nil {
+		return d, fmt.Errorf(
+			"standard gripper: cannot detect the generation: %w. Set gripper_version in the config to skip detection", err)
+	}
+	if r.exception != 0 {
+		logger.Debugf("standard gripper: force-control block rejected with Modbus exception 0x%02X (raw %v)", r.exception, r.params)
+	} else {
+		logger.Debugf("standard gripper: force-control block read back %v (raw %v)", r.words(), r.params)
+	}
+
+	d.submodel = submodelFromForceControlProbe(r)
+	logger.Infof("standard gripper: detected %s", d.submodel)
+	return d, nil
 }
 
 func probeGripper(ctx context.Context, a arm.Arm, kind gripperKind, logger logging.Logger) detectedGripper {
