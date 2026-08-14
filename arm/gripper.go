@@ -35,11 +35,6 @@ var (
 const fullyClosedThreshold = 10
 const fullyOpenThreshold = 830
 
-const (
-	gripperClosedInput = 0.0
-	gripperOpenInput   = 1.0
-)
-
 // GripperConfig config for gripper.
 type GripperConfig struct {
 	Arm            string
@@ -118,7 +113,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	mf, err := newGripperKinematics(ModelNameGripperLite, newConf, logger, liteGripperGeometries, true)
+	mf, err := newGripperKinematics(ModelNameGripperLite, newConf, logger, liteGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
 	}
@@ -232,18 +227,7 @@ func (g *myGripperLite) Kinematics(ctx context.Context) (referenceframe.Model, e
 }
 
 func (g *myGripperLite) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	if len(g.mf.DoF()) == 0 {
-		return []referenceframe.Input{}, nil
-	}
-	status, err := g.IsHoldingSomething(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	v := gripperOpenInput
-	if status.IsHoldingSomething {
-		v = gripperClosedInput
-	}
-	return []referenceframe.Input{v}, nil
+	return []referenceframe.Input{}, nil
 }
 
 func (g *myGripperLite) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
@@ -277,7 +261,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		return nil, err
 	}
 
-	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, standardGripperGeometries, true)
+	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, standardGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper kinematics: %w", err)
 	}
@@ -475,18 +459,7 @@ func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error
 }
 
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	if len(g.mf.DoF()) == 0 {
-		return []referenceframe.Input{}, nil
-	}
-	pos, err := g.getPosition(ctx)
-	if err != nil {
-		return nil, err
-	}
-	v := gripperClosedInput
-	if pos > (fullyClosedThreshold+fullyOpenThreshold)/2 {
-		v = gripperOpenInput
-	}
-	return []referenceframe.Input{v}, nil
+	return []referenceframe.Input{}, nil
 }
 
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
