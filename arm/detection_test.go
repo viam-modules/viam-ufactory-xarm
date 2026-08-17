@@ -88,25 +88,6 @@ func TestParseVersionBanner(t *testing.T) {
 	}
 }
 
-func TestStandardGripperSubmodel(t *testing.T) {
-	tests := []struct {
-		name              string
-		major, minor, pat uint16
-		want              string
-	}{
-		{"old major", 2, 9, 9, "v1"},
-		{"3.4.2 just below gate", 3, 4, 2, "v1"},
-		{"3.4.3 exact gate", 3, 4, 3, "v2"},
-		{"3.5.0 above gate", 3, 5, 0, "v2"},
-		{"4.0.0", 4, 0, 0, "v2"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			test.That(t, standardGripperSubmodel(tc.major, tc.minor, tc.pat), test.ShouldEqual, tc.want)
-		})
-	}
-}
-
 func TestVacuumGripperSubmodel(t *testing.T) {
 	tests := []struct {
 		name string
@@ -176,4 +157,18 @@ func TestDecodehardwareModel(t *testing.T) {
 			test.That(t, got, test.ShouldEqual, tc.want)
 		})
 	}
+}
+
+// Generation detection, from the bytes the controller actually sent. Frames
+// captured verbatim from a real G1 on firmware 3.6.0 and a real G2 on 5.2.1: the
+// G1 rejects the force-control block, the G2 reads it back.
+func TestSubmodelFromForceControlProbe(t *testing.T) {
+	g1, err := decodeGripperRegRead(gripperControlModeReg, gripperForceControlRegs, []byte{16, 9, 8, 131, 2})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, submodelFromForceControlProbe(g1), test.ShouldEqual, submodelG1)
+
+	g2, err := decodeGripperRegRead(gripperControlModeReg, gripperForceControlRegs,
+		[]byte{0, 9, 8, 3, 10, 0, 0, 0, 100, 0, 50, 0, 0, 0, 0})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, submodelFromForceControlProbe(g2), test.ShouldEqual, submodelG2)
 }

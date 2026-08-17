@@ -47,7 +47,10 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 		name  string
 		geoms func() ([]spatialmath.Geometry, error)
 	}{
-		{ModelNameGripper, standardGripperGeometries},
+		{
+			ModelNameGripper,
+			func() ([]spatialmath.Geometry, error) { return standardGripperGeometries(submodelG2) },
+		},
 		{ModelNameGripperLite, liteGripperGeometries},
 		{
 			ModelNameVacuumGripper,
