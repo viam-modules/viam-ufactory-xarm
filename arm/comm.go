@@ -718,13 +718,9 @@ func (x *xArm) createTrajGenSteps(
 ) ([][]referenceframe.Input, error) {
 	nWaypoints := len(positions) + 1
 	waypoints := make([]float64, 0, nWaypoints*x.dof)
-	for _, inp := range curPos {
-		waypoints = append(waypoints, inp)
-	}
+	waypoints = append(waypoints, curPos...)
 	for _, wp := range positions {
-		for _, inp := range wp {
-			waypoints = append(waypoints, inp)
-		}
+		waypoints = append(waypoints, wp...)
 	}
 
 	x.confLock.Lock()
@@ -1286,7 +1282,7 @@ func (x *xArm) graspWithTorque(ctx context.Context, speed, torque uint16, positi
 		return err
 	}
 
-	return x.waitForGripper(ctx, int(position), stall) //nolint:gosec
+	return x.waitForGripper(ctx, int(position), stall)
 }
 
 // waitForGripper polls gripper position until it reaches goal (within 6),
