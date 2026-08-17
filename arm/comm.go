@@ -1125,17 +1125,7 @@ func (x *xArm) setupGripper(ctx context.Context) error {
 // subsequent standalone Fn700 position commands may not work reliably. See G2 manual section 4.1.7.
 // Writing the block also resets Fn303, so callers that need the configured speed must restore it.
 func (x *xArm) disableGripperControlMode(ctx context.Context) error {
-	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x0C, 0x00)
-	c.params = append(c.params, 0x00, 0x01)
-	c.params = append(c.params, 0x02)
-	c.params = append(c.params, 0x00, 0x00)
-	x.logger.Debugf("disableGripperControlMode")
-	if _, err := x.gripperSend(ctx, c); err != nil {
-		return err
-	}
-	x.gripperControlMode.Store(false)
-	return nil
+	return x.writeGripperRegisters(ctx, gripperControlModeReg, []uint16{0})
 }
 
 // restoreGripperSpeed re-writes the last speed passed to setGripperSpeed. No-op if none was set,
@@ -1174,75 +1164,148 @@ func (x *xArm) gripperSend(ctx context.Context, c cmd) (cmd, error) {
 	return x.gripperConn.send(ctx, c, true)
 }
 
-func (x *xArm) enableGripper(ctx context.Context) error {
-	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x01, 0x00)
-	c.params = append(c.params, 0x00, 0x01)
-	c.params = append(c.params, 0x02)
-	c.params = append(c.params, 0x00, 0x01)
-	_, err := x.gripperSend(ctx, c)
-	return err
-}
+// Gripper-bus registers.
+const (
+	gripperSpeedReg       uint16 = 0x0303 // Fn303 position-mode speed
+	gripperControlModeReg uint16 = 0x0C00 // FnC00, first word of the force-control block
+	gripperEnableReg      uint16 = 0x0100
+	gripperModeReg        uint16 = 0x0101
+	gripperTargetPosReg   uint16 = 0x0700
+	gripperCurrentPosReg  uint16 = 0x0702
+)
 
-func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
-	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x01, 0x01)
-	c.params = append(c.params, 0x00, 0x01)
-	c.params = append(c.params, 0x02)
-	if speed {
-		c.params = append(c.params, 0x00, 0x01)
-	} else {
-		c.params = append(c.params, 0x00, 0x00)
+// writeGripperRegisters writes consecutive holding registers over the gripper
+// bus.
+//
+// The two cached values the arm keeps — gripperControlMode and gripperSpeed —
+// are updated here rather than by callers.
+func (x *xArm) writeGripperRegisters(ctx context.Context, addr uint16, values []uint16) error {
+	if len(values) == 0 || len(values) > 127 {
+		return fmt.Errorf("gripper register 0x%04X write: bad value count %d", addr, len(values))
 	}
-	_, err := x.gripperSend(ctx, c)
-	return err
-}
 
-func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x07, 0x00)
-	c.params = append(c.params, 0x00, 0x02)
-	c.params = append(c.params, 0x04)
-	tmpBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(tmpBytes, position)
-	x.logger.Debugf("setGripperPosition bytes: %v", tmpBytes)
-	c.params = append(c.params, tmpBytes...)
-	_, err := x.gripperSend(ctx, c)
-	return err
-}
+	c.params = binary.BigEndian.AppendUint16(c.params, addr)
+	c.params = binary.BigEndian.AppendUint16(c.params, uint16(len(values))) //nolint:gosec // bounded by the caller.
+	c.params = append(c.params, byte(2*len(values)))
+	for _, v := range values {
+		c.params = binary.BigEndian.AppendUint16(c.params, v)
+	}
 
-func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
-	c := x.gripperPreamble(true)
-	c.params = append(c.params, 0x03, 0x03)
-	c.params = append(c.params, 0x00, 0x01)
-	c.params = append(c.params, 0x02)
-	tmpBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(tmpBytes, speed)
-	x.logger.Debugf("setGripperSpeed bytes: %v", tmpBytes)
-	c.params = append(c.params, tmpBytes...)
+	x.logger.Debugf("writeGripperRegisters 0x%04X <- %v", addr, values)
+
+	first := values[0]
+	if addr == gripperControlModeReg && first != 0 {
+		x.gripperControlMode.Store(true)
+	}
 	if _, err := x.gripperSend(ctx, c); err != nil {
 		return err
 	}
-	x.gripperSpeed.Store(uint32(speed))
+	if addr == gripperControlModeReg && first == 0 {
+		x.gripperControlMode.Store(false)
+	}
+	if addr == gripperSpeedReg {
+		x.gripperSpeed.Store(uint32(first))
+	}
 	return nil
 }
 
+func (x *xArm) enableGripper(ctx context.Context) error {
+	return x.writeGripperRegisters(ctx, gripperEnableReg, []uint16{1})
+}
+
+func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
+	mode := uint16(0)
+	if speed {
+		mode = 1
+	}
+	return x.writeGripperRegisters(ctx, gripperModeReg, []uint16{mode})
+}
+
+func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
+	return x.writeGripperRegisters(ctx, gripperTargetPosReg,
+		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)}) //nolint:gosec // split of a 32-bit value.
+}
+
+func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
+	return x.writeGripperRegisters(ctx, gripperSpeedReg, []uint16{speed})
+}
+
 func (x *xArm) getGripperSpeed(ctx context.Context) (uint16, error) {
-	c := x.gripperPreamble(false)
-	c.params = append(c.params, 0x03, 0x03)
-	c.params = append(c.params, 0x00, 0x01)
-	res, err := x.gripperSend(ctx, c)
+	r, err := x.readGripperRegisters(ctx, gripperSpeedReg, 1)
 	if err != nil {
 		return 0, err
 	}
+	if r.exception != 0 {
+		return 0, fmt.Errorf("gripper speed read rejected with Modbus exception 0x%02X (%v)", r.exception, r.params)
+	}
+	w := r.words()
+	if len(w) != 1 {
+		return 0, fmt.Errorf("unexpected length for getGripperSpeed response: %d %v", len(r.params), r.params)
+	}
+	return w[0], nil
+}
 
-	x.logger.Debugf("getGripperSpeed: %v %v", res, res.params)
+// gripperReadHeaderLen is the number of bytes ahead of the register payload in a
+// gripper-bus read response:
+// On a Modbus exception the function code comes back with its high bit set
+// (0x03 -> 0x83) and the byte-count slot carries the exception code instead.
+const gripperReadHeaderLen = 5
 
-	if len(res.params) != 7 {
-		return 0, fmt.Errorf("unexpected length for getGripperSpeed response: %d %v", len(res.params), res.params)
+// gripperRegRead is a decoded gripper-bus register read. A non-zero exception
+// means the gripper refused the address; 0x02 ("illegal data address").
+type gripperRegRead struct {
+	params    []byte // the whole raw response, kept for logging
+	exception byte
+	data      []byte
+}
+
+// readGripperRegisters reads count consecutive holding registers starting at
+// addr over the gripper bus.
+func (x *xArm) readGripperRegisters(ctx context.Context, addr, count uint16) (gripperRegRead, error) {
+	c := x.gripperPreamble(false)
+	c.params = binary.BigEndian.AppendUint16(c.params, addr)
+	c.params = binary.BigEndian.AppendUint16(c.params, count)
+	res, err := x.gripperSend(ctx, c)
+	if err != nil {
+		return gripperRegRead{}, err
+	}
+	return decodeGripperRegRead(addr, count, res.params)
+}
+
+// decodeGripperRegRead splits a gripper-bus read response into an exception code
+// or a register payload.
+func decodeGripperRegRead(addr, count uint16, params []byte) (gripperRegRead, error) {
+	r := gripperRegRead{params: params}
+
+	if len(params) < gripperReadHeaderLen {
+		return r, fmt.Errorf("gripper register 0x%04X read: response too short: got %d, want at least %d (%v)",
+			addr, len(params), gripperReadHeaderLen, params)
+	}
+	if params[3]&0x80 != 0 {
+		r.exception = params[4]
+		return r, nil
 	}
 
-	return binary.BigEndian.Uint16(res.params[5:]), nil
+	byteCount := int(params[4])
+	if want := int(2 * count); byteCount != want {
+		return r, fmt.Errorf("gripper register 0x%04X read: byte count %d, want %d (%v)", addr, byteCount, want, params)
+	}
+	if len(params) < gripperReadHeaderLen+byteCount {
+		return r, fmt.Errorf("gripper register 0x%04X read: truncated, got %d bytes, want %d (%v)",
+			addr, len(params), gripperReadHeaderLen+byteCount, params)
+	}
+	r.data = params[gripperReadHeaderLen : gripperReadHeaderLen+byteCount]
+	return r, nil
+}
+
+// words decodes the payload as big-endian 16-bit registers.
+func (r gripperRegRead) words() []uint16 {
+	out := make([]uint16, 0, len(r.data)/2)
+	for i := 0; i+1 < len(r.data); i += 2 {
+		out = append(out, binary.BigEndian.Uint16(r.data[i:i+2]))
+	}
+	return out
 }
 
 // graspWithTorque issues the FnCxx block-write (start address 0x0C00, 5 registers) so the gripper
@@ -1328,23 +1391,18 @@ func (x *xArm) waitForGripper(ctx context.Context, goal int, stall time.Duration
 }
 
 func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
-	c := x.gripperPreamble(false)
-	c.params = append(c.params, 0x07, 0x02)
-	c.params = append(c.params, 0x00, 0x02)
-	res, err := x.gripperSend(ctx, c)
+	r, err := x.readGripperRegisters(ctx, gripperCurrentPosReg, 2)
 	if err != nil {
 		return 0, err
 	}
-
-	x.logger.Debugf("getGripperPosition: %v %v", res, res.params)
-
-	// open  : 0 9 8 3 4 0 0 3 73
-	// closed: 0 9 8 3 4 0 0 0 0
-	if len(res.params) != 9 {
-		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(res.params), res.params)
+	if r.exception != 0 {
+		return 0, fmt.Errorf("gripper position read rejected with Modbus exception 0x%02X (%v)", r.exception, r.params)
 	}
-
-	return int32(binary.BigEndian.Uint32(res.params[5:])), nil //nolint:gosec
+	w := r.words()
+	if len(w) != 2 {
+		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(r.params), r.params)
+	}
+	return int32(uint32(w[0])<<16 | uint32(w[1])), nil //nolint:gosec
 }
 
 // vacuumStateFromResponse decodes "object picked" from a DIGITAL_IN (0x0A14)
