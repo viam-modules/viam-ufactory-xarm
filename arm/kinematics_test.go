@@ -50,10 +50,8 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 		{
 			ModelNameGripper,
 			func() ([]spatialmath.Geometry, error) { return standardGripperGeometries(submodelG2) },
-			true,
-			1,
 		},
-		{ModelNameGripperLite, liteGripperGeometries, true, 1},
+		{ModelNameGripperLite, liteGripperGeometries},
 		{
 			ModelNameVacuumGripper,
 			func() ([]spatialmath.Geometry, error) { return vacuumGripperGeometries(VacuumGripperModel, 30) },
@@ -93,29 +91,6 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 				test.That(t, spatialmath.GeometriesAlmostEqual(got[i], before[i]), test.ShouldBeTrue)
 			}
 		})
-	}
-}
-
-// Geometry output must be invariant across the state joint's input range —
-// otherwise consumers parented to the gripper shift with jaw state.
-func TestMakeGeometryModelStateJointDoesNotWarpGeometry(t *testing.T) {
-	geoms, err := standardGripperGeometries(submodelG2)
-	test.That(t, err, test.ShouldBeNil)
-
-	mf, err := makeGeometryModel(ModelNameGripper, geoms, true)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, mf.DoF(), test.ShouldHaveLength, 1)
-
-	closed, err := mf.Geometries([]referenceframe.Input{gripperClosedInput})
-	test.That(t, err, test.ShouldBeNil)
-	open, err := mf.Geometries([]referenceframe.Input{gripperOpenInput})
-	test.That(t, err, test.ShouldBeNil)
-
-	closedGeoms := closed.Geometries()
-	openGeoms := open.Geometries()
-	test.That(t, closedGeoms, test.ShouldHaveLength, len(openGeoms))
-	for i := range closedGeoms {
-		test.That(t, spatialmath.GeometriesAlmostEqual(closedGeoms[i], openGeoms[i]), test.ShouldBeTrue)
 	}
 }
 

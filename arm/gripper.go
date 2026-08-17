@@ -323,7 +323,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	}
 	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, func() ([]spatialmath.Geometry, error) {
 		return standardGripperGeometries(submodel)
-	}, true)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("gripper kinematics: %w", err)
 	}
