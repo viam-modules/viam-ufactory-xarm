@@ -48,7 +48,7 @@ func TestMakeModelFrameJSON(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame("", tc.model, nil, nil, false, nil, logger, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, false, nil, logger, 0, 0, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -76,7 +76,7 @@ func TestMakeModelFrameURDF(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame("", tc.model, nil, nil, true, nil, logger, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, true, nil, logger, 0, 0, 0)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, m, test.ShouldNotBeNil)
 			test.That(t, len(m.DoF()), test.ShouldEqual, tc.expected)
@@ -90,14 +90,14 @@ func TestMakeModelFrameURDFMissingEnv(t *testing.T) {
 	// Ensure VIAM_MODULE_ROOT points to a nonexistent directory.
 	t.Setenv("VIAM_MODULE_ROOT", "/nonexistent/path")
 
-	_, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
 func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("", "unknownModel", nil, nil, true, nil, logger, 0)
+	_, err := MakeModelFrame("", "unknownModel", nil, nil, true, nil, logger, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
@@ -111,7 +111,7 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 		current[i] = 0
 	}
 
-	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0)
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
@@ -120,6 +120,57 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 func TestUseURDFsDefaultsFalse(t *testing.T) {
 	cfg := &Config{}
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
+}
+
+// The point of publishing limits is that they leave the module, so this checks the bytes RDK
+// actually sends rather than the model we happen to be holding.
+func TestMakeModelFramePublishesSpeedLimits(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	const speed, accel = 45.0, 300.0
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, speed, accel)
+	test.That(t, err, test.ShouldBeNil)
+
+	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
+	test.That(t, err, test.ShouldBeNil)
+
+	// a trajectory generator can use this arm, and every joint carries the configured speed
+	vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
+	test.That(t, ok, test.ShouldBeTrue)
+	test.That(t, vels, test.ShouldHaveLength, 6)
+	for i := range vels {
+		test.That(t, vels[i], test.ShouldAlmostEqual, utils.DegToRad(speed), 1e-8)
+		test.That(t, accs[i], test.ShouldAlmostEqual, utils.DegToRad(accel), 1e-8)
+	}
+}
+
+// Without speeds there is nothing to advertise, and the arm must not claim bounds it was never
+// given, or the motion service would plan timing against numbers nobody chose.
+func TestMakeModelFrameWithoutSpeedsIsUnbounded(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+
+	_, _, ok := referenceframe.TrajectoryLimits(m.DoF())
+	test.That(t, ok, test.ShouldBeFalse)
+}
+
+// A locked joint used to be locked only inside this module: the patch went onto the parsed
+// config, but the bytes RDK sends were the untouched ones off disk.
+func TestMakeModelFrameBadJointsReachTheWire(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	current := make([]referenceframe.Input, 6)
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+
+	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
+	test.That(t, err, test.ShouldBeNil)
+
+	locked := served.DoF()[2]
+	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -1.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 1.0, 1e-8)
 }
 
 func TestResolveArmKinematicsArtifact(t *testing.T) {
@@ -197,7 +248,7 @@ func TestMakeModelFrameVariantURDF(t *testing.T) {
 	repoRoot := filepath.Dir(armDir())
 	t.Setenv("VIAM_MODULE_ROOT", repoRoot)
 
-	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 1305)
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, 1305, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, m, test.ShouldNotBeNil)
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)

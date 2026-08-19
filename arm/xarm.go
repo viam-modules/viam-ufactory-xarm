@@ -313,6 +313,10 @@ func (cfg *Config) maxBadJoint() int {
 // When armTypeCode matches a known hardware variant (e.g. 1305 on xArm6),
 // MakeModelFrame routes to the variant-specific kinematics artifact; otherwise it uses
 // the base model. Pass 0 when variant info isn't available.
+//
+// speedDegsPerSec and accelDegsPerSec2 are written into the kinematics document as per-joint
+// limits, so that the motion service plans against the same speeds the arm actually moves at.
+// Pass 0 for either to leave the document's limits alone.
 func MakeModelFrame(
 	resourceName string,
 	modelName string,
@@ -322,6 +326,8 @@ func MakeModelFrame(
 	meshDecimationRatios []float64,
 	logger logging.Logger,
 	armTypeCode int,
+	speedDegsPerSec float64,
+	accelDegsPerSec2 float64,
 ) (referenceframe.Model, error) {
 	artifact, err := resolveArmKinematicsArtifact(modelName, detectedArm{armTypeCode: armTypeCode})
 	if err != nil {
@@ -350,6 +356,32 @@ func MakeModelFrame(
 		cfg.Joints[j].Min = now - 1
 		cfg.Joints[j].Max = now + 1
 		logger.Infof("locking joint %d to %v", j, now)
+	}
+
+	// Writing limits into the document is the only way they reach the server, since RDK sends
+	// the document bytes rather than serializing the model. That rules out the URDF path: we
+	// would have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. It
+	// keeps obeying the configured speed when it moves, it just cannot advertise it. RSDK-14232
+	// is where URDF gets a way to carry these.
+	if !useURDFs {
+		limits := map[string]referenceframe.JointLimits{}
+		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+			for _, joint := range cfg.Joints {
+				limits[joint.ID] = referenceframe.JointLimits{
+					MaxVelocity:     &speedDegsPerSec,
+					MaxAcceleration: &accelDegsPerSec2,
+				}
+			}
+		}
+		// Even with nothing to add this re-marshals the document, which is what carries the
+		// bad-joint locks above out to the motion service and to any client.
+		cfg, err = referenceframe.SetJointLimits(cfg, limits)
+		if err != nil {
+			return nil, err
+		}
+	} else if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+		logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
+			"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
 	}
 
 	source := "json"
@@ -509,9 +541,12 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
+	// The effective speeds, not the raw config ones, because an arm with no speed configured
+	// still moves at the module default and the document should say so.
 	x.model, err = MakeModelFrame(
 		name.Name, modelName, newConf.BadJoints, current, newConf.UseURDFs,
 		newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
+		float64(newConf.speed()), float64(newConf.acceleration()),
 	)
 	if err != nil {
 		return nil, err
@@ -700,6 +735,11 @@ func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[strin
 	return models, nil
 }
 
+// Kinematics returns the model built at configure time, including the speed limits from the
+// config. set_speed and set_acceleration change how the arm moves without rebuilding this, so
+// after one of those the published limits are the configured ones rather than the current ones.
+// That is deliberate: kinematics describe how the arm is set up, and a DoCommand is not a
+// reconfigure.
 func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
