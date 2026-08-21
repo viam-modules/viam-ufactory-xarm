@@ -62,6 +62,7 @@ const (
 	getGripperSpeedKey       = "get_gripper_speed"
 	gripperSpeedKey          = "gripper_speed"
 	grabWithTorqueKey        = "grab_with_torque"
+	setLoadKey               = "set_load"
 	enterManualModeKey       = "enter_manual_mode"
 	exitManualModeKey        = "exit_manual_mode"
 	getFTSensorDataKey       = "get_ft_sensor_data"
@@ -823,6 +824,43 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		validCommand = true
 	}
 
+	if val, ok := cmd[setLoadKey]; ok {
+		params, ok := val.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a map with keys weight_kg and center_of_gravity_mm; got %T", setLoadKey, val)
+		}
+		weight, err := utils.AssertType[float64](params["weight_kg"])
+		if err != nil {
+			return nil, fmt.Errorf("set_load.weight_kg: %w", err)
+		}
+		if weight < 0 {
+			return nil, fmt.Errorf("set_load.weight_kg cannot be negative, got %v", weight)
+		}
+		cogRaw, err := utils.AssertType[[]any](params["center_of_gravity_mm"])
+		if err != nil {
+			return nil, fmt.Errorf("set_load.center_of_gravity_mm: %w", err)
+		}
+		if len(cogRaw) != 3 {
+			return nil, fmt.Errorf("set_load.center_of_gravity_mm must have exactly 3 values (x, y, z), got %d", len(cogRaw))
+		}
+		var cog [3]float64
+		for i, v := range cogRaw {
+			f, err := utils.AssertType[float64](v)
+			if err != nil {
+				return nil, fmt.Errorf("set_load.center_of_gravity_mm[%d]: %w", i, err)
+			}
+			cog[i] = f
+		}
+		if err := x.setLoad(ctx, weight, cog); err != nil {
+			return nil, err
+		}
+		if save, _ := params["save"].(bool); save {
+			if err := x.saveConf(ctx); err != nil {
+				return nil, err
+			}
+		}
+		validCommand = true
+	}
 	if _, ok := cmd[loadKey]; ok {
 		loadInformation, err := x.getLoad(ctx)
 		if err != nil {

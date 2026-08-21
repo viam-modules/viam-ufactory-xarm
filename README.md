@@ -205,6 +205,38 @@ resp, err := xArmComponent.DoCommand(ctx, map[string]interface{}{"load": ""})
 // resp["load"] contains a []float64 of per-joint torque values
 ```
 
+### Payload (TCP Load)
+
+Set the payload weight and center of gravity the firmware uses for gravity
+compensation and collision detection — equivalent to the payload setting in
+UFactory Studio. The center of gravity is x, y, z in millimeters relative to the
+tool flange frame.
+
+**Go:**
+```go
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "set_load": map[string]interface{}{
+        "weight_kg":            0.82,
+        "center_of_gravity_mm": []interface{}{0.0, 0.0, 48.0},
+        "save":                 true, // optional: persist across controller reboots
+    },
+})
+```
+
+**Python:**
+```python
+await arm.do_command({"set_load": {
+    "weight_kg": 0.82,
+    "center_of_gravity_mm": [0, 0, 48],
+    "save": True,  # optional: persist across controller reboots
+}})
+```
+
+> [!WARNING]
+> An incorrect payload configuration makes gravity compensation inaccurate: the
+> arm may drift in manual mode and collision detection may false-trigger or miss
+> real collisions.
+
 ### UFactory Gripper Control (via arm DoCommand)
 
 > [!NOTE]
