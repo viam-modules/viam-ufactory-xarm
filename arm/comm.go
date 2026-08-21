@@ -43,6 +43,8 @@ var regMap = map[string]byte{
 	"ClearWarn":      0x11,
 	"SetMode":        0x13,
 	"P2PJoint":       0x17,
+	"SetLoad":        0x24,
+	"SaveConf":       0x28,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
@@ -1542,6 +1544,27 @@ func (x *xArm) getLoad(ctx context.Context) ([]float64, error) {
 	}
 
 	return loads, nil
+}
+
+// setLoad sets the arm's TCP payload
+// The setting is lost on controller reboot unless persisted with saveConf.
+func (x *xArm) setLoad(ctx context.Context, weightKg float64, cogMM [3]float64) error {
+	c := x.newCmd(regMap["SetLoad"])
+	fBytes := make([]byte, 4)
+	for _, v := range []float64{weightKg, cogMM[0], cogMM[1], cogMM[2]} {
+		binary.LittleEndian.PutUint32(fBytes, math.Float32bits(float32(v)))
+		c.params = append(c.params, fBytes...)
+	}
+	_, err := x.send(ctx, c, true)
+	return err
+}
+
+// saveConf persists the controller's current configuration (payload, TCP offset, etc.)
+// across reboots.
+func (x *xArm) saveConf(ctx context.Context) error {
+	c := x.newCmd(regMap["SaveConf"])
+	_, err := x.send(ctx, c, true)
+	return err
 }
 
 // parseFTSensorData parses FTSensorData (0xC8): params[0] is a status byte, then six

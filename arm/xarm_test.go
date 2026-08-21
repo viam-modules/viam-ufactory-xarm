@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -24,6 +25,28 @@ func TestConnectionTypeFromCmd(t *testing.T) {
 		test.ShouldEqual, connectionPlugin)
 	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "nonsense"}, submodelV1),
 		test.ShouldEqual, connectionPlugin)
+}
+
+func TestDoCommandSetLoadValidation(t *testing.T) {
+	x := &xArm{}
+	for _, tc := range []struct {
+		name string
+		val  any
+		msg  string
+	}{
+		{"not a map", 5.0, "must be a map"},
+		{"missing weight", map[string]any{"center_of_gravity_mm": []any{0.0, 0.0, 0.0}}, "weight_kg"},
+		{"negative weight", map[string]any{"weight_kg": -1.0, "center_of_gravity_mm": []any{0.0, 0.0, 0.0}}, "cannot be negative"},
+		{"missing cog", map[string]any{"weight_kg": 1.0}, "center_of_gravity_mm"},
+		{"wrong cog length", map[string]any{"weight_kg": 1.0, "center_of_gravity_mm": []any{0.0, 0.0}}, "exactly 3"},
+		{"non-numeric cog", map[string]any{"weight_kg": 1.0, "center_of_gravity_mm": []any{0.0, "x", 0.0}}, "center_of_gravity_mm[1]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := x.DoCommand(context.Background(), map[string]any{setLoadKey: tc.val})
+			test.That(t, err, test.ShouldNotBeNil)
+			test.That(t, err.Error(), test.ShouldContainSubstring, tc.msg)
+		})
+	}
 }
 
 // armDir returns the absolute path to the arm/ directory containing test data.
