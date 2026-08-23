@@ -183,6 +183,10 @@ The following commands are available via `DoCommand` on the arm component.
 // Set speed (degrees/second)
 xArmComponent.DoCommand(ctx, map[string]interface{}{"set_speed": 50.0})
 
+// Get the current speed (degrees/second)
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_speed": true})
+// resp["speed_degs_per_sec"] contains the current runtime speed
+
 // Set acceleration (degrees/second²)
 xArmComponent.DoCommand(ctx, map[string]interface{}{"set_acceleration": 100.0})
 
@@ -196,6 +200,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{
 **Python:**
 ```python
 await arm.do_command({"set_speed": 50.0, "set_acceleration": 100.0})
+resp = await arm.do_command({"get_speed": True})
 ```
 
 ### Joint Torques
