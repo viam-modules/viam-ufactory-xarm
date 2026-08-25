@@ -309,7 +309,16 @@ func (cfg *Config) maxBadJoint() int {
 	return maxJoint
 }
 
+// lockedJointRangeDegs returns the position bounds, in degrees, that pin a bad joint to roughly
+// where it is now. The one degree of slack on either side is what keeps IK from failing outright
+// on a joint whose reported position drifts a little.
+func lockedJointRangeDegs(current referenceframe.Input) (lo, hi float64) {
+	now := utils.RadToDeg(current)
+	return now - 1, now + 1
+}
+
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
+//
 // When armTypeCode matches a known hardware variant (e.g. 1305 on xArm6),
 // MakeModelFrame routes to the variant-specific kinematics artifact; otherwise it uses
 // the base model. Pass 0 when variant info isn't available.
@@ -351,19 +360,29 @@ func MakeModelFrame(
 		}
 	}
 
-	for _, j := range badJoints {
-		now := utils.RadToDeg(current[j])
-		cfg.Joints[j].Min = now - 1
-		cfg.Joints[j].Max = now + 1
-		logger.Infof("locking joint %d to %v", j, now)
-	}
-
-	// Writing limits into the document is the only way they reach the server, since RDK sends
-	// the document bytes rather than serializing the model. That rules out the URDF path: we
-	// would have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. It
-	// keeps obeying the configured speed when it moves, it just cannot advertise it. RSDK-14232
-	// is where URDF gets a way to carry these.
-	if !useURDFs {
+	// Limits only reach the server by being written into the document, since RDK sends the
+	// document bytes rather than serializing the model. That rules out the URDF path: we would
+	// have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. RSDK-14232 is
+	// where URDF gets a way to carry these. So the two paths do genuinely different things and
+	// each says so for itself.
+	if useURDFs {
+		// The locks still shape the model we return, so our own planning respects them. They just
+		// cannot be advertised, and neither can the configured speed.
+		for _, j := range badJoints {
+			lo, hi := lockedJointRangeDegs(current[j])
+			cfg.Joints[j].Min, cfg.Joints[j].Max = lo, hi
+			logger.Infof("locking joint %d to %v", j, utils.RadToDeg(current[j]))
+		}
+		if len(badJoints) > 0 {
+			logger.Warnf("not publishing locked joints %v for %s: use_urdfs is set, so the lock "+
+				"applies to this module's own model but the motion service and any client will "+
+				"plan as though those joints are free.", badJoints, modelName)
+		}
+		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+			logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
+				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
+		}
+	} else {
 		limits := map[string]referenceframe.JointLimits{}
 		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
 			for _, joint := range cfg.Joints {
@@ -373,15 +392,18 @@ func MakeModelFrame(
 				}
 			}
 		}
-		// Even with nothing to add this re-marshals the document, which is what carries the
-		// bad-joint locks above out to the motion service and to any client.
+		for _, j := range badJoints {
+			lo, hi := lockedJointRangeDegs(current[j])
+			id := cfg.Joints[j].ID
+			locked := limits[id]
+			locked.Min, locked.Max = &lo, &hi
+			limits[id] = locked
+			logger.Infof("locking joint %d to %v", j, utils.RadToDeg(current[j]))
+		}
 		cfg, err = referenceframe.SetJointLimits(cfg, limits)
 		if err != nil {
 			return nil, err
 		}
-	} else if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
-		logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
-			"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
 	}
 
 	source := "json"

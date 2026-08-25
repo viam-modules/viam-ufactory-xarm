@@ -117,6 +117,57 @@ func TestMakeModelFrameWithBadJoints(t *testing.T) {
 	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
 }
 
+// On the URDF path a lock cannot reach the server, since the bytes RDK sends are the URDF off
+// disk. It still has to shape the model we return, so this module's own planning refuses to move
+// the joint. Losing that quietly is the failure this pins down.
+func TestMakeModelFrameBadJointsOnURDFLockOnlyLocally(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	repoRoot := filepath.Dir(armDir())
+	t.Setenv("VIAM_MODULE_ROOT", repoRoot)
+
+	current := make([]referenceframe.Input, 6)
+	current[2] = utils.DegToRad(30)
+
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, true, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+
+	locked := m.DoF()[2]
+	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, 29.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 31.0, 1e-8)
+
+	// The document we hand out is still the URDF, so the lock does not travel with it.
+	test.That(t, m.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "urdf")
+}
+
+// A locked joint also carries the configured speed, so the two edits have to survive each other:
+// they are written into the same map entry, and a careless merge drops one of them.
+func TestMakeModelFrameLockAndSpeedLimitsCoexist(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	const speed, accel = 45.0, 300.0
+	current := make([]referenceframe.Input, 6)
+	current[2] = utils.DegToRad(30)
+
+	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, speed, accel)
+	test.That(t, err, test.ShouldBeNil)
+
+	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
+	test.That(t, err, test.ShouldBeNil)
+
+	locked := served.DoF()[2]
+	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, 29.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 31.0, 1e-8)
+
+	// Every joint still advertises the configured speed, the locked one included.
+	vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
+	test.That(t, ok, test.ShouldBeTrue)
+	for i := range vels {
+		test.That(t, vels[i], test.ShouldAlmostEqual, utils.DegToRad(speed), 1e-8)
+		test.That(t, accs[i], test.ShouldAlmostEqual, utils.DegToRad(accel), 1e-8)
+	}
+}
+
 func TestUseURDFsDefaultsFalse(t *testing.T) {
 	cfg := &Config{}
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
