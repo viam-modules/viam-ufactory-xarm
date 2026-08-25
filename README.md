@@ -16,9 +16,9 @@ This module is particularly useful in applications that require an xArm to be op
   - [Networking](#networking)
   - [Trajectory Generator](#trajectory-generator)
   - [Using within a Frame System](#using-within-a-frame-system)
-- [Error Handling](#error-handling)
-- [DoCommand Reference](#docommand-reference)
-- [UFactory Studio Proxy](#ufactory-studio-proxy)
+  - [Error Handling](#error-handling)
+  - [DoCommand Reference](#docommand-reference)
+  - [UFactory Studio Proxy](#ufactory-studio-proxy)
 - [Gripper](#gripper)
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
@@ -146,7 +146,7 @@ For an attached gripper, set its parent to the arm's name:
 }
 ```
 
-## Error Handling
+### Error Handling
 
 When a collision or other fault occurs, the arm enters an error state and will not accept motion commands. The driver attempts to clear transient errors automatically on each command. A collision (overcurrent error) requires manual intervention:
 
@@ -172,11 +172,11 @@ resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 // resp["error info"] contains raw error bytes
 ```
 
-## DoCommand Reference
+### DoCommand Reference
 
 The following commands are available via `DoCommand` on the arm component.
 
-### Speed and Acceleration
+#### Speed and Acceleration
 
 **Go:**
 ```go
@@ -198,14 +198,14 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{
 await arm.do_command({"set_speed": 50.0, "set_acceleration": 100.0})
 ```
 
-### Joint Torques
+#### Joint Torques
 
 ```go
 resp, err := xArmComponent.DoCommand(ctx, map[string]interface{}{"load": ""})
 // resp["load"] contains a []float64 of per-joint torque values
 ```
 
-### UFactory Gripper Control (via arm DoCommand)
+#### UFactory Gripper Control (via arm DoCommand)
 
 > [!NOTE]
 > `"setup_gripper": true` must be included in any gripper move command.
@@ -235,7 +235,7 @@ resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_gripper_spee
 // resp["gripper_speed"]
 ```
 
-### Vacuum Gripper Control (via arm DoCommand)
+#### Vacuum Gripper Control (via arm DoCommand)
 
 ```go
 // Activate suction (grab)
@@ -260,7 +260,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{
 })
 ```
 
-### Manual Mode (Teaching Mode)
+#### Manual Mode (Teaching Mode)
 
 Manual mode puts the arm into zero-gravity mode, allowing free movement by hand with gravity compensation active. Servos remain engaged — do not disable them.
 
@@ -275,7 +275,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 > [!CAUTION]
 > Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
 
-## UFactory Studio Proxy
+### UFactory Studio Proxy
 
 The arm hosts UFactory Studio at `http://<arm-ip>:18333`. When viam-server and the arm are on different subnets (e.g., direct Ethernet connection), Studio may not be reachable from your browser.
 
