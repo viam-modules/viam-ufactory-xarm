@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -360,6 +361,16 @@ func MakeModelFrame(
 		}
 	}
 
+	// Both paths index by joint number, so an out of range entry would either panic or, worse,
+	// be quietly skipped. A joint appears here because it is broken, so failing to lock one is
+	// not something to discover later.
+	for _, j := range badJoints {
+		if j < 0 || j >= len(cfg.Joints) || j >= len(current) {
+			return nil, fmt.Errorf("bad-joints index %d is out of range for %s, which has %d joints and %d reported positions",
+				j, modelName, len(cfg.Joints), len(current))
+		}
+	}
+
 	// Limits only reach the server by being written into the document, since RDK sends the
 	// document bytes rather than serializing the model. That rules out the URDF path: we would
 	// have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. RSDK-14232 is
@@ -383,22 +394,21 @@ func MakeModelFrame(
 				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
 		}
 	} else {
-		limits := map[string]referenceframe.JointLimits{}
-		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
-			for _, joint := range cfg.Joints {
-				limits[joint.ID] = referenceframe.JointLimits{
-					MaxVelocity:     &speedDegsPerSec,
-					MaxAcceleration: &accelDegsPerSec2,
-				}
+		// One entry per joint, built in full before it goes in the map. A nil field leaves that
+		// limit as the document already has it, so a joint that is neither locked nor speed
+		// limited contributes an entry that changes nothing, and the call still re-marshals.
+		limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
+		for i, joint := range cfg.Joints {
+			entry := referenceframe.JointLimits{}
+			if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+				entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
 			}
-		}
-		for _, j := range badJoints {
-			lo, hi := lockedJointRangeDegs(current[j])
-			id := cfg.Joints[j].ID
-			locked := limits[id]
-			locked.Min, locked.Max = &lo, &hi
-			limits[id] = locked
-			logger.Infof("locking joint %d to %v", j, utils.RadToDeg(current[j]))
+			if slices.Contains(badJoints, i) {
+				lo, hi := lockedJointRangeDegs(current[i])
+				entry.Min, entry.Max = &lo, &hi
+				logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
+			}
+			limits[joint.ID] = entry
 		}
 		cfg, err = referenceframe.SetJointLimits(cfg, limits)
 		if err != nil {

@@ -168,6 +168,22 @@ func TestMakeModelFrameLockAndSpeedLimitsCoexist(t *testing.T) {
 	}
 }
 
+// An index nobody can lock used to panic on the way to `cfg.Joints[j]`. Erroring says the same
+// thing without taking the module down, and matters more than it looks: a joint is listed here
+// because it is broken, so quietly not locking it is the one outcome we cannot have.
+func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	current := make([]referenceframe.Input, 6)
+
+	_, err := MakeModelFrame("", ModelName6DOF, []int{99}, current, false, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "out of range")
+
+	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, false, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldNotBeNil)
+}
+
 func TestUseURDFsDefaultsFalse(t *testing.T) {
 	cfg := &Config{}
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
