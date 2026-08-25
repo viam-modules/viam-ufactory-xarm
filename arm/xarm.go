@@ -313,9 +313,21 @@ func (cfg *Config) maxBadJoint() int {
 // lockedJointRangeDegs returns the position bounds, in degrees, that pin a bad joint to roughly
 // where it is now. The one degree of slack on either side is what keeps IK from failing outright
 // on a joint whose reported position drifts a little.
-func lockedJointRangeDegs(current referenceframe.Input) (lo, hi float64) {
+//
+// When the joint is inside its own range the window is clamped to it, because a joint that failed
+// against its stop sits at the end of that range and the slack would otherwise put the published
+// bound past it, where the motion service would plan and the controller would refuse.
+//
+// When the joint reports a position outside its range we leave the window alone. That happens, and
+// the reported position is still where the arm actually is, so moving the window somewhere it is
+// not would make every pose computed from this joint wrong.
+func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64) {
 	now := utils.RadToDeg(current)
-	return now - 1, now + 1
+	lo, hi = now-1, now+1
+	if now >= joint.Min && now <= joint.Max {
+		lo, hi = max(lo, joint.Min), min(hi, joint.Max)
+	}
+	return lo, hi
 }
 
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
@@ -380,7 +392,7 @@ func MakeModelFrame(
 		// The locks still shape the model we return, so our own planning respects them. They just
 		// cannot be advertised, and neither can the configured speed.
 		for _, j := range badJoints {
-			lo, hi := lockedJointRangeDegs(current[j])
+			lo, hi := lockedJointRangeDegs(current[j], cfg.Joints[j])
 			cfg.Joints[j].Min, cfg.Joints[j].Max = lo, hi
 			logger.Infof("locking joint %d to %v", j, utils.RadToDeg(current[j]))
 		}
@@ -394,9 +406,11 @@ func MakeModelFrame(
 				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
 		}
 	} else {
-		// One entry per joint, built in full before it goes in the map. A nil field leaves that
-		// limit as the document already has it, so a joint that is neither locked nor speed
-		// limited contributes an entry that changes nothing, and the call still re-marshals.
+		// One entry per joint we actually have something to say about, built in full before it
+		// goes in the map. A joint we would say nothing about is left out rather than given an
+		// empty entry, because SetJointLimits refuses a mimic joint that appears in the map at
+		// all, before it looks at whether we set any field. Passing no entries is still fine: the
+		// call re-marshals the document either way, and that is what carries the locks out.
 		limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
 		for i, joint := range cfg.Joints {
 			entry := referenceframe.JointLimits{}
@@ -404,9 +418,12 @@ func MakeModelFrame(
 				entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
 			}
 			if slices.Contains(badJoints, i) {
-				lo, hi := lockedJointRangeDegs(current[i])
+				lo, hi := lockedJointRangeDegs(current[i], joint)
 				entry.Min, entry.Max = &lo, &hi
 				logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
+			}
+			if entry == (referenceframe.JointLimits{}) {
+				continue
 			}
 			limits[joint.ID] = entry
 		}
@@ -581,7 +598,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		float64(newConf.speed()), float64(newConf.acceleration()),
 	)
 	if err != nil {
-		return nil, err
+		return nil, multierr.Combine(err, x.Close(ctx))
 	}
 	x.dof = len(x.model.DoF())
 

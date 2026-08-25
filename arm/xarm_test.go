@@ -127,14 +127,14 @@ func TestMakeModelFrameBadJointsOnURDFLockOnlyLocally(t *testing.T) {
 	t.Setenv("VIAM_MODULE_ROOT", repoRoot)
 
 	current := make([]referenceframe.Input, 6)
-	current[2] = utils.DegToRad(30)
+	current[2] = utils.DegToRad(-30) // the xArm6 elbow lives in [-225, 10]
 
 	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, true, nil, logger, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	locked := m.DoF()[2]
-	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, 29.0, 1e-8)
-	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 31.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -31.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, -29.0, 1e-8)
 
 	// The document we hand out is still the URDF, so the lock does not travel with it.
 	test.That(t, m.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "urdf")
@@ -147,7 +147,7 @@ func TestMakeModelFrameLockAndSpeedLimitsCoexist(t *testing.T) {
 
 	const speed, accel = 45.0, 300.0
 	current := make([]referenceframe.Input, 6)
-	current[2] = utils.DegToRad(30)
+	current[2] = utils.DegToRad(-30) // the xArm6 elbow lives in [-225, 10]
 
 	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, speed, accel)
 	test.That(t, err, test.ShouldBeNil)
@@ -156,8 +156,8 @@ func TestMakeModelFrameLockAndSpeedLimitsCoexist(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 
 	locked := served.DoF()[2]
-	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, 29.0, 1e-8)
-	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 31.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -31.0, 1e-8)
+	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, -29.0, 1e-8)
 
 	// Every joint still advertises the configured speed, the locked one included.
 	vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
@@ -182,6 +182,38 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 
 	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, false, nil, logger, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
+}
+
+// A joint fails against its stop as often as anywhere else, and the slack would then publish a
+// bound past the stop that the motion service would plan to and the controller would refuse.
+func TestLockedJointRangeClampsToTheJointsOwnRange(t *testing.T) {
+	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
+
+	// Sitting on the upper stop: the top of the window stays there rather than going to 11.
+	lo, hi := lockedJointRangeDegs(utils.DegToRad(10), elbow)
+	test.That(t, lo, test.ShouldAlmostEqual, 9.0, 1e-8)
+	test.That(t, hi, test.ShouldAlmostEqual, 10.0, 1e-8)
+
+	// Same at the bottom.
+	lo, hi = lockedJointRangeDegs(utils.DegToRad(-225), elbow)
+	test.That(t, lo, test.ShouldAlmostEqual, -225.0, 1e-8)
+	test.That(t, hi, test.ShouldAlmostEqual, -224.0, 1e-8)
+
+	// Well inside, nothing to clamp.
+	lo, hi = lockedJointRangeDegs(utils.DegToRad(-30), elbow)
+	test.That(t, lo, test.ShouldAlmostEqual, -31.0, 1e-8)
+	test.That(t, hi, test.ShouldAlmostEqual, -29.0, 1e-8)
+}
+
+// A joint can report a position its own document says is impossible. Clamping then would describe
+// the arm as being somewhere it is not, and every pose computed from this joint would be wrong, so
+// the window is left where the hardware says the joint actually is.
+func TestLockedJointRangeKeepsAnOutOfRangePosition(t *testing.T) {
+	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
+
+	lo, hi := lockedJointRangeDegs(utils.DegToRad(30), elbow)
+	test.That(t, lo, test.ShouldAlmostEqual, 29.0, 1e-8)
+	test.That(t, hi, test.ShouldAlmostEqual, 31.0, 1e-8)
 }
 
 func TestUseURDFsDefaultsFalse(t *testing.T) {
