@@ -383,18 +383,43 @@ func MakeModelFrame(
 		}
 	}
 
+	// One entry per joint we actually have something to say about. A joint we would say nothing
+	// about is left out rather than given an empty entry, because SetJointLimits refuses a mimic
+	// joint that appears in the map at all, before it looks at whether we set any field.
+	limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
+	for i, joint := range cfg.Joints {
+		entry := referenceframe.JointLimits{}
+		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+			entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
+		}
+		if slices.Contains(badJoints, i) {
+			lo, hi := lockedJointRangeDegs(current[i], joint)
+			entry.Min, entry.Max = &lo, &hi
+			logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
+		}
+		if entry != (referenceframe.JointLimits{}) {
+			limits[joint.ID] = entry
+		}
+	}
+
 	// Limits only reach the server by being written into the document, since RDK sends the
 	// document bytes rather than serializing the model. That rules out the URDF path: we would
 	// have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. RSDK-14232 is
-	// where URDF gets a way to carry these. So the two paths do genuinely different things and
-	// each says so for itself.
-	if useURDFs {
-		// The locks still shape the model we return, so our own planning respects them. They just
-		// cannot be advertised, and neither can the configured speed.
-		for _, j := range badJoints {
-			lo, hi := lockedJointRangeDegs(current[j], cfg.Joints[j])
-			cfg.Joints[j].Min, cfg.Joints[j].Max = lo, hi
-			logger.Infof("locking joint %d to %v", j, utils.RadToDeg(current[j]))
+	// where URDF gets a way to carry these.
+	if !useURDFs {
+		// Passing no entries is still worth doing, since the call re-marshals the document either
+		// way, and that is what carries the locks out.
+		cfg, err = referenceframe.SetJointLimits(cfg, limits)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// A lock still has to shape the model we return, so this module's own planning respects
+		// it. It just cannot be advertised, and neither can the configured speed.
+		for i, joint := range cfg.Joints {
+			if entry, ok := limits[joint.ID]; ok && entry.Min != nil {
+				cfg.Joints[i].Min, cfg.Joints[i].Max = *entry.Min, *entry.Max
+			}
 		}
 		if len(badJoints) > 0 {
 			logger.Warnf("not publishing locked joints %v for %s: use_urdfs is set, so the lock "+
@@ -404,32 +429,6 @@ func MakeModelFrame(
 		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
 			logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
 				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
-		}
-	} else {
-		// One entry per joint we actually have something to say about, built in full before it
-		// goes in the map. A joint we would say nothing about is left out rather than given an
-		// empty entry, because SetJointLimits refuses a mimic joint that appears in the map at
-		// all, before it looks at whether we set any field. Passing no entries is still fine: the
-		// call re-marshals the document either way, and that is what carries the locks out.
-		limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
-		for i, joint := range cfg.Joints {
-			entry := referenceframe.JointLimits{}
-			if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
-				entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
-			}
-			if slices.Contains(badJoints, i) {
-				lo, hi := lockedJointRangeDegs(current[i], joint)
-				entry.Min, entry.Max = &lo, &hi
-				logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
-			}
-			if entry == (referenceframe.JointLimits{}) {
-				continue
-			}
-			limits[joint.ID] = entry
-		}
-		cfg, err = referenceframe.SetJointLimits(cfg, limits)
-		if err != nil {
-			return nil, err
 		}
 	}
 

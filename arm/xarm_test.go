@@ -102,21 +102,6 @@ func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
 
-func TestMakeModelFrameWithBadJoints(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
-	// Provide fake current positions for a 6-DOF arm.
-	current := make([]referenceframe.Input, 6)
-	for i := range current {
-		current[i] = 0
-	}
-
-	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, 0, 0)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, m, test.ShouldNotBeNil)
-	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
-}
-
 // On the URDF path a lock cannot reach the server, since the bytes RDK sends are the URDF off
 // disk. It still has to shape the model we return, so this module's own planning refuses to move
 // the joint. Losing that quietly is the failure this pins down.
@@ -140,37 +125,6 @@ func TestMakeModelFrameBadJointsOnURDFLockOnlyLocally(t *testing.T) {
 	test.That(t, m.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "urdf")
 }
 
-// A locked joint also carries the configured speed, so the two edits have to survive each other:
-// they are written into the same map entry, and a careless merge drops one of them.
-func TestMakeModelFrameLockAndSpeedLimitsCoexist(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
-	const speed, accel = 45.0, 300.0
-	current := make([]referenceframe.Input, 6)
-	current[2] = utils.DegToRad(-30) // the xArm6 elbow lives in [-225, 10]
-
-	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, speed, accel)
-	test.That(t, err, test.ShouldBeNil)
-
-	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
-	test.That(t, err, test.ShouldBeNil)
-
-	locked := served.DoF()[2]
-	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -31.0, 1e-8)
-	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, -29.0, 1e-8)
-
-	// Every joint still advertises the configured speed, the locked one included.
-	vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
-	test.That(t, ok, test.ShouldBeTrue)
-	for i := range vels {
-		test.That(t, vels[i], test.ShouldAlmostEqual, utils.DegToRad(speed), 1e-8)
-		test.That(t, accs[i], test.ShouldAlmostEqual, utils.DegToRad(accel), 1e-8)
-	}
-}
-
-// An index nobody can lock used to panic on the way to `cfg.Joints[j]`. Erroring says the same
-// thing without taking the module down, and matters more than it looks: a joint is listed here
-// because it is broken, so quietly not locking it is the one outcome we cannot have.
 func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
@@ -186,34 +140,30 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 
 // A joint fails against its stop as often as anywhere else, and the slack would then publish a
 // bound past the stop that the motion service would plan to and the controller would refuse.
-func TestLockedJointRangeClampsToTheJointsOwnRange(t *testing.T) {
+// The one degree of slack has to stay inside the joint, because a joint fails against its stop as
+// often as anywhere else and the published bound would otherwise sit past it, where the motion
+// service plans and the controller refuses. Except when the joint reports a position its own
+// document calls impossible: that is still where the arm is, and moving the window would make
+// every pose computed from this joint wrong.
+func TestLockedJointRangeDegs(t *testing.T) {
 	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
 
-	// Sitting on the upper stop: the top of the window stays there rather than going to 11.
-	lo, hi := lockedJointRangeDegs(utils.DegToRad(10), elbow)
-	test.That(t, lo, test.ShouldAlmostEqual, 9.0, 1e-8)
-	test.That(t, hi, test.ShouldAlmostEqual, 10.0, 1e-8)
-
-	// Same at the bottom.
-	lo, hi = lockedJointRangeDegs(utils.DegToRad(-225), elbow)
-	test.That(t, lo, test.ShouldAlmostEqual, -225.0, 1e-8)
-	test.That(t, hi, test.ShouldAlmostEqual, -224.0, 1e-8)
-
-	// Well inside, nothing to clamp.
-	lo, hi = lockedJointRangeDegs(utils.DegToRad(-30), elbow)
-	test.That(t, lo, test.ShouldAlmostEqual, -31.0, 1e-8)
-	test.That(t, hi, test.ShouldAlmostEqual, -29.0, 1e-8)
-}
-
-// A joint can report a position its own document says is impossible. Clamping then would describe
-// the arm as being somewhere it is not, and every pose computed from this joint would be wrong, so
-// the window is left where the hardware says the joint actually is.
-func TestLockedJointRangeKeepsAnOutOfRangePosition(t *testing.T) {
-	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
-
-	lo, hi := lockedJointRangeDegs(utils.DegToRad(30), elbow)
-	test.That(t, lo, test.ShouldAlmostEqual, 29.0, 1e-8)
-	test.That(t, hi, test.ShouldAlmostEqual, 31.0, 1e-8)
+	for _, tc := range []struct {
+		name           string
+		atDegs         float64
+		wantLo, wantHi float64
+	}{
+		{"on the upper stop", 10, 9, 10},
+		{"on the lower stop", -225, -225, -224},
+		{"well inside", -30, -31, -29},
+		{"past the upper stop", 30, 29, 31},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lo, hi := lockedJointRangeDegs(utils.DegToRad(tc.atDegs), elbow)
+			test.That(t, lo, test.ShouldAlmostEqual, tc.wantLo, 1e-8)
+			test.That(t, hi, test.ShouldAlmostEqual, tc.wantHi, 1e-8)
+		})
+	}
 }
 
 func TestUseURDFsDefaultsFalse(t *testing.T) {
@@ -221,55 +171,67 @@ func TestUseURDFsDefaultsFalse(t *testing.T) {
 	test.That(t, cfg.UseURDFs, test.ShouldBeFalse)
 }
 
-// The point of publishing limits is that they leave the module, so this checks the bytes RDK
-// actually sends rather than the model we happen to be holding.
-func TestMakeModelFramePublishesSpeedLimits(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
+// Everything below reads the bytes RDK actually sends rather than the model we happen to be
+// holding, because a limit that only exists in memory is the failure this whole change is about.
+func TestMakeModelFrameServedLimits(t *testing.T) {
 	const speed, accel = 45.0, 300.0
-	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, speed, accel)
-	test.That(t, err, test.ShouldBeNil)
 
-	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
-	test.That(t, err, test.ShouldBeNil)
+	// the xArm6 elbow lives in [-225, 10], so a lock there lands at [-31, -29]
+	elbowAt30Below := make([]referenceframe.Input, 6)
+	elbowAt30Below[2] = utils.DegToRad(-30)
 
-	// a trajectory generator can use this arm, and every joint carries the configured speed
-	vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
-	test.That(t, ok, test.ShouldBeTrue)
-	test.That(t, vels, test.ShouldHaveLength, 6)
-	for i := range vels {
-		test.That(t, vels[i], test.ShouldAlmostEqual, utils.DegToRad(speed), 1e-8)
-		test.That(t, accs[i], test.ShouldAlmostEqual, utils.DegToRad(accel), 1e-8)
+	for _, tc := range []struct {
+		name         string
+		badJoints    []int
+		current      []referenceframe.Input
+		speed, accel float64
+		wantSpeeds   bool
+		wantElbow    *[2]float64
+	}{
+		{
+			name:  "speeds alone reach every joint",
+			speed: speed, accel: accel, wantSpeeds: true,
+		},
+		{
+			// the arm must not claim bounds nobody chose, or the motion service plans timing
+			// against numbers that came from us rather than from the hardware
+			name: "no speeds means no advertised bounds",
+		},
+		{
+			name: "a lock alone reaches the wire", badJoints: []int{2}, current: elbowAt30Below,
+			wantElbow: &[2]float64{-31, -29},
+		},
+		{
+			// both edits land in the same map entry, so a careless merge drops one of them
+			name: "a lock and speeds survive each other", badJoints: []int{2}, current: elbowAt30Below,
+			speed: speed, accel: accel, wantSpeeds: true, wantElbow: &[2]float64{-31, -29},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := logging.NewTestLogger(t)
+			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, false, nil, logger, 0, tc.speed, tc.accel)
+			test.That(t, err, test.ShouldBeNil)
+
+			served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
+			test.That(t, err, test.ShouldBeNil)
+
+			vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
+			test.That(t, ok, test.ShouldEqual, tc.wantSpeeds)
+			if tc.wantSpeeds {
+				test.That(t, vels, test.ShouldHaveLength, 6)
+				for i := range vels {
+					test.That(t, vels[i], test.ShouldAlmostEqual, utils.DegToRad(tc.speed), 1e-8)
+					test.That(t, accs[i], test.ShouldAlmostEqual, utils.DegToRad(tc.accel), 1e-8)
+				}
+			}
+
+			if tc.wantElbow != nil {
+				elbow := served.DoF()[2]
+				test.That(t, utils.RadToDeg(elbow.Min), test.ShouldAlmostEqual, tc.wantElbow[0], 1e-8)
+				test.That(t, utils.RadToDeg(elbow.Max), test.ShouldAlmostEqual, tc.wantElbow[1], 1e-8)
+			}
+		})
 	}
-}
-
-// Without speeds there is nothing to advertise, and the arm must not claim bounds it was never
-// given, or the motion service would plan timing against numbers nobody chose.
-func TestMakeModelFrameWithoutSpeedsIsUnbounded(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
-	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, 0, 0)
-	test.That(t, err, test.ShouldBeNil)
-
-	_, _, ok := referenceframe.TrajectoryLimits(m.DoF())
-	test.That(t, ok, test.ShouldBeFalse)
-}
-
-// A locked joint used to be locked only inside this module: the patch went onto the parsed
-// config, but the bytes RDK sends were the untouched ones off disk.
-func TestMakeModelFrameBadJointsReachTheWire(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
-	current := make([]referenceframe.Input, 6)
-	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, 0, 0)
-	test.That(t, err, test.ShouldBeNil)
-
-	served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
-	test.That(t, err, test.ShouldBeNil)
-
-	locked := served.DoF()[2]
-	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -1.0, 1e-8)
-	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, 1.0, 1e-8)
 }
 
 func TestResolveArmKinematicsArtifact(t *testing.T) {
