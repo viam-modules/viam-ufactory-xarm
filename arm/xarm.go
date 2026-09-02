@@ -50,6 +50,8 @@ const (
 	gripperPositionKey       = "gripper_position"
 	setAcckey                = "set_acceleration"
 	setSpeedKey              = "set_speed"
+	getSpeedKey              = "get_speed"
+	speedKey                 = "speed_degs_per_sec"
 	grabVacuumKey            = "grab_vacuum"
 	openVacuumKey            = "open_vacuum"
 	clearErrorKey            = "clear_error"
@@ -930,6 +932,13 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		x.confLock.Lock()
 		x.speed = utils.DegToRad(speed)
 		x.confLock.Unlock()
+		validCommand = true
+	}
+	if _, ok := cmd[getSpeedKey]; ok {
+		x.confLock.Lock()
+		speed := utils.RadToDeg(x.speed)
+		x.confLock.Unlock()
+		resp[speedKey] = speed
 		validCommand = true
 	}
 	if val, ok := cmd[setAcckey]; ok {
