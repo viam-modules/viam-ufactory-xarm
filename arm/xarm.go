@@ -146,6 +146,9 @@ type xArm struct {
 	// state of movement things
 	started atomic.Int32 // -1 is off, >= 0 is mode
 
+	// manualExit auto-exits manual mode after SetManualMode's enabledFor elapses
+	manualExit exitTimer
+
 	name        resource.Name
 	conf        *Config
 	closed      atomic.Bool
@@ -1058,6 +1061,10 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 
 func (x *xArm) Name() resource.Name {
 	return x.name
+}
+
+func (x *xArm) Properties(ctx context.Context, extra map[string]any) (arm.Properties, error) {
+	return arm.Properties{SupportManualMode: true, SupportCartesianCommands: true}, nil
 }
 
 func (x *xArm) Status(_ context.Context) (map[string]any, error) {

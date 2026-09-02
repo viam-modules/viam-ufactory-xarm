@@ -452,6 +452,7 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 
 // exitManualMode exits manual mode and returns the arm to normal operation.
 func (x *xArm) exitManualMode(ctx context.Context) error {
+	x.manualExit.cancel()
 	x.logger.Info("Exiting manual mode")
 
 	// Reset internal state flag to force re-initialization
@@ -472,6 +473,7 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
+	x.manualExit.cancel()
 	if x.proxyServer != nil {
 		x.stopProxy()
 	}
@@ -1083,6 +1085,7 @@ func (x *xArm) Stop(ctx context.Context, extra map[string]any) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 
+	x.manualExit.cancel()
 	x.started.Store(-1)
 
 	if err := x.setMotionState(ctx, 3); err != nil {
