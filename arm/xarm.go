@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -309,10 +310,35 @@ func (cfg *Config) maxBadJoint() int {
 	return maxJoint
 }
 
+// lockedJointRangeDegs returns the position bounds, in degrees, that pin a bad joint to roughly
+// where it is now. The one degree of slack on either side is what keeps IK from failing outright
+// on a joint whose reported position drifts a little.
+//
+// When the joint is inside its own range the window is clamped to it, because a joint that failed
+// against its stop sits at the end of that range and the slack would otherwise put the published
+// bound past it, where the motion service would plan and the controller would refuse.
+//
+// When the joint reports a position outside its range we leave the window alone. That happens, and
+// the reported position is still where the arm actually is, so moving the window somewhere it is
+// not would make every pose computed from this joint wrong.
+func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64) {
+	now := utils.RadToDeg(current)
+	lo, hi = now-1, now+1
+	if now >= joint.Min && now <= joint.Max {
+		lo, hi = max(lo, joint.Min), min(hi, joint.Max)
+	}
+	return lo, hi
+}
+
 // MakeModelFrame returns the kinematics model of the xarm arm, which has all Frame information.
+//
 // When armTypeCode matches a known hardware variant (e.g. 1305 on xArm6),
 // MakeModelFrame routes to the variant-specific kinematics artifact; otherwise it uses
 // the base model. Pass 0 when variant info isn't available.
+//
+// speedDegsPerSec and accelDegsPerSec2 are written into the kinematics document as per-joint
+// limits, so that the motion service plans against the same speeds the arm actually moves at.
+// Pass 0 for either to leave the document's limits alone.
 func MakeModelFrame(
 	resourceName string,
 	modelName string,
@@ -322,6 +348,8 @@ func MakeModelFrame(
 	meshDecimationRatios []float64,
 	logger logging.Logger,
 	armTypeCode int,
+	speedDegsPerSec float64,
+	accelDegsPerSec2 float64,
 ) (referenceframe.Model, error) {
 	artifact, err := resolveArmKinematicsArtifact(modelName, detectedArm{armTypeCode: armTypeCode})
 	if err != nil {
@@ -345,11 +373,63 @@ func MakeModelFrame(
 		}
 	}
 
+	// Both paths index by joint number, so an out of range entry would either panic or, worse,
+	// be quietly skipped. A joint appears here because it is broken, so failing to lock one is
+	// not something to discover later.
 	for _, j := range badJoints {
-		now := utils.RadToDeg(current[j])
-		cfg.Joints[j].Min = now - 1
-		cfg.Joints[j].Max = now + 1
-		logger.Infof("locking joint %d to %v", j, now)
+		if j < 0 || j >= len(cfg.Joints) || j >= len(current) {
+			return nil, fmt.Errorf("bad-joints index %d is out of range for %s, which has %d joints and %d reported positions",
+				j, modelName, len(cfg.Joints), len(current))
+		}
+	}
+
+	// One entry per joint we actually have something to say about. A joint we would say nothing
+	// about is left out rather than given an empty entry, because SetJointLimits refuses a mimic
+	// joint that appears in the map at all, before it looks at whether we set any field.
+	limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
+	for i, joint := range cfg.Joints {
+		entry := referenceframe.JointLimits{}
+		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+			entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
+		}
+		if slices.Contains(badJoints, i) {
+			lo, hi := lockedJointRangeDegs(current[i], joint)
+			entry.Min, entry.Max = &lo, &hi
+			logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
+		}
+		if entry != (referenceframe.JointLimits{}) {
+			limits[joint.ID] = entry
+		}
+	}
+
+	// Limits only reach the server by being written into the document, since RDK sends the
+	// document bytes rather than serializing the model. That rules out the URDF path: we would
+	// have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. RSDK-14232 is
+	// where URDF gets a way to carry these.
+	if !useURDFs {
+		// Passing no entries is still worth doing, since the call re-marshals the document either
+		// way, and that is what carries the locks out.
+		cfg, err = referenceframe.SetJointLimits(cfg, limits)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// A lock still has to shape the model we return, so this module's own planning respects
+		// it. It just cannot be advertised, and neither can the configured speed.
+		for i, joint := range cfg.Joints {
+			if entry, ok := limits[joint.ID]; ok && entry.Min != nil {
+				cfg.Joints[i].Min, cfg.Joints[i].Max = *entry.Min, *entry.Max
+			}
+		}
+		if len(badJoints) > 0 {
+			logger.Warnf("not publishing locked joints %v for %s: use_urdfs is set, so the lock "+
+				"applies to this module's own model but the motion service and any client will "+
+				"plan as though those joints are free.", badJoints, modelName)
+		}
+		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
+			logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
+				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
+		}
 	}
 
 	source := "json"
@@ -509,12 +589,15 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
+	// The effective speeds, not the raw config ones, because an arm with no speed configured
+	// still moves at the module default and the document should say so.
 	x.model, err = MakeModelFrame(
 		name.Name, modelName, newConf.BadJoints, current, newConf.UseURDFs,
 		newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
+		float64(newConf.speed()), float64(newConf.acceleration()),
 	)
 	if err != nil {
-		return nil, err
+		return nil, multierr.Combine(err, x.Close(ctx))
 	}
 	x.dof = len(x.model.DoF())
 
@@ -700,6 +783,11 @@ func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[strin
 	return models, nil
 }
 
+// Kinematics returns the model built at configure time, including the speed limits from the
+// config. set_speed and set_acceleration change how the arm moves without rebuilding this, so
+// after one of those the published limits are the configured ones rather than the current ones.
+// That is deliberate: kinematics describe how the arm is set up, and a DoCommand is not a
+// reconfigure.
 func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
 }
