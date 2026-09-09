@@ -1187,7 +1187,7 @@ func (x *xArm) writeGripperRegisters(ctx context.Context, addr uint16, values []
 	c := x.gripperPreamble(true)
 	c.params = binary.BigEndian.AppendUint16(c.params, addr)
 	c.params = binary.BigEndian.AppendUint16(c.params, uint16(len(values))) //nolint:gosec // bounded by the caller.
-	c.params = append(c.params, byte(2*len(values)))
+	c.params = append(c.params, byte(2*len(values))) //nolint:gosec // bounded to 254 by the 127-value check above
 	for _, v := range values {
 		c.params = binary.BigEndian.AppendUint16(c.params, v)
 	}
@@ -1224,7 +1224,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 
 func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	return x.writeGripperRegisters(ctx, gripperTargetPosReg,
-		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)}) //nolint:gosec // split of a 32-bit value.
+		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)})
 }
 
 func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
@@ -1583,7 +1583,7 @@ func (x *xArm) setFTSensorEnable(ctx context.Context) error {
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
 	c := x.newCmd(regMap["Sensitivity"])
-	c.params = append(c.params, byte(sensitivity))
+	c.params = append(c.params, byte(sensitivity)) //nolint:gosec // validated by Validate() to 0-5
 	_, err := x.send(ctx, c, true)
 	return err
 }
