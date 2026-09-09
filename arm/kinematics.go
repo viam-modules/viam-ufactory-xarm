@@ -103,7 +103,7 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 	if err != nil {
 		return nil, err
 	}
-	cfg.OriginalFile = &referenceframe.ModelFile{Bytes: raw, Extension: "json"}
+	cfg.OriginalFile = &referenceframe.ModelFile{Bytes: raw, Extension: kinematicsExtJSON}
 
 	return cfg.ParseConfig(name)
 }

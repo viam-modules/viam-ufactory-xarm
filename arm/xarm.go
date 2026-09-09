@@ -75,6 +75,9 @@ const (
 	gripperLiteActionClose    = "close"
 	gripperLiteActionIsClosed = "is_closed"
 	gripperLiteActionStop     = "stop"
+
+	kinematicsExtJSON    = "json"
+	kinematicsVariantDef = "base"
 )
 
 //go:embed xarm6_kinematics.json
@@ -367,7 +370,7 @@ func MakeModelFrame(
 		if len(artifact.json) == 0 {
 			return nil, referenceframe.ErrNoModelInformation
 		}
-		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: "json"}}
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: kinematicsExtJSON}}
 		if err := json.Unmarshal(artifact.json, cfg); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal json file")
 		}
@@ -432,13 +435,13 @@ func MakeModelFrame(
 		}
 	}
 
-	source := "json"
+	source := kinematicsExtJSON
 	if useURDFs {
 		source = artifact.urdfBasename + ".urdf"
 	}
 	variant := artifact.variant
 	if variant == "" {
-		variant = "base"
+		variant = kinematicsVariantDef
 	}
 	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
 
@@ -729,8 +732,7 @@ func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
 
 	// the model path is safe because it is constructed from the module root and the model and name and has no user input
-	// #nosec G304
-	glb, err := os.ReadFile(path)
+	glb, err := os.ReadFile(path) //nolint:gosec // path is constructed from env var and known constants, no user input
 	if err != nil {
 		return commonpb.Mesh{}, err
 	}
@@ -1062,4 +1064,22 @@ func (x *xArm) Name() resource.Name {
 
 func (x *xArm) Status(_ context.Context) (map[string]any, error) {
 	return map[string]any{}, nil
+}
+
+func (x *xArm) Properties(_ context.Context, _ map[string]interface{}) (arm.Properties, error) {
+	return arm.Properties{
+		SupportManualMode:        true,
+		SupportCartesianCommands: true,
+	}, nil
+}
+
+func (x *xArm) SetManualMode(ctx context.Context, manualModeEnabled bool, _ time.Duration, _ map[string]interface{}) error {
+	if manualModeEnabled {
+		return x.enterManualMode(ctx)
+	}
+	return x.exitManualMode(ctx)
+}
+
+func (x *xArm) ManualMode(_ context.Context, _ map[string]interface{}) (bool, error) {
+	return x.started.Load() == int32(manualMode), nil
 }

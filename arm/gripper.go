@@ -347,7 +347,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	// enabled before the first force-control write, and nothing else does that.
 	g.speed = defaultGripperSpeedG2
 	if newConf.GripperSpeed != 0 {
-		g.speed = uint16(newConf.GripperSpeed)
+		g.speed = uint16(newConf.GripperSpeed) //nolint:gosec // validated by Validate() to 1-5000
 	}
 	if newConf.GripperSpeed != 0 || submodel == submodelG2 {
 		if err := x.setupGripper(ctx); err != nil {
@@ -462,8 +462,8 @@ func writeForceControlBlock(ctx context.Context, x *xArm, speed, force uint16, p
 		1,
 		speed,
 		force,
-		uint16(position >> 16),    //nolint:gosec // split of a 32-bit value.
-		uint16(position & 0xFFFF), //nolint:gosec
+		uint16(position >> 16),
+		uint16(position & 0xFFFF),
 	})
 }
 
