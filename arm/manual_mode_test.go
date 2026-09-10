@@ -1,9 +1,11 @@
 package arm
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"go.viam.com/rdk/operation"
 	"go.viam.com/test"
 )
 
@@ -54,4 +56,15 @@ func TestExitTimerReschedule(t *testing.T) {
 	default:
 	}
 	test.That(t, len(secondFired), test.ShouldEqual, 0)
+}
+
+func TestSetManualModeRejectsWhileMoving(t *testing.T) {
+	x := &xArm{opMgr: operation.NewSingleOperationManager()}
+	_, done := x.opMgr.New(context.Background())
+	defer done()
+
+	err := x.SetManualMode(context.Background(), true, 0, nil)
+
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "motion is in progress")
 }
