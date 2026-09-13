@@ -594,11 +594,11 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	}
 
 	// Point times are relative to the start of the motion; the first point is at t=0. We anchor
-	// wall-clock to the moment we send that first point and schedule every later send for `anchor`
-	// plus the point's `Time`, which follows the trajectory's own clock rather than letting a
-	// per-step sleep accumulate drift. A point that is already past due when it arrives, because the
-	// producer is starving us, sends immediately with no wait; the arm holds its last setpoint until
-	// we catch up. Keeping the arm fed is the caller's contract, not ours to repair.
+	// wall-clock to the moment we send the point that starts the arm moving and schedule every later
+	// send for `anchor` plus the point's `Time`, which follows the trajectory's own clock rather than
+	// letting a per-step sleep accumulate drift. A point that is already past due when it arrives,
+	// because the producer is starving us, sends immediately with no wait; the arm holds its last
+	// setpoint until we catch up. Keeping the arm fed is the caller's contract, not ours to repair.
 	var anchor time.Time
 	validator := newTrajectoryStreamValidator()
 
@@ -636,10 +636,18 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			// it cannot be used per point at this cadence; RDK's unexported `checkDesiredJointPositions`
 			// is the check we want.
 
+			// The validator above guarantees the first point is the t=0 point. Its accelerations are the
+			// only actionable content on it, and the xArm has no interface to command those, so skip it and
+			// let the next point start the motion.
+			if p.Time == 0 {
+				continue
+			}
+
+			// The trajectory clock starts with the motion, so however long the second point takes to
+			// reach us, across a batch boundary or behind a slow producer, none of that wait is charged
+			// against the schedule.
 			if anchor.IsZero() {
 				anchor = time.Now()
-				// xarm currently only operates on position, so there is nothing interesting in the first trajectory point.
-				continue
 			}
 
 			if err := x.sendJointStep(ctx, p.Positions, mo); err != nil {
