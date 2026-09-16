@@ -462,8 +462,8 @@ func writeForceControlBlock(ctx context.Context, x *xArm, speed, force uint16, p
 		1,
 		speed,
 		force,
-		uint16(position >> 16),    //nolint:gosec // split of a 32-bit value.
-		uint16(position & 0xFFFF), //nolint:gosec
+		uint16(position >> 16),
+		uint16(position & 0xFFFF),
 	})
 }
 

@@ -1235,7 +1235,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 
 func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	return x.writeGripperRegisters(ctx, gripperTargetPosReg,
-		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)}) //nolint:gosec // split of a 32-bit value.
+		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)})
 }
 
 func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {

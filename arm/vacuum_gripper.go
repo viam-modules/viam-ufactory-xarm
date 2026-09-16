@@ -179,7 +179,7 @@ func (g *myVacuumGripper) IsHoldingSomething(
 	if err != nil {
 		return gripper.HoldingStatus{}, err
 	}
-	return gripper.HoldingStatus{IsHoldingSomething: res[vacuumGripperStateKey].(bool)}, nil
+	return gripper.HoldingStatus{IsHoldingSomething: res[vacuumGripperStateKey].(bool), Meta: nil}, nil
 }
 
 func (g *myVacuumGripper) Name() resource.Name {
