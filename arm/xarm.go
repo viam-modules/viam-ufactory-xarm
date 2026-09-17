@@ -813,6 +813,13 @@ func connectionTypeFromCmd(cmd map[string]any, detectedSubmodel string) connecti
 }
 
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	if value, ok := cmd["clear_joint_limit_error"]; ok {
+		if value != true || len(cmd) != 1 {
+			return nil, errors.New("clear_joint_limit_error must be the only command and true")
+		}
+		cleared, err := x.clearJointLimitError(ctx)
+		return map[string]any{"cleared": cleared}, err
+	}
 	resp := map[string]any{}
 	validCommand := false
 
