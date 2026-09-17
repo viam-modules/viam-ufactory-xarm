@@ -6,6 +6,7 @@ import (
 	_ "embed" // for embedding model file.
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -44,31 +45,35 @@ const (
 	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
 
 	// DoCommand keys.
-	loadKey                  = "load"
-	moveGripperKey           = "move_gripper"
-	getGripperKey            = "get_gripper"
-	gripperPositionKey       = "gripper_position"
-	setAcckey                = "set_acceleration"
-	setSpeedKey              = "set_speed"
-	grabVacuumKey            = "grab_vacuum"
-	openVacuumKey            = "open_vacuum"
-	clearErrorKey            = "clear_error"
-	getStateKey              = "get_state"
-	getErrorKey              = "get_error"
-	getVacuumGripperStateKey = "get_vacuum_state"
-	vacuumGripperStateKey    = "vacuum_state"
-	connectionTypeKey        = "connection_type"
-	gripperLiteActionKey     = "gripper_lite_action"
-	setGripperSpeedKey       = "set_gripper_speed"
-	getGripperSpeedKey       = "get_gripper_speed"
-	gripperSpeedKey          = "gripper_speed"
-	grabWithTorqueKey        = "grab_with_torque"
-	enterManualModeKey       = "enter_manual_mode"
-	exitManualModeKey        = "exit_manual_mode"
-	getFTSensorDataKey       = "get_ft_sensor_data"
-	ftSensorZeroKey          = "ft_sensor_zero"
-	ftSensorEnableKey        = "ft_sensor_enable"
-	ftSensorDataKey          = "ft_sensor_data"
+	setCollisionSensitivityKey        = "set_collision_sensitivity"
+	resetCollisionSensitivityKey      = "reset_collision_sensitivity"
+	collisionSensitivityKey           = "collision_sensitivity"
+	configuredCollisionSensitivityKey = "configured_collision_sensitivity"
+	loadKey                           = "load"
+	moveGripperKey                    = "move_gripper"
+	getGripperKey                     = "get_gripper"
+	gripperPositionKey                = "gripper_position"
+	setAcckey                         = "set_acceleration"
+	setSpeedKey                       = "set_speed"
+	grabVacuumKey                     = "grab_vacuum"
+	openVacuumKey                     = "open_vacuum"
+	clearErrorKey                     = "clear_error"
+	getStateKey                       = "get_state"
+	getErrorKey                       = "get_error"
+	getVacuumGripperStateKey          = "get_vacuum_state"
+	vacuumGripperStateKey             = "vacuum_state"
+	connectionTypeKey                 = "connection_type"
+	gripperLiteActionKey              = "gripper_lite_action"
+	setGripperSpeedKey                = "set_gripper_speed"
+	getGripperSpeedKey                = "get_gripper_speed"
+	gripperSpeedKey                   = "gripper_speed"
+	grabWithTorqueKey                 = "grab_with_torque"
+	enterManualModeKey                = "enter_manual_mode"
+	exitManualModeKey                 = "exit_manual_mode"
+	getFTSensorDataKey                = "get_ft_sensor_data"
+	ftSensorZeroKey                   = "ft_sensor_zero"
+	ftSensorEnableKey                 = "ft_sensor_enable"
+	ftSensorDataKey                   = "ft_sensor_data"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -813,6 +818,26 @@ func connectionTypeFromCmd(cmd map[string]any, detectedSubmodel string) connecti
 }
 
 func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]any, error) {
+	if value, ok := cmd[setCollisionSensitivityKey]; ok {
+		if len(cmd) != 1 {
+			return nil, errors.New("collision sensitivity must be a standalone command")
+		}
+		level, numeric := value.(float64)
+		if native, ok := value.(int); ok {
+			level, numeric = float64(native), true
+		}
+		if !numeric || math.IsNaN(level) || math.IsInf(level, 0) || level != math.Trunc(level) || level < 1 || level > 5 {
+			return nil, errors.New("collision sensitivity must be an integer from 1 to 5")
+		}
+		return x.commandCollisionSensitivity(ctx, int(level))
+	}
+	if value, ok := cmd[resetCollisionSensitivityKey]; ok {
+		reset, valid := value.(bool)
+		if len(cmd) != 1 || !valid || !reset {
+			return nil, errors.New("reset_collision_sensitivity requires a standalone true value")
+		}
+		return x.commandCollisionSensitivity(ctx, 0)
+	}
 	resp := map[string]any{}
 	validCommand := false
 
@@ -971,6 +996,10 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		validCommand = true
 	}
 	if _, ok := cmd[clearErrorKey]; ok {
+		// Collision faults are cleared only by this explicit operator command.
+		if _, err := x.send(ctx, x.newCmd(regMap["ClearError"]), false); err != nil {
+			return nil, err
+		}
 		if err := x.checkReadyState(ctx, false); err != nil {
 			return nil, err
 		}
@@ -1057,6 +1086,36 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		return nil, errors.New("command not found")
 	}
 	return resp, nil
+}
+
+func (x *xArm) commandCollisionSensitivity(ctx context.Context, level int) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if x.conf == nil || x.conf.Sensitivity == nil || *x.conf.Sensitivity < 1 || *x.conf.Sensitivity > 5 {
+		return nil, errors.New("runtime sensitivity requires configured collision_sensitivity from 1 to 5")
+	}
+	baseline := *x.conf.Sensitivity
+	if level == 0 {
+		level = baseline
+	}
+	if level < baseline {
+		return nil, errors.New("runtime sensitivity cannot be lower than configured collision_sensitivity")
+	}
+	if x.opMgr.OpRunning() {
+		return nil, errors.New("cannot change collision sensitivity during an arm operation")
+	}
+	state, err := x.send(ctx, x.newCmd(regMap["GetState"]), true)
+	if err != nil {
+		return nil, err
+	}
+	if len(state.params) < 2 || state.params[1] == 1 {
+		return nil, errors.New("controller must confirm stopped motion before changing sensitivity")
+	}
+	if err := x.setCollisionDetectionSensitivity(ctx, level); err != nil {
+		return nil, err
+	}
+	return map[string]any{collisionSensitivityKey: level, configuredCollisionSensitivityKey: baseline}, nil
 }
 
 func (x *xArm) Name() resource.Name {

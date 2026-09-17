@@ -1,17 +1,110 @@
 package arm
 
 import (
+	"context"
+	"encoding/binary"
+	"io"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/operation"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
+
+func TestCollisionSensitivityDoCommand(t *testing.T) {
+	controller, client := net.Pipe()
+	t.Cleanup(func() { _ = controller.Close(); _ = client.Close() })
+	baseline := 3
+	x := &xArm{conf: &Config{Sensitivity: &baseline}, opMgr: operation.NewSingleOperationManager(),
+		cmdConn: &modbusConn{conn: client, logger: logging.NewTestLogger(t)}}
+	requests := make(chan cmd, 4)
+	var collision atomic.Bool
+	go func() {
+		defer close(requests)
+		for {
+			header := make([]byte, 7)
+			if _, err := io.ReadFull(controller, header); err != nil {
+				return
+			}
+			params := make([]byte, int(binary.BigEndian.Uint16(header[4:6]))-1)
+			if _, err := io.ReadFull(controller, params); err != nil {
+				return
+			}
+			request := cmd{tid: binary.BigEndian.Uint16(header[:2]), prot: 2, reg: header[6], params: params}
+			requests <- request
+			response := cmd{tid: request.tid, prot: 2, reg: request.reg, params: []byte{0}}
+			if request.reg == regMap["GetState"] {
+				response.params = []byte{0, 2}
+			}
+			if request.reg == regMap["ClearError"] {
+				collision.Store(false)
+			}
+			if collision.Load() {
+				response.params[0] = errorState
+			}
+			if request.reg == regMap["GetError"] {
+				response.params = []byte{0, 0, 0}
+				if collision.Load() {
+					response.params = []byte{errorState, errCodeCollision, 0}
+				}
+			}
+			if _, err := controller.Write(response.bytes()); err != nil {
+				return
+			}
+		}
+	}()
+	response, err := x.DoCommand(context.Background(), map[string]any{setCollisionSensitivityKey: 5})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, response[collisionSensitivityKey], test.ShouldEqual, 5)
+	response, err = x.DoCommand(context.Background(), map[string]any{resetCollisionSensitivityKey: true})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, response[collisionSensitivityKey], test.ShouldEqual, baseline)
+	for _, level := range []byte{5, 3} {
+		test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetState"])
+		request := <-requests
+		test.That(t, request.reg, test.ShouldEqual, regMap["Sensitivity"])
+		test.That(t, request.params, test.ShouldResemble, []byte{level})
+	}
+	for _, value := range []any{0, 6, -1, 2, 3.5, math.NaN(), math.Inf(1), "5", true, map[string]any{}} {
+		_, err := x.DoCommand(context.Background(), map[string]any{setCollisionSensitivityKey: value})
+		test.That(t, err, test.ShouldNotBeNil)
+	}
+	test.That(t, len(requests), test.ShouldEqual, 0)
+	x.conf.Sensitivity = nil
+	_, err = x.DoCommand(context.Background(), map[string]any{setCollisionSensitivityKey: 5.0})
+	test.That(t, err, test.ShouldNotBeNil)
+	x.conf.Sensitivity = &baseline
+	_, done := x.opMgr.New(context.Background())
+	_, err = x.DoCommand(context.Background(), map[string]any{setCollisionSensitivityKey: 5.0})
+	test.That(t, err, test.ShouldNotBeNil)
+	done()
+	test.That(t, len(requests), test.ShouldEqual, 0)
+	collision.Store(true)
+	// Reads and new moves must not auto-clear a resistance fault.
+	_, err = x.JointPositions(context.Background(), nil)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetError"])
+	err = x.MoveToJointPositions(context.Background(), nil, nil)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetError"])
+	_, err = x.DoCommand(context.Background(), map[string]any{resetCollisionSensitivityKey: true})
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetState"])
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetError"])
+	_, err = x.DoCommand(context.Background(), map[string]any{clearErrorKey: true})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["ClearError"])
+	test.That(t, (<-requests).reg, test.ShouldEqual, regMap["GetError"])
+	test.That(t, collision.Load(), test.ShouldBeFalse)
+}
 
 func TestConnectionTypeFromCmd(t *testing.T) {
 	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "contact"}, submodelV1),

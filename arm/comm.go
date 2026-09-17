@@ -299,8 +299,10 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	}
 
 	if currentState[0]&errorState != 0 {
-		// we assume that if we run into an error we will need to restart the servos etc.
 		x.started.Store(-1)
+		if currentState[1] == errCodeCollision {
+			return decodeError(currentState)
+		}
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code

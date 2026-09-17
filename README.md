@@ -53,7 +53,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `port` | int | Optional | `502` | TCP port for the arm's Modbus interface. |
 | `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `3` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
-| `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
+| `collision_sensitivity` | int | Optional | Controller setting retained | Collision detection sensitivity from `0` (off) to `5` (highest). Higher values trigger collision protection with less additional torque. Explicitly configure a protected baseline of `1`–`5` to use runtime sensitivity commands. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
 | `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. Hardware auto-detection selects a variant URDF when applicable — e.g. an xArm6 reporting arm-type code `1305` is loaded from `xarm6_1305.urdf` with its distinct link meshes; other arms use the base URDF for their model. Gripper meshes are opt-in separately via each gripper's own `use_urdfs` flag. |
@@ -175,6 +175,28 @@ resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 ### DoCommand Reference
 
 The following commands are available via `DoCommand` on the arm component.
+
+#### Collision sensitivity
+
+`{"set_collision_sensitivity": 5}` applies the highest controller sensitivity.
+`{"reset_collision_sensitivity": true}` restores the arm's explicit configured
+baseline. Each must be sent alone while the arm is stopped. Runtime values must
+be integers from 1 to 5 and cannot be less sensitive than the configured baseline;
+an absent or disabled baseline is refused. The response contains
+`collision_sensitivity` and `configured_collision_sensitivity`, acknowledging a
+successful controller write, not an independent hardware readback.
+
+An action owner can apply its configured level before motion and restore the
+baseline after successful release/retreat. After a failed action, retain the
+stricter level and require operator recovery. Serialize these commands with the
+owning action; they change the controller-wide setting, not one wrist joint.
+Out-of-band Studio or direct-controller changes are not tracked. Collision faults
+are preserved by readiness checks, including joint reads and subsequent moves;
+only an explicit `clear_error` command (or operator action in Studio) clears them.
+
+[UFactory documents](https://docs.ufactory.cc/user_manual/ufactoryStudio/7.settings.html)
+5 as the highest sensitivity. Correct tool load and mounting configuration matter.
+This setting is not a calibrated knob torque limit or proof that a push latch unlocked.
 
 #### Speed and Acceleration
 
