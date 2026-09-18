@@ -85,8 +85,8 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0/go.mod h1:Mf6O40IAyB9zR/1J8nGDDPirZQQPbYJni8Yisy7NTMc=
 github.com/JohnN193/api v0.0.0-20260908194345-974c0908dea1 h1:X/FWd4BVvS931QHAnWWb+a4U22OLHZ67AgK5GWmTsXo=
 github.com/JohnN193/api v0.0.0-20260908194345-974c0908dea1/go.mod h1:4wA8A7g955PH03er3PNSJAi32bu3fpj9/kFp6AbrDNY=
-github.com/JohnN193/rdk v0.0.0-20260918182451-7f5305efe138 h1:GiQEPR85BLozB1EnuMen/tN54t9VZzMSKmmF1AjRRDA=
-github.com/JohnN193/rdk v0.0.0-20260918182451-7f5305efe138/go.mod h1:078Mwamdxwhd2cnSFKLPk2umqOAFfE61aucWUsmISMU=
+github.com/JohnN193/rdk v0.0.0-20260918192919-59ae9619a39b h1:KykINuccNiF0g5oJfmDfSDcKhuAc7d/iTl1JSHcjXfQ=
+github.com/JohnN193/rdk v0.0.0-20260918192919-59ae9619a39b/go.mod h1:078Mwamdxwhd2cnSFKLPk2umqOAFfE61aucWUsmISMU=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=

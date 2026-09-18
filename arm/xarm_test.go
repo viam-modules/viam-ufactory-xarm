@@ -414,3 +414,40 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
 }
+
+// With a module root, the 1305 variant loads from the shipped SVA v2 file: collision meshes and
+// visuals arrive by path, the joints carry the SVA names, and the configured speed still lands
+// as a user limit on each of them.
+func TestMakeModelFramePrefersSVAv2(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 1305, 45, 300)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
+
+	pb := referenceframe.KinematicModelToProtobuf(m).GetModel()
+	names := map[string]bool{}
+	meshLinks, visualLinks := 0, 0
+	for _, l := range pb.GetLinks() {
+		names[l.GetId()] = true
+		if len(l.GetCollision()) > 0 && l.GetCollision()[0].GetMesh() != nil {
+			meshLinks++
+			test.That(t, len(l.GetCollision()[0].GetMesh().GetMesh()), test.ShouldBeGreaterThan, 0)
+			test.That(t, l.GetCollision()[0].GetMesh().GetContentType(), test.ShouldEqual, "ply")
+		}
+		if len(l.GetVisual()) > 0 {
+			visualLinks++
+			test.That(t, len(l.GetVisual()[0].GetMesh().GetMesh()), test.ShouldBeGreaterThan, 0)
+		}
+	}
+	test.That(t, meshLinks, test.ShouldEqual, 7)
+	test.That(t, visualLinks, test.ShouldEqual, 7)
+	test.That(t, names["gripper_mount"], test.ShouldBeTrue)
+
+	for _, j := range pb.GetJoints() {
+		test.That(t, j.GetUserLimits().GetMaxVelocity(), test.ShouldEqual, 45.0)
+		test.That(t, j.GetUserLimits().GetMaxAcceleration(), test.ShouldEqual, 300.0)
+	}
+	test.That(t, pb.GetJoints()[0].GetId(), test.ShouldEqual, "waist")
+}

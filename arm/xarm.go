@@ -359,14 +359,28 @@ func MakeModelFrame(
 		return nil, err
 	}
 
+	// An SVA v2 file shipped beside the URDF is the preferred source. It carries the collision
+	// meshes and the visuals by path, so neither the URDF branch nor the GLB table is needed.
+	var fromV2 referenceframe.Model
+	if v2Path, ok := svaV2Path(artifact.urdfBasename); ok {
+		parsed, err := referenceframe.ParseModelV2File(v2Path, resourceName)
+		if err != nil {
+			return nil, errors.Wrapf(err, "loading %s", v2Path)
+		}
+		fromV2 = parsed
+	}
+
 	var cfg *referenceframe.ModelConfigJSON
-	if useURDFs {
+	switch {
+	case fromV2 != nil:
+		cfg = fromV2.ModelConfig()
+	case useURDFs:
 		parsed, err := makeModelFrameFromURDF(artifact.urdfBasename, modelName, meshDecimationRatios, logger)
 		if err != nil {
 			return nil, err
 		}
 		cfg = parsed.ModelConfig()
-	} else {
+	default:
 		if len(artifact.json) == 0 {
 			return nil, referenceframe.ErrNoModelInformation
 		}
@@ -412,7 +426,10 @@ func MakeModelFrame(
 	}
 
 	source := "json"
-	if useURDFs {
+	switch {
+	case fromV2 != nil:
+		source = artifact.urdfBasename + "_v2.json"
+	case useURDFs:
 		source = artifact.urdfBasename + ".urdf"
 	}
 	variant := artifact.variant
@@ -421,9 +438,12 @@ func MakeModelFrame(
 	}
 	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
 
-	model, err := cfg.ParseConfig(resourceName)
-	if err != nil {
-		return nil, err
+	model := fromV2
+	if model == nil {
+		model, err = cfg.ParseConfig(resourceName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// The limits live on the model rather than in the document, so they reach the wire through
 	// the typed kinematic model whichever file they came from, URDF included.
@@ -443,6 +463,20 @@ func MakeModelFrame(
 // Ratios ≥ 1.0 are clamped to 0.9999: RDK treats 1.0 as "skip decimation"
 // and ships raw STL labelled as PLY, which the client fails to parse.
 // The input slice is not mutated.
+// svaV2Path is where the module ships an SVA v2 kinematics file for a URDF variant, and whether
+// one is there. Outside a module root, as in tests, there is none.
+func svaV2Path(urdfBasename string) (string, bool) {
+	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
+	if moduleRoot == "" {
+		return "", false
+	}
+	path := fmt.Sprintf("%s/arm/%s_v2.json", moduleRoot, urdfBasename)
+	if _, err := os.Stat(path); err != nil {
+		return "", false
+	}
+	return path, true
+}
+
 func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64, logger logging.Logger) (referenceframe.Model, error) {
 	ratios := append([]float64(nil), meshDecimationRatios...)
 	for i, r := range ratios {

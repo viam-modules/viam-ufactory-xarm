@@ -21,6 +21,10 @@ func attachVisualsAndProperties(model referenceframe.Model, conf *Config, modelN
 	// the GLB files ship inside the module, so a missing one means we are running outside a
 	// module root, as in tests, and the model simply has no visuals
 	for _, part := range armTo3DModelParts[modelName] {
+		// a model loaded from an SVA v2 file already carries its visuals by path
+		if len(sm.VisualGeometries(part)) > 0 {
+			continue
+		}
 		mesh, err := threeDMeshFromName(modelName, part)
 		if err != nil {
 			logger.Debugw("no visual mesh for link", "link", part, "error", err)
