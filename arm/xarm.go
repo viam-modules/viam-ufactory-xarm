@@ -386,9 +386,10 @@ func MakeModelFrame(
 		}
 	}
 
-	// One entry per joint we actually have something to say about. A joint we would say nothing
-	// about is left out rather than given an empty entry, because SetJointLimits refuses a mimic
-	// joint that appears in the map at all, before it looks at whether we set any field.
+	// One entry per joint we actually have something to say about. These are user limits: what
+	// this arm's config asks for, sitting inside what the hardware allows, which the model keeps
+	// as the hardware limits. A lock on a joint that currently sits outside its own range is
+	// pulled back to the nearest bound, since a limit that widens the hardware range is refused.
 	limits := make(map[string]referenceframe.JointLimits, len(cfg.Joints))
 	for i, joint := range cfg.Joints {
 		entry := referenceframe.JointLimits{}
@@ -397,41 +398,16 @@ func MakeModelFrame(
 		}
 		if slices.Contains(badJoints, i) {
 			lo, hi := lockedJointRangeDegs(current[i], joint)
+			if lo < joint.Min || hi > joint.Max {
+				logger.Warnf("joint %d (%s) sits at %v, outside its hardware range [%v, %v]; locking it at the nearest bound",
+					i, joint.ID, utils.RadToDeg(current[i]), joint.Min, joint.Max)
+				lo, hi = min(max(lo, joint.Min), joint.Max), max(min(hi, joint.Max), joint.Min)
+			}
 			entry.Min, entry.Max = &lo, &hi
 			logger.Infof("locking joint %d to %v", i, utils.RadToDeg(current[i]))
 		}
 		if entry != (referenceframe.JointLimits{}) {
 			limits[joint.ID] = entry
-		}
-	}
-
-	// Limits only reach the server by being written into the document, since RDK sends the
-	// document bytes rather than serializing the model. That rules out the URDF path: we would
-	// have to re-emit as SVA, and an arm asking for URDFs is asking for its meshes. RSDK-14232 is
-	// where URDF gets a way to carry these.
-	if !useURDFs {
-		// Passing no entries is still worth doing, since the call re-marshals the document either
-		// way, and that is what carries the locks out.
-		cfg, err = referenceframe.SetJointLimits(cfg, limits)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		// A lock still has to shape the model we return, so this module's own planning respects
-		// it. It just cannot be advertised, and neither can the configured speed.
-		for i, joint := range cfg.Joints {
-			if entry, ok := limits[joint.ID]; ok && entry.Min != nil {
-				cfg.Joints[i].Min, cfg.Joints[i].Max = *entry.Min, *entry.Max
-			}
-		}
-		if len(badJoints) > 0 {
-			logger.Warnf("not publishing locked joints %v for %s: use_urdfs is set, so the lock "+
-				"applies to this module's own model but the motion service and any client will "+
-				"plan as though those joints are free.", badJoints, modelName)
-		}
-		if speedDegsPerSec > 0 && accelDegsPerSec2 > 0 {
-			logger.Warnf("not publishing joint speed limits for %s: use_urdfs is set, and limits can "+
-				"only be written into SVA kinematics. The arm still moves at the configured speed.", modelName)
 		}
 	}
 
@@ -445,7 +421,22 @@ func MakeModelFrame(
 	}
 	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
 
-	return cfg.ParseConfig(resourceName)
+	model, err := cfg.ParseConfig(resourceName)
+	if err != nil {
+		return nil, err
+	}
+	// The limits live on the model rather than in the document, so they reach the wire through
+	// the typed kinematic model whichever file they came from, URDF included.
+	if len(limits) > 0 {
+		sm, ok := model.(*referenceframe.SimpleModel)
+		if !ok {
+			return nil, fmt.Errorf("cannot set user limits on a %T", model)
+		}
+		if err := sm.SetUserLimits(limits); err != nil {
+			return nil, err
+		}
+	}
+	return model, nil
 }
 
 // makeModelFrameFromURDF parses a URDF into a referenceframe.Model.
@@ -603,6 +594,9 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, multierr.Combine(err, x.Close(ctx))
 	}
 	x.dof = len(x.model.DoF())
+	if err := attachVisualsAndProperties(x.model, newConf, modelName, logger); err != nil {
+		return nil, multierr.Combine(err, x.Close(ctx))
+	}
 
 	if len(current) > 0 {
 		logger.Infof("model that was loaded config")
