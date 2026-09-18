@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/utils"
@@ -105,7 +106,7 @@ func TestMakeModelFrameURDFUnknownModel(t *testing.T) {
 // On the URDF path a lock cannot reach the server, since the bytes RDK sends are the URDF off
 // disk. It still has to shape the model we return, so this module's own planning refuses to move
 // the joint. Losing that quietly is the failure this pins down.
-func TestMakeModelFrameBadJointsOnURDFLockOnlyLocally(t *testing.T) {
+func TestMakeModelFrameBadJointsOnURDFReachTheWire(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
 	repoRoot := filepath.Dir(armDir())
@@ -121,8 +122,15 @@ func TestMakeModelFrameBadJointsOnURDFLockOnlyLocally(t *testing.T) {
 	test.That(t, utils.RadToDeg(locked.Min), test.ShouldAlmostEqual, -31.0, 1e-8)
 	test.That(t, utils.RadToDeg(locked.Max), test.ShouldAlmostEqual, -29.0, 1e-8)
 
-	// The document we hand out is still the URDF, so the lock does not travel with it.
+	// The file we parsed is still the URDF, but the lock travels on the typed model as a user
+	// limit, with the hardware range left as the URDF declared it.
 	test.That(t, m.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "urdf")
+	elbow := referenceframe.KinematicModelToProtobuf(m).GetModel().GetJoints()[2]
+	test.That(t, elbow.GetUserLimits().GetMin(), test.ShouldAlmostEqual, -31.0, 1e-8)
+	test.That(t, elbow.GetUserLimits().GetMax(), test.ShouldAlmostEqual, -29.0, 1e-8)
+	// the URDF's own range, untouched by the lock, still contains it
+	test.That(t, elbow.GetHardwareLimits().GetMin(), test.ShouldBeLessThan, -31.0)
+	test.That(t, elbow.GetHardwareLimits().GetMax(), test.ShouldBeGreaterThan, -29.0)
 }
 
 func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
@@ -212,7 +220,9 @@ func TestMakeModelFrameServedLimits(t *testing.T) {
 			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, false, nil, logger, 0, tc.speed, tc.accel)
 			test.That(t, err, test.ShouldBeNil)
 
-			served, err := referenceframe.UnmarshalModelJSON(m.ModelConfig().OriginalFile.Bytes, "")
+			// what a client sees is the typed model, read back the way the framesystem reads it
+			resp := referenceframe.KinematicModelToProtobuf(m)
+			served, err := referenceframe.KinematicModelFromProtobuf("", resp)
 			test.That(t, err, test.ShouldBeNil)
 
 			vels, accs, ok := referenceframe.TrajectoryLimits(served.DoF())
@@ -229,8 +239,45 @@ func TestMakeModelFrameServedLimits(t *testing.T) {
 				elbow := served.DoF()[2]
 				test.That(t, utils.RadToDeg(elbow.Min), test.ShouldAlmostEqual, tc.wantElbow[0], 1e-8)
 				test.That(t, utils.RadToDeg(elbow.Max), test.ShouldAlmostEqual, tc.wantElbow[1], 1e-8)
+				// the lock narrows the user layer only; the hardware range is still what the file said
+				hw := resp.GetModel().GetJoints()[2].GetHardwareLimits()
+				test.That(t, hw.GetMin(), test.ShouldAlmostEqual, -225.0, 1e-8)
+				test.That(t, hw.GetMax(), test.ShouldAlmostEqual, 10.0, 1e-8)
 			}
 		})
+	}
+}
+
+func TestAttachVisualsAndProperties(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+	conf := &Config{MoveHZ: 120}
+	test.That(t, attachVisualsAndProperties(m, conf, ModelName6DOF, logger), test.ShouldBeNil)
+
+	pb := referenceframe.KinematicModelToProtobuf(m).GetModel()
+	test.That(t, pb.GetProperties().GetTrajectorySamplingFreqHz(), test.ShouldEqual, 120.0)
+
+	visuals := 0
+	for _, link := range pb.GetLinks() {
+		for _, g := range link.GetVisual() {
+			visuals++
+			test.That(t, g.GetMesh().GetContentType(), test.ShouldEqual, "glb")
+			test.That(t, g.GetMesh().GetSourcePath(), test.ShouldEqual, "3d_models/"+ModelName6DOF+"/"+link.GetId()+".glb")
+			test.That(t, len(g.GetMesh().GetMesh()), test.ShouldBeGreaterThan, 0)
+		}
+	}
+	test.That(t, visuals, test.ShouldEqual, len(armTo3DModelParts[ModelName6DOF]))
+
+	// and a caller who does not want the visuals does not pay for them
+	slim := referenceframe.KinematicModelToProtobufForRequest(m, &commonpb.GetKinematicsRequest{ExcludeVisualMeshes: true})
+	for _, link := range slim.GetModel().GetLinks() {
+		for _, g := range link.GetVisual() {
+			test.That(t, len(g.GetMesh().GetMesh()), test.ShouldEqual, 0)
+			test.That(t, g.GetMesh().GetSourcePath(), test.ShouldNotBeEmpty)
+		}
 	}
 }
 
@@ -366,4 +413,41 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
+}
+
+// With a module root, the 1305 variant loads from the shipped SVA v2 file: collision meshes and
+// visuals arrive by path, the joints carry the SVA names, and the configured speed still lands
+// as a user limit on each of them.
+func TestMakeModelFramePrefersSVAv2(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 1305, 45, 300)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, len(m.DoF()), test.ShouldEqual, 6)
+
+	pb := referenceframe.KinematicModelToProtobuf(m).GetModel()
+	names := map[string]bool{}
+	meshLinks, visualLinks := 0, 0
+	for _, l := range pb.GetLinks() {
+		names[l.GetId()] = true
+		if len(l.GetCollision()) > 0 && l.GetCollision()[0].GetMesh() != nil {
+			meshLinks++
+			test.That(t, len(l.GetCollision()[0].GetMesh().GetMesh()), test.ShouldBeGreaterThan, 0)
+			test.That(t, l.GetCollision()[0].GetMesh().GetContentType(), test.ShouldEqual, "ply")
+		}
+		if len(l.GetVisual()) > 0 {
+			visualLinks++
+			test.That(t, len(l.GetVisual()[0].GetMesh().GetMesh()), test.ShouldBeGreaterThan, 0)
+		}
+	}
+	test.That(t, meshLinks, test.ShouldEqual, 7)
+	test.That(t, visualLinks, test.ShouldEqual, 7)
+	test.That(t, names["gripper_mount"], test.ShouldBeTrue)
+
+	for _, j := range pb.GetJoints() {
+		test.That(t, j.GetUserLimits().GetMaxVelocity(), test.ShouldEqual, 45.0)
+		test.That(t, j.GetUserLimits().GetMaxAcceleration(), test.ShouldEqual, 300.0)
+	}
+	test.That(t, pb.GetJoints()[0].GetId(), test.ShouldEqual, "waist")
 }
