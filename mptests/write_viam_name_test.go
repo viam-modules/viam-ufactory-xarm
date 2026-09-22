@@ -70,7 +70,7 @@ func TestWriteViam(t *testing.T) {
 		},
 		StartState:     armplanning.NewPlanState(nil, seedMap),
 		FrameSystem:    fs,
-		PlannerOptions: &armplanning.PlannerOptions{},
+		PlannerOptions: armplanning.NewBasicPlannerOptions(),
 	})
 	test.That(t, err, test.ShouldBeNil)
 
