@@ -318,6 +318,8 @@ On a G2 the module uses the force block-write for `Grab`/`Open` and reads the gr
 | `gripper_force` | int | Optional | G2 only. Grasp force as a percentage (1–100). Defaults to 50. Ignored on a G1, which has no force register. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `xarm_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity, `0.5` reduces it to 50% of its original triangle count. |
+| `moving_fingers` | bool | Optional | Defaults to `false`. When `true`, the gripper reports its jaw opening as a kinematic input and its fingers move with it, so collision checks see them where they are. The motion planner may open or close the jaws during a move. |
+
 
 ### DoCommand
 
