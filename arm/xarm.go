@@ -75,6 +75,9 @@ const (
 	gripperLiteActionClose    = "close"
 	gripperLiteActionIsClosed = "is_closed"
 	gripperLiteActionStop     = "stop"
+
+	kinematicsSourceJSON = "json"
+	kinematicsBase       = "base"
 )
 
 //go:embed xarm6_kinematics.json
@@ -116,7 +119,7 @@ var (
 var armTo3DModelParts = map[string][]string{
 	"lite6": {
 		"base_top",
-		"base",
+		kinematicsBase,
 		"gripper_mount",
 		"lower_forearm",
 		"upper_arm",
@@ -125,7 +128,7 @@ var armTo3DModelParts = map[string][]string{
 	},
 	"xArm6": {
 		"base_top",
-		"base",
+		kinematicsBase,
 		"gripper_mount",
 		"lower_forearm",
 		"upper_arm",
@@ -370,7 +373,7 @@ func MakeModelFrame(
 		if len(artifact.json) == 0 {
 			return nil, referenceframe.ErrNoModelInformation
 		}
-		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: "json"}}
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: kinematicsSourceJSON}}
 		if err := json.Unmarshal(artifact.json, cfg); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal json file")
 		}
@@ -435,13 +438,13 @@ func MakeModelFrame(
 		}
 	}
 
-	source := "json"
+	source := kinematicsSourceJSON
 	if useURDFs {
 		source = artifact.urdfBasename + ".urdf"
 	}
 	variant := artifact.variant
 	if variant == "" {
-		variant = "base"
+		variant = kinematicsBase
 	}
 	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
 
@@ -732,7 +735,7 @@ func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
 
 	// the model path is safe because it is constructed from the module root and the model and name and has no user input
-	// #nosec G304
+	// #nosec G304 G703
 	glb, err := os.ReadFile(path)
 	if err != nil {
 		return commonpb.Mesh{}, err
