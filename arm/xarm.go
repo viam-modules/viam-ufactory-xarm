@@ -43,6 +43,8 @@ const (
 	defaultTrajGenPathToleranceDeltaRads             = 0.1
 	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
 
+	defaultStreamLimitToleranceRatio = 1.01 // accept 1% tolerance on stream vel and acc limits
+
 	// DoCommand keys.
 	loadKey                  = "load"
 	moveGripperKey           = "move_gripper"
@@ -212,17 +214,18 @@ type TrajGenConfig struct {
 
 // Config is used for converting config attributes.
 type Config struct {
-	Host                 string         `json:"host"`
-	Port                 int            `json:"port,omitempty"`
-	Speed                float64        `json:"speed_degs_per_sec,omitempty"`
-	Acceleration         float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ               float64        `json:"move_hz,omitempty"`
-	Sensitivity          *int           `json:"collision_sensitivity,omitempty"`
-	BadJoints            []int          `json:"bad-joints"`
-	Motion               string         `json:"motion"`
-	UseURDFs             bool           `json:"use_urdfs,omitempty"`
-	TrajGen              *TrajGenConfig `json:"trajectory_generator,omitempty"`
-	MeshDecimationRatios []float64      `json:"mesh_decimation_ratios,omitempty"`
+	Host                      string         `json:"host"`
+	Port                      int            `json:"port,omitempty"`
+	Speed                     float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration              float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ                    float64        `json:"move_hz,omitempty"`
+	Sensitivity               *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints                 []int          `json:"bad-joints"`
+	Motion                    string         `json:"motion"`
+	UseURDFs                  bool           `json:"use_urdfs,omitempty"`
+	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
+	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
 
 	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
 	StudioProxyPort int  `json:"ufactory-studio-proxy-port,omitempty"`
@@ -257,6 +260,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		if r < 0 || r > 1 {
 			return nil, nil, fmt.Errorf("mesh_decimation_ratios[%d] must be in [0, 1], got %f", i, r)
 		}
+	}
+
+	if cfg.StreamLimitToleranceRatio != 0 && cfg.StreamLimitToleranceRatio < 1 {
+		return nil, nil, fmt.Errorf("stream_limit_tolerance_ratio must be >= 1, got %f", cfg.StreamLimitToleranceRatio)
 	}
 
 	deps := []string{}
@@ -311,6 +318,13 @@ func (cfg *Config) maxBadJoint() int {
 		}
 	}
 	return maxJoint
+}
+
+func (cfg *Config) streamLimitToleranceRatio() float64 {
+	if cfg.StreamLimitToleranceRatio == 0 {
+		return defaultStreamLimitToleranceRatio
+	}
+	return cfg.StreamLimitToleranceRatio
 }
 
 // lockedJointRangeDegs returns the position bounds, in degrees, that pin a bad joint to roughly

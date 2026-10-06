@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -589,6 +590,13 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	// we ignore a `direct` setting from `extra`.
 	mo.direct = false
 
+	// start() trusts its cached mode, so an arm that dropped out of motion-ready on its own (after
+	// a rejected stream, a stop, etc.) would silently ignore every setpoint. Check the arm itself,
+	// as the unary path does.
+	if err := x.checkReadyState(ctx, true); err != nil {
+		return err
+	}
+
 	if err := x.start(ctx, false); err != nil {
 		return err
 	}
@@ -601,6 +609,8 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	// setpoint until we catch up. Keeping the arm fed is the caller's contract, not ours to repair.
 	var anchor time.Time
 	validator := newTrajectoryStreamValidator()
+
+	velLimits, accLimits := streamLimits(x.model, mo, x.conf.streamLimitToleranceRatio())
 
 	// Read batches until the client ends the stream or the operation is cancelled. We select on
 	// `ctx.Done()` rather than plainly ranging over `batches`: a cancellation, whether a `Stop`, a
@@ -643,6 +653,15 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 				continue
 			}
 
+			if c := p.Constraints; c != nil {
+				if err := checkJointConstraints("velocity", c.Velocities, velLimits); err != nil {
+					return err
+				}
+				if err := checkJointConstraints("acceleration", c.Accelerations, accLimits); err != nil {
+					return err
+				}
+			}
+
 			// The trajectory clock starts with the motion, so however long the second point takes to
 			// reach us, across a batch boundary or behind a slow producer, none of that wait is charged
 			// against the schedule.
@@ -668,6 +687,39 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			return ctx.Err()
 		}
 	}
+}
+
+// streamLimits returns the per-joint velocity and acceleration bounds a streamed trajectory is
+// checked against, scaled by tol so planner rounding just over a limit is not rejected.
+func streamLimits(model referenceframe.Model, mo moveOptions, tol float64) (velLimits, accLimits []float64) {
+	velLimits, accLimits, ok := referenceframe.TrajectoryLimits(model.DoF())
+	if !ok {
+		// The model carries no rate limits when use_urdfs is set, so fall back to the speed and
+		// acceleration this move would run at.
+		dof := len(model.DoF())
+		velLimits = slices.Repeat([]float64{mo.speed}, dof)
+		accLimits = slices.Repeat([]float64{mo.acceleration}, dof)
+	}
+	for i := range velLimits {
+		velLimits[i] *= tol
+		accLimits[i] *= tol
+	}
+	return velLimits, accLimits
+}
+
+func checkJointConstraints(kind string, values, limits []float64) error {
+	if values == nil {
+		return nil
+	}
+	if len(values) != len(limits) {
+		return fmt.Errorf("trajectory point has %d %s values but %d DoF", len(values), kind, len(limits))
+	}
+	for i, v := range values {
+		if math.Abs(v) > limits[i] {
+			return fmt.Errorf("joint %d %s %v exceeds limit %v", i, kind, v, limits[i])
+		}
+	}
+	return nil
 }
 
 // trajectoryStreamValidator enforces the shape invariants a streamed trajectory must satisfy,
