@@ -26,6 +26,22 @@ func TestConnectionTypeFromCmd(t *testing.T) {
 		test.ShouldEqual, connectionPlugin)
 }
 
+func TestStreamLimitToleranceRatio(t *testing.T) {
+	cfg := Config{Host: "localhost"}
+	test.That(t, cfg.streamLimitToleranceRatio(), test.ShouldEqual, defaultStreamLimitToleranceRatio)
+	_, _, err := cfg.Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	cfg.StreamLimitToleranceRatio = 1.05
+	test.That(t, cfg.streamLimitToleranceRatio(), test.ShouldEqual, 1.05)
+	_, _, err = cfg.Validate("")
+	test.That(t, err, test.ShouldBeNil)
+
+	cfg.StreamLimitToleranceRatio = 0.9
+	_, _, err = cfg.Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+}
+
 // armDir returns the absolute path to the arm/ directory containing test data.
 func armDir() string {
 	//nolint:dogsled

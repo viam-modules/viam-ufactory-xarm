@@ -3,6 +3,7 @@ package arm
 import (
 	"encoding/binary"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -74,6 +75,63 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 				}
 			}
 			test.That(t, firstErrIdx, test.ShouldEqual, tc.failAtIdx)
+		})
+	}
+}
+
+func TestStreamLimits(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	const speedDegs, accelDegs, tol = 45.0, 300.0, 1.01
+	mo := moveOptions{speed: 0.5, acceleration: 2}
+
+	for _, tc := range []struct {
+		name               string
+		useURDFs           bool
+		wantVel, wantAccel float64
+	}{
+		{"json model uses its served limits", false, utils.DegToRad(speedDegs), utils.DegToRad(accelDegs)},
+		// URDF models carry no rate limits, so the move's own speed and acceleration apply.
+		{"urdf model falls back to the move options", true, mo.speed, mo.acceleration},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, tc.useURDFs, nil, logger, 0, speedDegs, accelDegs)
+			test.That(t, err, test.ShouldBeNil)
+
+			vel, acc := streamLimits(m, mo, tol)
+			test.That(t, vel, test.ShouldHaveLength, 6)
+			test.That(t, acc, test.ShouldHaveLength, 6)
+			for i := range vel {
+				test.That(t, vel[i], test.ShouldAlmostEqual, tc.wantVel*tol, 1e-9)
+				test.That(t, acc[i], test.ShouldAlmostEqual, tc.wantAccel*tol, 1e-9)
+			}
+		})
+	}
+}
+
+func TestCheckJointConstraints(t *testing.T) {
+	limits := []float64{1, 2, 3}
+
+	for _, tc := range []struct {
+		name    string
+		values  []float64
+		wantErr bool
+	}{
+		{"nil values are not checked", nil, false},
+		{"within limits", []float64{0.5, 1.5, 2.5}, false},
+		{"exactly at the limit", []float64{1, 2, 3}, false},
+		{"over the limit on one joint", []float64{0.5, 2.1, 2.5}, true},
+		{"negative values are checked by magnitude", []float64{0.5, -2.1, 2.5}, true},
+		{"length must match the limits", []float64{0.5, 1.5}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkJointConstraints("velocity", tc.values, limits)
+			if tc.wantErr {
+				test.That(t, err, test.ShouldNotBeNil)
+			} else {
+				test.That(t, err, test.ShouldBeNil)
+			}
 		})
 	}
 }
