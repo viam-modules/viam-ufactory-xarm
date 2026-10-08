@@ -456,6 +456,13 @@ func MakeModelFrame(
 // and ships raw STL labelled as PLY, which the client fails to parse.
 // The input slice is not mutated.
 func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios []float64, logger logging.Logger) (referenceframe.Model, error) {
+	ratios := clampMeshDecimationRatios(meshDecimationRatios, modelName, logger)
+	return referenceframe.ParseModelXMLFile(urdfPath(urdfBasename), modelName, ratios)
+}
+
+// clampMeshDecimationRatios returns a copy of ratios with values ≥ 1.0 clamped
+// to 0.9999; see makeModelFrameFromURDF.
+func clampMeshDecimationRatios(meshDecimationRatios []float64, modelName string, logger logging.Logger) []float64 {
 	ratios := append([]float64(nil), meshDecimationRatios...)
 	for i, r := range ratios {
 		if r < 1.0 {
@@ -466,9 +473,12 @@ func makeModelFrameFromURDF(urdfBasename, modelName string, meshDecimationRatios
 			logger.Warnf("mesh_decimation_ratio[%d]=%.4f for %s clamped to 0.9999 (RDK bug on 1.0)", i, r, modelName)
 		}
 	}
-	moduleRoot := os.Getenv("VIAM_MODULE_ROOT")
-	path := fmt.Sprintf("%s/arm/%s.urdf", moduleRoot, urdfBasename)
-	return referenceframe.ParseModelXMLFile(path, modelName, ratios)
+	return ratios
+}
+
+// urdfPath is where a shipped URDF lives under the module root.
+func urdfPath(urdfBasename string) string {
+	return fmt.Sprintf("%s/arm/%s.urdf", os.Getenv("VIAM_MODULE_ROOT"), urdfBasename)
 }
 
 // newxArm returns a new xArm of the specified modelName.
