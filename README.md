@@ -23,6 +23,8 @@ This module is particularly useful in applications that require an xArm to be op
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
 - [Vacuum Gripper Lite](#vacuum-gripper-lite)
+- [Force Torque Sensor](#force-torque-sensor)
+- [Force Control](#force-control)
 - [UFactory xArm Resources](#ufactory-xarm-resources)
 
 ## Getting Started
@@ -275,6 +277,33 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 > [!CAUTION]
 > Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
 
+### Force/Torque Sensor and Force Control
+
+```go
+// Read the wrist sensor
+resp, _ := xArmComponent.DoCommand(ctx, map[string]interface{}{"get_ft_sensor_data": true})
+// resp["ft_sensor_data"] is a map of Fx_N, Fy_N, Fz_N, TRx_Nm, TRy_Nm, TRz_Nm
+
+// Enable or disable the controller's data stream
+xArmComponent.DoCommand(ctx, map[string]interface{}{"ft_sensor_enable": true})
+
+// Zero the sensor at the current reading (see the caveats in Force Control)
+xArmComponent.DoCommand(ctx, map[string]interface{}{"ft_sensor_zero": true})
+
+// Hold a constant force along base-frame Z while XY stays under position control
+xArmComponent.DoCommand(ctx, map[string]interface{}{
+    "set_force_control": map[string]interface{}{"axes": "z", "forces": -5.0},
+})
+xArmComponent.DoCommand(ctx, map[string]interface{}{"stop_force_control": true})
+
+// Inspect the controller's force-control state
+resp, _ = xArmComponent.DoCommand(ctx, map[string]interface{}{"get_ft_sensor_config": true})
+// resp["ft_sensor_config"]["is_started"] is the field that matters
+```
+
+See [Force Control](#force-control) for the firmware requirement, the full
+parameter set, and what arming changes about the arm's behaviour.
+
 ### UFactory Studio Proxy
 
 The arm hosts UFactory Studio at `http://<arm-ip>:18333`. When viam-server and the arm are on different subnets (e.g., direct Ethernet connection), Studio may not be reachable from your browser.
@@ -333,10 +362,6 @@ resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0})
 // Set/get gripper speed (proxied to arm DoCommand)
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
-
-// G2 gripper only — set/get the grasp current/torque (0-100%). Affects how hard the gripper squeezes.
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_torque": 50})
-resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_torque": true})
 
 // G2 gripper only — close to a position with a force limit
 gripperComponent.DoCommand(context.Background(), map[string]interface{}{
@@ -474,6 +499,99 @@ that (disconnected, or an overload latch that only a power-cycle clears),
 | Command | Effect |
 |---------|--------|
 | `{"tare": true}` | Zero the sensor at the current reading. Hold the arm stationary at the unloaded reference pose first. |
+
+## Force Control
+
+Hybrid position/force control: some Cartesian axes are driven to a target force
+while the rest stay under position control. The classic use is holding a
+constant contact force along Z — polishing, sanding, drawing — while X and Y
+follow a commanded path.
+
+The controller implements the hybrid controller; this module exposes it. The
+primitive is a per-axis compliance selection vector, so "Z compliant at 5 N,
+XY positional" is expressed directly rather than built out of an outer loop.
+
+> **Controller firmware >= 2.3.0 is required.** The SDK header says 1.8.3, but
+> below 2.3.0 a position move issued while force control was active raised `C31`
+> ("abnormal current") — and moving while force-controlled is the whole point.
+> See [xArm-Python-SDK#108](https://github.com/xArm-Developer/xArm-Python-SDK/issues/108).
+
+### Before you start
+
+Run **payload identification** in UFactory Studio once. Force control on an
+uncompensated sensor chases gravity rather than contact.
+
+Do *not* use `ft_sensor_zero` as a substitute. UFactory disavow it for setup: it
+compensates from the current readings, so it stops being valid as soon as the
+arm's posture changes, and it **overwrites** an identified payload config. The
+arming sequence here deliberately does not call it.
+
+### Commands
+
+```go
+// Hold 5N down along base-frame Z; X, Y and all rotations stay positional.
+armComponent.DoCommand(context.Background(), map[string]interface{}{
+    "set_force_control": map[string]interface{}{
+        "axes":   "z",
+        "forces": -5.0,
+    },
+})
+
+// ... issue normal moves here. XY tracks; Z is regulated.
+
+armComponent.DoCommand(context.Background(), map[string]interface{}{"stop_force_control": true})
+```
+
+| Command | Effect |
+|---------|--------|
+| `{"set_force_control": {...}}` | Arm force control. See the fields below. |
+| `{"stop_force_control": true}` | Disarm and restore collision detection. |
+| `{"get_ft_sensor_config": true}` | Report the controller's force-control state — the diagnostic for "why isn't it holding force". |
+| `{"ft_sensor_enable": false}` | Disable the data stream. Absent or `true` enables, as before. |
+
+`set_force_control` fields:
+
+| Field | Meaning |
+|---|---|
+| `axes` | Which axes are force-controlled. `"z"`, `["z","rx"]`, or six booleans. **Required.** |
+| `forces` | Target force (N) / torque (Nm) applied **to the environment**. A bare number when exactly one axis is compliant, a map like `{"z": -5}`, or six numbers. **Required.** |
+| `frame` | `"base"` (default) or `"tool"`. |
+| `kp` / `ki` / `kd` | Loop gains, one number applied to all axes. Defaults 0.005 / 0.00006 / 0. Ranges 0–0.05 / 0–0.0005 / 0–0.05, clamped. |
+| `max_velocity` | Cap on the correction velocity, mm/s. Default 100, range 0–200, clamped. |
+
+`get_ft_sensor_config` returns `mode` (0 off, 1 admittance, 2 force) with a
+`mode_name`, `is_started`, `frame`, `axes`, `ref`, the gains, and `sample_hz`.
+**`is_started` is the field that matters**: mode 2 with `is_started` false means
+the arming sequence was accepted but never actually started.
+
+### What arming changes
+
+- **Motion mode goes to 0** and stays there. Every UFactory force-control
+  example runs from position mode, and servo mode has been reported to ignore
+  compliance parameters silently
+  ([#146](https://github.com/xArm-Developer/xArm-Python-SDK/issues/146)). This
+  module defaults to mode 1, so moves issued while armed behave as if
+  `"direct": true` — including moves that explicitly ask otherwise.
+- **Collision detection is disabled.** A contact task trips it on first touch;
+  UFactory's own answer to a sanding case was to set sensitivity to 0
+  ([xarm_ros#248](https://github.com/xArm-Developer/xarm_ros/issues/248)).
+  `stop_force_control` restores the configured `collision_sensitivity`, or 3 if
+  none was set.
+
+Force control is disarmed automatically by `Stop` and on `Close`, and
+`enter_manual_mode` is refused while it is active (the controller would raise
+`C51` anyway).
+
+### Expectations
+
+- **±2 N** is the practical floor: Fz hysteresis is 1 %FS on a 200 N range.
+- The internal loop runs at a **fixed 200 Hz**. `sample_hz` from
+  `get_ft_sensor_config` is the *sensor* rate, not the control rate.
+- `forces` is what the arm applies to the environment, so the sign depends on
+  the frame. In base frame, pushing down is negative Z. Verify gently over foam
+  before touching a real surface — a sign error drives the arm the wrong way.
+- Compliance is superimposed on the commanded trajectory, so actual joint
+  positions diverge from commanded ones while armed.
 
 ## UFactory xArm Resources
 

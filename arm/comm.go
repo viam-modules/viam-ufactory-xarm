@@ -43,6 +43,7 @@ var regMap = map[string]byte{
 	"ClearWarn":      0x11,
 	"SetMode":        0x13,
 	"P2PJoint":       0x17,
+	"P2PJointB":      0x18,
 	"MoveJoints":     0x1D,
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
@@ -52,13 +53,22 @@ var regMap = map[string]byte{
 	"CurrentTorque":  0x37,
 	"FTSensorData":   0xC8,
 	"FTSensorEnable": 0xC9,
-	"FTSensorZero":   0xCE,
-	"SetEEModel":     0x4E,
-	"ServoError":     0x6A,
-	"GripperControl": 0x7C,
-	"VacuumControl":  0x7F,
-	"LoadID":         0xCC,
-	"VacuumState":    0x80,
+	// Force-control registers. The admittance/impedance ones (0xCF, 0xD2, 0xD3)
+	// are deliberately absent: admittance is a spring-damper with no force
+	// setpoint, so it cannot hold a constant force, and nothing here needs
+	// hand-guiding yet. Add them if that changes.
+	"FTSensorSetMode":   0xCA,
+	"FTSensorGetMode":   0xCB,
+	"FTSensorZero":      0xCE,
+	"ForceCtrlPID":      0xD0,
+	"ForceCtrlConfig":   0xD1,
+	"FTSensorGetConfig": 0xD4,
+	"SetEEModel":        0x4E,
+	"ServoError":        0x6A,
+	"GripperControl":    0x7C,
+	"VacuumControl":     0x7F,
+	"LoadID":            0xCC,
+	"VacuumState":       0x80,
 }
 
 const (
@@ -483,13 +493,22 @@ func (x *xArm) Close(ctx context.Context) error {
 		return nil
 	}
 
+	// Disarm before anything else. Force control means the arm is actively
+	// pushing; dropping the socket without clearing it would leave the
+	// controller holding a target force with nothing supervising it, and would
+	// also leave collision detection disabled.
+	disarmErr := x.stopForceControl(ctx)
+	if disarmErr != nil {
+		x.logger.Errorf("could not disarm force control while closing: %v", disarmErr)
+	}
+
 	stopErr := x.setMotionState(ctx, 3)
 	closeErr := x.cmdConn.close()
 	var gripperCloseErr error
 	if x.gripperConn != nil && x.gripperConn != x.cmdConn {
 		gripperCloseErr = x.gripperConn.close()
 	}
-	err := multierr.Combine(stopErr, closeErr, gripperCloseErr)
+	err := multierr.Combine(disarmErr, stopErr, closeErr, gripperCloseErr)
 
 	if err != nil {
 		x.logger.Warnf("closing connection failed: %v", err)
@@ -508,6 +527,58 @@ func (x *xArm) MoveThroughJointPositions(
 ) error {
 	mo := x.moveOptions(opts, extra)
 	return x.internalMoveThroughJointPositions(ctx, positions, mo)
+}
+
+// stepSource says how a waypoint list becomes the setpoints sent to the arm.
+type stepSource int
+
+const (
+	// stepSourceRaw sends the waypoints unchanged.
+	stepSourceRaw stepSource = iota
+	// stepSourceTrajGen time-parameterises them with the trajectory generator.
+	stepSourceTrajGen
+	// stepSourceInterpolate uses the built-in trapezoidal interpolator.
+	stepSourceInterpolate
+)
+
+func (s stepSource) String() string {
+	switch s {
+	case stepSourceRaw:
+		return "raw"
+	case stepSourceTrajGen:
+		return "trajgen"
+	case stepSourceInterpolate:
+		return "interpolate"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(s))
+	}
+}
+
+// chooseStepSource decides whether a move gets densified before it is sent.
+//
+// Motion mode 0 gets the waypoints raw, and that is the interesting case.
+// Mode 0's opcode (P2PJoint / MOVE_JOINT) is a *planned* point-to-point move:
+// the controller builds its own accel/decel profile for each one. Feeding it a
+// densified stream therefore queues a hundred planned moves per second, none of
+// which reaches cruise, and the arm crawls -- which is exactly what force
+// control did before this, since force control pins the arm to mode 0.
+// Densification is for servo mode, where setpoints are tracked rather than
+// planned.
+//
+// `direct` implies mode0, so it lands here too. That is a fix in passing: a
+// single-waypoint direct move previously still went through the trajectory
+// generator, because that branch was checked first and ignored `direct`.
+func chooseStepSource(hasTrajGen bool, mo moveOptions) stepSource {
+	switch {
+	case mo.mode0:
+		return stepSourceRaw
+	case hasTrajGen:
+		return stepSourceTrajGen
+	case mo.interpolate:
+		return stepSourceInterpolate
+	default:
+		return stepSourceRaw
+	}
 }
 
 func (x *xArm) internalMoveThroughJointPositions(
@@ -534,7 +605,9 @@ func (x *xArm) internalMoveThroughJointPositions(
 	}
 
 	armRawSteps := positions
-	if x.trajGen != nil {
+	src := chooseStepSource(x.trajGen != nil, mo)
+	switch src {
+	case stepSourceTrajGen:
 		curPos, err := x.JointPositions(ctx, nil)
 		if err != nil {
 			return err
@@ -548,7 +621,7 @@ func (x *xArm) internalMoveThroughJointPositions(
 			return nil
 		}
 		armRawSteps = trajSteps
-	} else if !mo.direct && mo.interpolate {
+	case stepSourceInterpolate:
 		curPos, err := x.JointPositions(ctx, nil)
 		if err != nil {
 			return err
@@ -557,7 +630,16 @@ func (x *xArm) internalMoveThroughJointPositions(
 		if err != nil {
 			return err
 		}
+	case stepSourceRaw:
+		// Waypoints go to the arm exactly as given.
 	}
+
+	// Info rather than Debug on purpose: this is the first thing to check when a
+	// move runs slower than expected, and the answer is otherwise invisible from
+	// outside the module. It says how many setpoints the arm will actually chew
+	// through, which paced at moveHZ is what sets the wall-clock duration.
+	x.logger.Infof("move: source=%s mode0=%t waypoints=%d steps=%d hz=%.0f",
+		src, mo.mode0, len(positions), len(armRawSteps), mo.moveHZ)
 
 	return x.executeInputs(ctx, armRawSteps, mo)
 }
@@ -584,10 +666,20 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 
+	// Streaming needs servo mode, and force control needs mode 0. There is no
+	// setting that satisfies both, so refuse rather than silently dropping the
+	// force target the moment the first setpoint goes out.
+	if x.forceControlActive.Load() {
+		return errors.New("cannot stream joint positions while force control is active: " +
+			"streaming requires servo mode, force control requires position mode. " +
+			"Send stop_force_control first, or use MoveThroughJointPositions instead")
+	}
+
 	mo := x.moveOptions(nil, extra)
 	// Streaming is always servo-mode; a paced setpoint feed has no meaning in point-to-point mode, so
 	// we ignore a `direct` setting from `extra`.
 	mo.direct = false
+	mo.mode0 = false
 
 	if err := x.start(ctx, false); err != nil {
 		return err
@@ -951,7 +1043,7 @@ func (x *xArm) createRawJointSteps(
 }
 
 func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveOptions) error {
-	if err := x.start(ctx, mo.direct); err != nil {
+	if err := x.start(ctx, mo.mode0); err != nil {
 		return err
 	}
 	// convenience for structuring and sending individual joint steps
@@ -984,30 +1076,61 @@ func (x *xArm) executeInputs(ctx context.Context, rawSteps [][]float64, mo moveO
 // sendJointStep encodes one set of joint angles as a single servo, or point-to-point, command and
 // sends it. The arm acknowledges immediately and then chases the target at up to `mo.speed` and
 // `mo.acceleration`; the caller shapes the actual motion by how it spaces successive calls in time.
-func (x *xArm) sendJointStep(ctx context.Context, step []float64, mo moveOptions) error {
-	cName := "MoveJoints"
-	if mo.direct {
-		cName = "P2PJoint"
+// jointStepParams encodes one joint-move payload: 7 little-endian float32 joint
+// angles (padded from `dof`), then speed, then acceleration, then a trailing
+// float that is the blend radius for MOVE_JOINTB and the unused motion-time
+// field for MOVE_JOINT. Always 40 bytes.
+func jointStepParams(step []float64, dof int, speed, accel float64, blended bool, radius float64) []byte {
+	params := make([]byte, 0, 10*4)
+	b := make([]byte, 4)
+	put := func(v float64) {
+		binary.LittleEndian.PutUint32(b, math.Float32bits(float32(v)))
+		params = append(params, b...)
 	}
-	c := x.newCmd(regMap[cName])
-	jFloatBytes := make([]byte, 4)
 	for _, jRad := range step {
-		binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(jRad)))
-		c.params = append(c.params, jFloatBytes...)
+		put(jRad)
 	}
-	// xarm 6 has 6 joints, but protocol needs 7- add 4 bytes for a blank 7th joint
-	for dof := x.dof; dof < 7; dof++ {
-		c.params = append(c.params, 0, 0, 0, 0)
+	// xarm 6 has 6 joints, but the protocol needs 7.
+	for i := dof; i < 7; i++ {
+		put(0)
+	}
+	put(speed)
+	put(accel)
+	if blended {
+		put(radius)
+	} else {
+		put(0)
+	}
+	return params
+}
+
+// sendJointStep encodes one set of joint angles as a single servo, or point-to-point, command and
+// sends it. The arm acknowledges immediately and then chases the target at up to `mo.speed` and
+// `mo.acceleration`; the caller shapes the actual motion by how it spaces successive calls in time.
+func (x *xArm) sendJointStep(ctx context.Context, step []float64, mo moveOptions) error {
+	// Motion mode 0 takes planned point-to-point moves (MOVE_JOINT); mode 1
+	// takes streamed servo setpoints (MOVE_SERVOJ). Sending the wrong opcode for
+	// the mode the arm is actually in does not error, it just does not move.
+	//
+	// MOVE_JOINT decelerates to a full stop at every target, which for a path of
+	// many waypoints means the arm spends nearly all its time in accel/decel
+	// ramps and never reaches cruise. MOVE_JOINTB takes the same payload but
+	// reads the trailing float as a blend radius instead of the unused motion
+	// time, and arcs through each waypoint without stopping. Opt-in, because the
+	// radius units are not documented and blending means the tool no longer
+	// passes exactly through the waypoints.
+	cName := "MoveJoints"
+	blended := false
+	if mo.mode0 {
+		cName = "P2PJoint"
+		if mo.blendRadius >= 0 {
+			cName = "P2PJointB"
+			blended = true
+		}
 	}
 
-	// speed
-	binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.speed)))
-	c.params = append(c.params, jFloatBytes...)
-	// acceleration
-	binary.LittleEndian.PutUint32(jFloatBytes, math.Float32bits(float32(mo.acceleration)))
-	c.params = append(c.params, jFloatBytes...)
-	// Motion Time - not used by the arm yet
-	c.params = append(c.params, 0, 0, 0, 0)
+	c := x.newCmd(regMap[cName])
+	c.params = append(c.params, jointStepParams(step, x.dof, mo.speed, mo.acceleration, blended, mo.blendRadius)...)
 
 	_, err := x.send(ctx, c, true)
 	return err
@@ -1089,11 +1212,23 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]any) ([]refe
 }
 
 // Stop stops the xArm but also reinitializes the arm so it can take commands again.
+//
+// This disarms force control. Stop is what a caller reaches for when something
+// is wrong, and "stopped" has to mean the arm is not still pushing -- so the
+// force target is cleared rather than surviving into the restart. Re-arm with
+// set_force_control if the session should continue.
 func (x *xArm) Stop(ctx context.Context, extra map[string]any) error {
 	ctx, done := x.opMgr.New(ctx)
 	defer done()
 
 	x.manualExit.cancel()
+
+	if err := x.stopForceControl(ctx); err != nil {
+		// Report it, but keep stopping: a failure to disarm must not prevent
+		// the motion state from being halted below.
+		x.logger.Errorf("could not disarm force control while stopping: %v", err)
+	}
+
 	x.started.Store(-1)
 
 	if err := x.setMotionState(ctx, 3); err != nil {
@@ -1585,9 +1720,15 @@ func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	return err
 }
 
-func (x *xArm) setFTSensorEnable(ctx context.Context) error {
+// setFTSensorEnable turns the controller's F/T data stream on or off. It must be
+// on before any read returns real values, and before force control is armed.
+func (x *xArm) setFTSensorEnable(ctx context.Context, on bool) error {
 	c := x.newCmd(regMap["FTSensorEnable"])
-	c.params = append(c.params, 1) // 1 = enable
+	var b byte
+	if on {
+		b = 1
+	}
+	c.params = append(c.params, b)
 	_, err := x.send(ctx, c, true)
 	return err
 }

@@ -38,6 +38,11 @@ const (
 	defaultGripperPort = 503
 	defaultMoveHz      = 100. // Don't change this
 
+	// defaultCollisionSensitivity is what force control restores when the config
+	// did not pin a value. Force control has to disable collision detection to
+	// work at all, so it needs something to put back.
+	defaultCollisionSensitivity = 3
+
 	interwaypointAccel = 600. // degrees per second per second. All xarms max out at 1145
 
 	defaultTrajGenPathToleranceDeltaRads             = 0.1
@@ -69,6 +74,10 @@ const (
 	ftSensorZeroKey          = "ft_sensor_zero"
 	ftSensorEnableKey        = "ft_sensor_enable"
 	ftSensorDataKey          = "ft_sensor_data"
+	setForceControlKey       = "set_force_control"
+	stopForceControlKey      = "stop_force_control"
+	getFTSensorConfigKey     = "get_ft_sensor_config"
+	ftSensorConfigKey        = "ft_sensor_config"
 
 	// gripperLiteActionKeys.
 	gripperLiteActionOpen     = "open"
@@ -151,6 +160,11 @@ type xArm struct {
 
 	// manualExit auto-exits manual mode after SetManualMode's enabledFor elapses
 	manualExit exitTimer
+
+	// forceControlActive is set while the controller is holding a target force
+	// on one or more Cartesian axes. It pins the arm to motion mode 0 (see
+	// moveOptions) and makes every teardown path disarm.
+	forceControlActive atomic.Bool
 
 	name        resource.Name
 	conf        *Config
@@ -635,9 +649,23 @@ type moveOptions struct {
 	acceleration float64
 	moveHZ       float64
 
+	// direct means "one planned point-to-point move, no interpolation". It is
+	// the caller-facing option.
 	direct      bool
 	waitAtEnd   bool
 	interpolate bool
+
+	// blendRadius, when >= 0 and running in mode 0, switches the opcode to
+	// MOVE_JOINTB so the arm arcs through waypoints instead of stopping at each.
+	// Negative disables it, which is the default and preserves stop-at-each.
+	blendRadius float64
+
+	// mode0 means "run in motion mode 0 and send P2PJoint rather than the
+	// servo-mode opcode". `direct` implies it, and so does an active force
+	// control session -- but force control needs *only* this half. It still
+	// wants many waypoints and still wants them interpolated, so it must not
+	// set `direct` and inherit the single-waypoint restriction along with it.
+	mode0 bool
 }
 
 func f64(extra map[string]any, n string) (float64, bool) {
@@ -667,6 +695,7 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOpti
 		direct:       false,
 		waitAtEnd:    true,
 		interpolate:  true,
+		blendRadius:  -1, // negative == no blending
 	}
 
 	if opts != nil {
@@ -711,6 +740,21 @@ func (x *xArm) moveOptions(opts *arm.MoveOptions, extra map[string]any) moveOpti
 		if extra["interpolate"] == false {
 			o.interpolate = false
 		}
+
+		if v, ok := f64(extra, "blend_radius"); ok {
+			o.blendRadius = v
+		}
+	}
+
+	// Force control only holds in motion mode 0. A normal move would otherwise
+	// call start() with mode 1, flipping the arm back to servo mode and silently
+	// ending force regulation -- the move would succeed and the target force
+	// would just stop being held. Pin the mode, but not `direct`: a drawing
+	// stroke is dozens of waypoints and still needs interpolating.
+	o.mode0 = o.direct
+	if x.forceControlActive.Load() && !o.mode0 {
+		x.logger.Debug("force control is active: pinning this move to motion mode 0")
+		o.mode0 = true
 	}
 
 	o.speed = x.clampMoveOptions(
@@ -1049,10 +1093,44 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		}
 		validCommand = true
 	}
-	if _, ok := cmd[ftSensorEnableKey]; ok {
-		if err := x.setFTSensorEnable(ctx); err != nil {
+	if val, ok := cmd[ftSensorEnableKey]; ok {
+		// Historically this key ignored its value and always enabled. Absent or
+		// true still enables; false now disables, which force-control teardown
+		// needs. Anything non-boolean keeps the old behaviour.
+		on := true
+		if b, isBool := val.(bool); isBool {
+			on = b
+		}
+		if err := x.setFTSensorEnable(ctx, on); err != nil {
 			return nil, err
 		}
+		validCommand = true
+	}
+
+	if val, ok := cmd[setForceControlKey]; ok {
+		req, err := parseForceControlRequest(val)
+		if err != nil {
+			return nil, err
+		}
+		if err := x.startForceControl(ctx, req); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+
+	if _, ok := cmd[stopForceControlKey]; ok {
+		if err := x.stopForceControl(ctx); err != nil {
+			return nil, err
+		}
+		validCommand = true
+	}
+
+	if _, ok := cmd[getFTSensorConfigKey]; ok {
+		cfg, err := x.getFTSensorConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		resp[ftSensorConfigKey] = cfg.asMap()
 		validCommand = true
 	}
 
