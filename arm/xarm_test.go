@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,6 +13,19 @@ import (
 	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
+
+func TestDoCommandGetsCurrentSpeed(t *testing.T) {
+	x := &xArm{speed: utils.DegToRad(20)}
+	resp, err := x.DoCommand(context.Background(), map[string]any{getSpeedKey: true})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, resp[speedKey], test.ShouldEqual, 20.0)
+
+	_, err = x.DoCommand(context.Background(), map[string]any{setSpeedKey: 8.0})
+	test.That(t, err, test.ShouldBeNil)
+	resp, err = x.DoCommand(context.Background(), map[string]any{getSpeedKey: true})
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, resp[speedKey], test.ShouldEqual, 8.0)
+}
 
 func TestConnectionTypeFromCmd(t *testing.T) {
 	test.That(t, connectionTypeFromCmd(map[string]any{connectionTypeKey: "contact"}, submodelV1),
