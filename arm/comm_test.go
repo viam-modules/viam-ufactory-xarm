@@ -1,8 +1,10 @@
 package arm
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -100,6 +102,54 @@ func TestCreateRawJointSteps1(t *testing.T) {
 	minMoves := (1 / x.speed) * x.moveHZ
 	test.That(t, len(out), test.ShouldBeGreaterThan, minMoves)
 	test.That(t, len(out), test.ShouldBeLessThan, 20+minMoves)
+}
+
+type boundaryArm struct {
+	arm.Arm
+	model   referenceframe.Model
+	current []referenceframe.Input
+}
+
+func (a *boundaryArm) JointPositions(context.Context, map[string]interface{}) ([]referenceframe.Input, error) {
+	return a.current, nil
+}
+
+func (a *boundaryArm) Kinematics(context.Context) (referenceframe.Model, error) {
+	return a.model, nil
+}
+
+func TestJointBoundaryRecovery(t *testing.T) {
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+	logger := logging.NewTestLogger(t)
+	model, err := MakeModelFrame("right-arm", ModelName6DOF, nil, nil, true, nil, logger, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+	// Recorded encoder feedback from a failed lift on 2026-09-17; J4 is just below -2*pi.
+	current := []referenceframe.Input{158.72684808419635, -18.331457628485303, -82.17235299864426,
+		-360.00044715001957, 40.55328514027774, 82.54302736490085}
+	for i := range current {
+		current[i] = utils.DegToRad(current[i])
+	}
+	goal := []referenceframe.Input{2.762922726660671, 0.2704127335697282, -1.5674003312466882,
+		-6.283185307179586, 1.2969875821430585, 1.6059038470624416}
+	device := &boundaryArm{model: model, current: current}
+	test.That(t, arm.CheckDesiredJointPositions(context.Background(), device, goal), test.ShouldBeNil)
+	_, err = model.Transform(current)
+	test.That(t, err, test.ShouldBeNil)
+	x := &xArm{model: model, speed: utils.DegToRad(defaultSpeed), acceleration: utils.DegToRad(defaultAccel), moveHZ: defaultMoveHz}
+	steps, err := x.createRawJointSteps(current, [][]referenceframe.Input{goal}, x.moveOptions(nil, nil))
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, len(steps), test.ShouldBeGreaterThan, 0)
+	for _, step := range steps {
+		if step[3] < current[3] || step[3] > goal[3] || math.IsNaN(step[3]) {
+			t.Fatalf("recovery step moved away from its target: %v", step)
+		}
+	}
+	worse := append([]referenceframe.Input(nil), current...)
+	worse[3] = math.Nextafter(current[3], math.Inf(-1))
+	test.That(t, arm.CheckDesiredJointPositions(context.Background(), device, worse), test.ShouldNotBeNil)
+	outside := append([]referenceframe.Input(nil), current...)
+	device.current = goal
+	test.That(t, arm.CheckDesiredJointPositions(context.Background(), device, outside), test.ShouldNotBeNil)
 }
 
 func TestCreateRawJointStepsLowSpeed(t *testing.T) {
