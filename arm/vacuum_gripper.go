@@ -249,13 +249,13 @@ func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]sp
 	}
 
 	caseBox, err := spatialmath.NewBox(
-		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM + caseSize.Z/2)}),
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseSize.Z / 2}),
 		caseSize, "vacuum-gripper-box")
 	if err != nil {
 		return nil, err
 	}
 	tube, err := spatialmath.NewBox(
-		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM / 2)}),
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseSize.Z + vacuumLengthMM/2}),
 		r3.Vector{X: 5, Y: 5, Z: max(5, vacuumLengthMM)},
 		"vacuum-gripper-tube")
 	if err != nil {
