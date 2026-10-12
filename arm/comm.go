@@ -632,7 +632,7 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 		}
 
 		for _, p := range batch {
-			if err := validator.validate(p); err != nil {
+			if err := validator.validate(p, velLimits, accLimits); err != nil {
 				return err
 			}
 			// The servo command encodes one value per joint, so a point whose `Positions` length does
@@ -651,15 +651,6 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 			// let the next point start the motion.
 			if p.Time == 0 {
 				continue
-			}
-
-			if c := p.Constraints; c != nil {
-				if err := checkJointConstraints("velocity", c.Velocities, velLimits); err != nil {
-					return err
-				}
-				if err := checkJointConstraints("acceleration", c.Accelerations, accLimits); err != nil {
-					return err
-				}
 			}
 
 			// The trajectory clock starts with the motion, so however long the second point takes to
@@ -738,10 +729,11 @@ func newTrajectoryStreamValidator() *trajectoryStreamValidator {
 }
 
 // validate checks a single point in stream order: the first point must be at time zero, every later
-// point must be strictly later than its predecessor, and all points must carry the same non-empty
-// `Positions`. These are the client's contractual obligations; we recheck them so a malformed stream
+// point must be strictly later than its predecessor, all points must carry the same non-empty
+// `Positions`, and any declared velocities and accelerations must lie within the given per-joint
+// limits. These are the client's contractual obligations; we recheck them so a malformed stream
 // is rejected before it can drive the arm.
-func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
+func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint, velLimits, accLimits []float64) error {
 	if len(p.Positions) == 0 {
 		return errors.New("trajectory point has no joint positions")
 	}
@@ -768,6 +760,14 @@ func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
 	}
 	if len(p.Positions) != v.dof {
 		return fmt.Errorf("trajectory points must all have %d joint positions, got %d", v.dof, len(p.Positions))
+	}
+	if c := p.Constraints; c != nil {
+		if err := checkJointConstraints("velocity", c.Velocities, velLimits); err != nil {
+			return err
+		}
+		if err := checkJointConstraints("acceleration", c.Accelerations, accLimits); err != nil {
+			return err
+		}
 	}
 	v.lastTime = p.Time
 	return nil

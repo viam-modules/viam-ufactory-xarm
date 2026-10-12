@@ -48,6 +48,18 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 		p.Constraints = &arm.KinematicConstraints{Velocities: vels}
 		return p
 	}
+	// pointWithAcc is `point` plus a declared `Accelerations` entry on each joint.
+	pointWithAcc := func(d time.Duration, dof int, acc float64) arm.TrajectoryPoint {
+		p := point(d, dof)
+		accs := make([]float64, dof)
+		for i := range accs {
+			accs[i] = acc
+		}
+		p.Constraints = &arm.KinematicConstraints{Accelerations: accs}
+		return p
+	}
+	velLimits := []float64{1, 1, 1, 1, 1, 1}
+	accLimits := []float64{2, 2, 2, 2, 2, 2}
 
 	// The validator carries state across a stream, so each case feeds a whole sequence and asserts
 	// where, if anywhere, the first rejection lands. A `failAtIdx` of -1 means the sequence is valid.
@@ -64,12 +76,14 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 		{"positions must be non-empty", []arm.TrajectoryPoint{point(0, 0)}, 0},
 		{"first point must be at rest", []arm.TrajectoryPoint{pointWithVel(0, 6, 0.5)}, 0},
 		{"first point at rest with zero velocity is fine", []arm.TrajectoryPoint{pointWithVel(0, 6, 0), pointWithVel(10*time.Millisecond, 6, 0.5)}, -1},
+		{"velocity over the limit", []arm.TrajectoryPoint{point(0, 6), pointWithVel(10*time.Millisecond, 6, 1.5)}, 1},
+		{"acceleration over the limit", []arm.TrajectoryPoint{point(0, 6), pointWithAcc(10*time.Millisecond, 6, -2.5)}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := newTrajectoryStreamValidator()
 			firstErrIdx := -1
 			for i, pt := range tc.points {
-				if err := v.validate(pt); err != nil {
+				if err := v.validate(pt, velLimits, accLimits); err != nil {
 					firstErrIdx = i
 					break
 				}
