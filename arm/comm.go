@@ -386,10 +386,11 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 		mode = 0
 	}
 
-	if x.started.Load() == int32(mode) {
-		return nil
-	}
-
+	// Always (re-)assert the motion mode and state. x.started is only the mode
+	// the module last set; the controller's real mode can change out from under
+	// us (e.g. UFACTORY Studio toggling manual mode), and there is no get-mode
+	// command to detect that. Skipping this on a stale cache made the controller
+	// silently drop servo points while every move still reported success.
 	if err := x.checkReadyState(ctx, false); err != nil {
 		return err
 	}
