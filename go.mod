@@ -11,10 +11,10 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/rhysd/actionlint v1.7.8
 	go.uber.org/multierr v1.11.0
-	go.viam.com/api v0.1.588
-	go.viam.com/rdk v1.10.0
+	go.viam.com/api v0.1.590
+	go.viam.com/rdk v1.12.0
 	go.viam.com/test v1.2.5
-	go.viam.com/utils v0.13.0
+	go.viam.com/utils v0.14.0
 	gorgonia.org/tensor v0.9.24
 	gotest.tools/gotestsum v1.12.2
 )
@@ -187,7 +187,7 @@ require (
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	github.com/viamrobotics/ice/v2 v2.3.40 // indirect
 	github.com/viamrobotics/webrtc/v3 v3.99.16 // indirect
-	github.com/viamrobotics/zeroconf v1.0.13 // indirect
+	github.com/viamrobotics/zeroconf v1.1.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
