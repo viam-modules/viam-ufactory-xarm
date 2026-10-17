@@ -19,6 +19,7 @@ This module is particularly useful in applications that require an xArm to be op
   - [Error Handling](#error-handling)
   - [DoCommand Reference](#docommand-reference)
   - [UFactory Studio Proxy](#ufactory-studio-proxy)
+- [Gripper payload defaults](#gripper-payload-defaults)
 - [Gripper](#gripper)
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
@@ -54,6 +55,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `0.25` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
+| `tcp_payload` | object | Optional | — | Payload mounted on the flange (gripper, tooling, held part), sent to the controller for gravity compensation and collision detection. Takes `mass_kg` and `center_of_gravity_mm` (`{"x", "y", "z"}`, relative to the flange in the tool frame). Applied on startup, after every reconnect, and each time manual mode is entered, overriding any value set in UFACTORY Studio. When unset and a UFACTORY gripper from this module is configured on the arm, that gripper's default payload is used instead (see [Gripper payload defaults](#gripper-payload-defaults)). An incorrect payload makes the arm drift or resist in manual mode. Mass must not exceed the model's rated payload. Example: `{"mass_kg": 0.82, "center_of_gravity_mm": {"x": 0, "y": 0, "z": 48}}`. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
 | `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. Hardware auto-detection selects a variant URDF when applicable — e.g. an xArm6 reporting arm-type code `1305` is loaded from `xarm6_1305.urdf` with its distinct link meshes; other arms use the base URDF for their model. Gripper meshes are opt-in separately via each gripper's own `use_urdfs` flag. |
@@ -293,6 +295,17 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 > [!CAUTION]
 > The proxy listens on all interfaces with no authentication. Anyone who can reach that port has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or restrict access with firewall rules.
+
+## Gripper payload defaults
+
+Every gripper model below sets its own mass and center of gravity as the arm's TCP payload, unless the arm sets `tcp_payload` itself. The arm sends this payload to the controller before its next move and each time it enters manual mode. Set `tcp_payload` on the arm to override it, for example when the gripper holds a heavy part or carries extra tooling.
+
+| Gripper model | Mass (kg) | Center of gravity (mm) | Source |
+|---|---|---|---|
+| `gripper` (G1 and G2) | 0.82 | (0, 0, 48) | UFACTORY Studio preset |
+| `vacuum_gripper` | 0.61 | (0, 0, 53) | UFACTORY Studio preset |
+| `gripper_lite` | 0.25 | (0, 0, 30) | Bundled URDF |
+| `vacuum_gripper_lite` | 0.14 | (0, 0, 30) | Bundled URDF |
 
 ## Gripper
 
