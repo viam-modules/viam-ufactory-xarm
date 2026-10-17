@@ -1457,7 +1457,36 @@ func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 	return params[4]&mask != 0, nil
 }
 
+// vacuumPumpOnFromResponse decodes whether the pump is commanded ON from a
+// DIGITAL_OUT readback (0x0A18). ON = pins[0] high & pins[1] low. The SDK's
+// get_tgpio_output_digital maps user pins 0,1,3,4 to word bits 0,1,2,3.
+func vacuumPumpOnFromResponse(params []byte, ct connectionType) (bool, error) {
+	if len(params) != 5 {
+		return false, fmt.Errorf("weird length for vacuum output readback: %d %v", len(params), params)
+	}
+	onMask, offMask := byte(0x01), byte(0x02)
+	if ct == connectionContact {
+		onMask, offMask = 0x04, 0x08
+	}
+	return params[4]&onMask != 0 && params[4]&offMask == 0, nil
+}
+
+// getVacuumStatus reports whether the suction cup has sealed on an object. The
+// seal sensor input is only meaningful while the pump is drawing vacuum (it can
+// read stale/high with the pump off), so it is gated on the pump's commanded
+// output state, mirroring the SDK's get_vacuum_gripper(check_on=True).
 func (x *xArm) getVacuumStatus(ctx context.Context, ct connectionType) (bool, error) {
+	out := x.newCmd(regMap["VacuumState"])
+	out.params = append(out.params, 0x09, 0x0A, 0x18)
+	outRes, err := x.send(ctx, out, true)
+	if err != nil {
+		return false, err
+	}
+	on, err := vacuumPumpOnFromResponse(outRes.params, ct)
+	if err != nil || !on {
+		return false, err
+	}
+
 	c := x.newCmd(regMap["VacuumState"])
 	c.params = append(c.params, 0x09, 0x0A, 0x14)
 	res, err := x.send(ctx, c, true)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
@@ -12,6 +13,7 @@ import (
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/utils"
 )
 
 // ModelNameVacuumGripper is the ufactory vacuum gripper commonly attached to xArm6/xArm7/xArm850.
@@ -149,8 +151,25 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 		}
 	}
 
-	return true, nil
+	// Vacuum takes time to build after the pump starts, so wait for the seal
+	// sensor rather than reporting success the moment the pump is on.
+	// ponytail: fixed timeout, make it a config field if hose length/pump varies by deployment.
+	deadline := time.Now().Add(vacuumSealTimeout)
+	for {
+		status, err := g.IsHoldingSomething(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		if status.IsHoldingSomething || time.Now().After(deadline) {
+			return status.IsHoldingSomething, nil
+		}
+		if !utils.SelectContextOrWait(ctx, 50*time.Millisecond) {
+			return false, ctx.Err()
+		}
+	}
 }
+
+const vacuumSealTimeout = 500 * time.Millisecond
 
 func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)
