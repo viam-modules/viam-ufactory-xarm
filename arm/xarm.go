@@ -6,6 +6,7 @@ import (
 	_ "embed" // for embedding model file.
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/golang/geo/r3"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 	commonpb "go.viam.com/api/common/v1"
@@ -181,6 +183,13 @@ type xArm struct {
 	// ever set. Clearing the FnCxx control mode resets Fn303, so we need this to put it back.
 	gripperSpeed atomic.Uint32
 
+	// gripperPayload is the default payload of an attached UFACTORY gripper,
+	// used when conf.TCPPayload is unset.
+	gripperPayload atomic.Pointer[TCPPayloadConfig]
+	// tcpPayloadApplied records whether effectiveTCPPayload has been sent on the
+	// current connection.
+	tcpPayloadApplied atomic.Bool
+
 	detectedArm detectedArm
 }
 
@@ -215,20 +224,52 @@ type TrajGenConfig struct {
 	WaypointDeduplicationToleranceRads *float64 `json:"waypoint_deduplication_tolerance_rads,omitempty"`
 }
 
+// TCPPayloadConfig describes the load mounted on the arm's flange (gripper,
+// tooling and any held part), which the controller uses for gravity
+// compensation in manual mode and for collision detection.
+type TCPPayloadConfig struct {
+	MassKg float64 `json:"mass_kg"`
+	// CenterOfGravityMM is in mm, relative to the flange in the tool frame.
+	// r3.Vector has no JSON tags; encoding/json matches "x"/"y"/"z" to its
+	// fields case-insensitively.
+	CenterOfGravityMM r3.Vector `json:"center_of_gravity_mm"`
+}
+
+// maxRatedPayloadKg is UFACTORY's rated payload for each supported model.
+var maxRatedPayloadKg = map[string]float64{
+	ModelName6DOF: 5,
+	ModelName7DOF: 3.5,
+	ModelNameLite: 0.6,
+	ModelName850:  5,
+}
+
+func (p *TCPPayloadConfig) validate() error {
+	if math.IsNaN(p.MassKg) || math.IsInf(p.MassKg, 0) || p.MassKg < 0 {
+		return fmt.Errorf("tcp_payload.mass_kg must be a finite value >= 0, got %v", p.MassKg)
+	}
+	for _, v := range []float64{p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return errors.New("tcp_payload.center_of_gravity_mm values must be finite")
+		}
+	}
+	return nil
+}
+
 // Config is used for converting config attributes.
 type Config struct {
-	Host                      string         `json:"host"`
-	Port                      int            `json:"port,omitempty"`
-	Speed                     float64        `json:"speed_degs_per_sec,omitempty"`
-	Acceleration              float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ                    float64        `json:"move_hz,omitempty"`
-	Sensitivity               *int           `json:"collision_sensitivity,omitempty"`
-	BadJoints                 []int          `json:"bad-joints"`
-	Motion                    string         `json:"motion"`
-	UseURDFs                  bool           `json:"use_urdfs,omitempty"`
-	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
-	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
-	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
+	Host                      string            `json:"host"`
+	Port                      int               `json:"port,omitempty"`
+	Speed                     float64           `json:"speed_degs_per_sec,omitempty"`
+	Acceleration              float64           `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ                    float64           `json:"move_hz,omitempty"`
+	Sensitivity               *int              `json:"collision_sensitivity,omitempty"`
+	BadJoints                 []int             `json:"bad-joints"`
+	Motion                    string            `json:"motion"`
+	UseURDFs                  bool              `json:"use_urdfs,omitempty"`
+	TrajGen                   *TrajGenConfig    `json:"trajectory_generator,omitempty"`
+	MeshDecimationRatios      []float64         `json:"mesh_decimation_ratios,omitempty"`
+	StreamLimitToleranceRatio float64           `json:"stream_limit_tolerance_ratio,omitempty"`
+	TCPPayload                *TCPPayloadConfig `json:"tcp_payload,omitempty"`
 
 	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
 	StudioProxyPort int  `json:"ufactory-studio-proxy-port,omitempty"`
@@ -267,6 +308,12 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.StreamLimitToleranceRatio != 0 && cfg.StreamLimitToleranceRatio < 1 {
 		return nil, nil, fmt.Errorf("stream_limit_tolerance_ratio must be >= 1, got %f", cfg.StreamLimitToleranceRatio)
+	}
+
+	if cfg.TCPPayload != nil {
+		if err := cfg.TCPPayload.validate(); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	deps := []string{}
@@ -509,7 +556,15 @@ func NewXArm(ctx context.Context, name resource.Name,
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
+	if p := newConf.TCPPayload; p != nil {
+		if limit, ok := maxRatedPayloadKg[modelName]; ok && p.MassKg > limit {
+			return nil, fmt.Errorf("tcp_payload.mass_kg %v exceeds the %s rated payload of %vkg", p.MassKg, modelName, limit)
+		}
+	}
+	x.cmdConn = newModbusConn(newConf.host(), logger, func() {
+		x.started.Store(-1)
+		x.tcpPayloadApplied.Store(false)
+	})
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
 	x.gripperControlMode.Store(true)
 

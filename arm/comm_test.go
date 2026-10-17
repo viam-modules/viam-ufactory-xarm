@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
@@ -250,4 +251,14 @@ func TestVacuumStateFromResponse(t *testing.T) {
 
 	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
 	test.That(t, err, test.ShouldNotBeNil)
+}
+
+func TestEncodeTCPPayload(t *testing.T) {
+	b := encodeTCPPayload(TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{X: 1.5, Y: -2, Z: 48}})
+	test.That(t, len(b), test.ShouldEqual, 16)
+	want := []float32{0.82, 1.5, -2, 48}
+	for i, w := range want {
+		got := math.Float32frombits(binary.LittleEndian.Uint32(b[i*4 : i*4+4]))
+		test.That(t, got, test.ShouldEqual, w)
+	}
 }

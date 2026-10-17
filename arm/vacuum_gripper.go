@@ -112,6 +112,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	g.detected = probeGripper(ctx, g.arm, gripperKindVacuum, logger)
 
 	g.connType = resolveGripperConnectionType(newConf.ConnectionType, g.detected.submodel, config.Model, logger)
+	g.releasePayload = claimGripperPayload(g.arm, config.Model.Name, logger)
 
 	return g, nil
 }
@@ -129,8 +130,9 @@ type myVacuumGripper struct {
 
 	isMoving atomic.Bool
 
-	detected detectedGripper
-	connType connectionType
+	detected       detectedGripper
+	connType       connectionType
+	releasePayload func()
 
 	logger logging.Logger
 }
@@ -187,6 +189,9 @@ func (g *myVacuumGripper) Name() resource.Name {
 }
 
 func (g *myVacuumGripper) Close(ctx context.Context) error {
+	if g.releasePayload != nil {
+		g.releasePayload()
+	}
 	return g.Stop(ctx, nil)
 }
 
