@@ -48,6 +48,7 @@ var regMap = map[string]byte{
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
 	"Sensitivity":    0x25,
+	"SetLoadParam":   0x24,
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
@@ -400,6 +401,21 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 		return err
 	}
 
+	// The controller forgets an unsaved payload when it reboots, which also drops
+	// our socket, so tcpPayloadApplied is cleared on every connection reset and
+	// the payload is re-sent here on the next start.
+	if p := x.effectiveTCPPayload(); p != nil && !x.tcpPayloadApplied.Load() {
+		if err := x.setMotionMode(ctx, 0); err != nil {
+			return err
+		}
+		if err := x.setMotionState(ctx, 0); err != nil {
+			return err
+		}
+		if err := x.setTCPPayload(ctx, *p); err != nil {
+			return err
+		}
+	}
+
 	err = x.setMotionMode(ctx, mode)
 	if err != nil {
 		return err
@@ -432,6 +448,15 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 	}
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return fmt.Errorf("failed to activate position mode before manual: %w", err)
+	}
+
+	// Gravity compensation in manual mode relies on the controller's payload
+	// model; a wrong one makes the arm drift or fight the user. Re-send it on
+	// every entry because UFACTORY Studio can overwrite it at any time.
+	if p := x.effectiveTCPPayload(); p != nil {
+		if err := x.setTCPPayload(ctx, *p); err != nil {
+			return fmt.Errorf("failed to set TCP payload before manual mode: %w", err)
+		}
 	}
 
 	// Set motion mode to 2 (manual/teaching mode)
@@ -1643,6 +1668,38 @@ func (x *xArm) setFTSensorEnable(ctx context.Context) error {
 	c.params = append(c.params, 1) // 1 = enable
 	_, err := x.send(ctx, c, true)
 	return err
+}
+
+// encodeTCPPayload packs SetLoadParam's arguments as four little-endian float32
+// values: mass in kg, then the center of gravity in mm in the tool frame.
+func encodeTCPPayload(p TCPPayloadConfig) []byte {
+	vals := []float64{p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z}
+	out := make([]byte, 0, 4*len(vals))
+	for _, v := range vals {
+		out = binary.LittleEndian.AppendUint32(out, math.Float32bits(float32(v)))
+	}
+	return out
+}
+
+// setTCPPayload sets the end-effector payload the controller uses for gravity
+// compensation and collision detection. The controller queues it like a motion
+// command, so it only runs while the arm is in motion state 0. It is not saved
+// to the controller's config and is lost on controller reboot.
+func (x *xArm) setTCPPayload(ctx context.Context, p TCPPayloadConfig) error {
+	c := x.newCmd(regMap["SetLoadParam"])
+	c.params = encodeTCPPayload(p)
+	if _, err := x.send(ctx, c, true); err != nil {
+		return fmt.Errorf("failed to set TCP payload: %w", err)
+	}
+	// A mode change can discard queued commands, so let it drain before the
+	// caller switches modes.
+	if err := x.waitForMotionStop(ctx); err != nil {
+		return err
+	}
+	x.tcpPayloadApplied.Store(true)
+	x.logger.Infof("TCP payload set: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
+		p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z)
+	return nil
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
