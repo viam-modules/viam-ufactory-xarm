@@ -251,3 +251,26 @@ func TestVacuumStateFromResponse(t *testing.T) {
 	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
 	test.That(t, err, test.ShouldNotBeNil)
 }
+
+func TestVacuumPumpOnFromResponse(t *testing.T) {
+	for _, tc := range []struct {
+		lo   byte
+		ct   connectionType
+		want bool
+	}{
+		{0x01, connectionPlugin, true},   // pin0 high, pin1 low
+		{0x02, connectionPlugin, false},  // OFF state
+		{0x00, connectionPlugin, false},  // never driven
+		{0x03, connectionPlugin, false},  // both high is not ON
+		{0x04, connectionContact, true},  // pin3 high, pin4 low
+		{0x08, connectionContact, false}, // OFF state
+		{0x01, connectionContact, false}, // v1 pins don't count for contact
+	} {
+		got, err := vacuumPumpOnFromResponse([]byte{0, 0, 0, 0, tc.lo}, tc.ct)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, got, test.ShouldEqual, tc.want)
+	}
+
+	_, err := vacuumPumpOnFromResponse([]byte{0}, connectionPlugin)
+	test.That(t, err, test.ShouldNotBeNil)
+}
