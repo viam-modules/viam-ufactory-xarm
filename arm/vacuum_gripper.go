@@ -151,9 +151,7 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 		}
 	}
 
-	// Vacuum takes time to build after the pump starts, so wait for the seal
-	// sensor rather than reporting success the moment the pump is on.
-	// ponytail: fixed timeout, make it a config field if hose length/pump varies by deployment.
+	// Vacuum takes time to build after the pump starts, so wait for the seal sensor.
 	deadline := time.Now().Add(vacuumSealTimeout)
 	for {
 		status, err := g.IsHoldingSomething(ctx, nil)

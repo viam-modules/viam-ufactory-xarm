@@ -1436,7 +1436,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	}
 	w := r.words()
 	if len(w) != 2 {
-		return 0, fmt.Errorf("unexpected length for getGripperPosition response: %d %v", len(r.params), r.params)
+		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(r.params), r.params)
 	}
 	return int32(uint32(w[0])<<16 | uint32(w[1])), nil //nolint:gosec
 }
@@ -1448,7 +1448,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 // is the low byte of that input word.
 func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 	if len(params) != 5 {
-		return false, fmt.Errorf("unexpected length for getVacuumStatus response: %d %v", len(params), params)
+		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(params), params)
 	}
 	mask := byte(0x01)
 	if ct == connectionContact {
