@@ -1436,7 +1436,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 	}
 	w := r.words()
 	if len(w) != 2 {
-		return 0, fmt.Errorf("weird length for getGripperPosition response: %d %v", len(r.params), r.params)
+		return 0, fmt.Errorf("unexpected length for getGripperPosition response: %d %v", len(r.params), r.params)
 	}
 	return int32(uint32(w[0])<<16 | uint32(w[1])), nil //nolint:gosec
 }
@@ -1448,7 +1448,7 @@ func (x *xArm) getGripperPosition(ctx context.Context) (int32, error) {
 // is the low byte of that input word.
 func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 	if len(params) != 5 {
-		return false, fmt.Errorf("weird length for getVacuumStatus response: %d %v", len(params), params)
+		return false, fmt.Errorf("unexpected length for getVacuumStatus response: %d %v", len(params), params)
 	}
 	mask := byte(0x01)
 	if ct == connectionContact {
@@ -1462,7 +1462,7 @@ func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 // get_tgpio_output_digital maps user pins 0,1,3,4 to word bits 0,1,2,3.
 func vacuumPumpOnFromResponse(params []byte, ct connectionType) (bool, error) {
 	if len(params) != 5 {
-		return false, fmt.Errorf("weird length for vacuum output readback: %d %v", len(params), params)
+		return false, fmt.Errorf("unexpected length for vacuum output readback: %d %v", len(params), params)
 	}
 	onMask, offMask := byte(0x01), byte(0x02)
 	if ct == connectionContact {
