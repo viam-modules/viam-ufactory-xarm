@@ -161,13 +161,13 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 		if status.IsHoldingSomething || time.Now().After(deadline) {
 			return status.IsHoldingSomething, nil
 		}
-		if !utils.SelectContextOrWait(ctx, 50*time.Millisecond) {
+		if !utils.SelectContextOrWait(ctx, 20*time.Millisecond) {
 			return false, ctx.Err()
 		}
 	}
 }
 
-const vacuumSealTimeout = 500 * time.Millisecond
+const vacuumSealTimeout = 100 * time.Millisecond
 
 func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)
