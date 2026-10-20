@@ -51,7 +51,7 @@ Copy and paste the following attributes into your JSON configuration:
 |------|------|-----------|---------|-------------|
 | `host` | string | **Required** | — | IP address of the xArm. Found on the sticker on the control box. See [Networking](#networking) below. |
 | `port` | int | Optional | `502` | TCP port for the arm's Modbus interface. |
-| `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `3` and `180`. |
+| `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `0.25` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |

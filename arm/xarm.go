@@ -29,7 +29,7 @@ import (
 
 const (
 	maxSpeed = 180.  // degrees per second
-	minSpeed = 3.    // degrees per second
+	minSpeed = 0.25  // degrees per second
 	maxAccel = 1145. // degrees per second per second
 
 	defaultSpeed       = maxSpeed / 3 // degrees per second
