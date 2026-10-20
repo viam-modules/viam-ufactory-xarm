@@ -582,6 +582,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
+	if r, err := x.readReport(ctx); err != nil {
+		logger.Warnf("could not read the controller report on port %d: %v", defaultReportPort, err)
+	} else {
+		logger.Infof("controller TCP payload: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
+			r.TCPLoad.MassKg, r.TCPLoad.CenterOfGravityMM.X, r.TCPLoad.CenterOfGravityMM.Y, r.TCPLoad.CenterOfGravityMM.Z)
+	}
+
 	err = x.start(ctx, false)
 	if err != nil {
 		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
