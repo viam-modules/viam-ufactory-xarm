@@ -421,17 +421,8 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 		return err
 	}
 
-	// The controller forgets an unsaved payload when it reboots, which also drops
-	// our socket, so tcpPayloadApplied is cleared on every connection reset and
-	// the payload is re-sent here on the next start.
-	if p := x.effectiveTCPPayload(); p != nil && !x.tcpPayloadApplied.Load() {
-		if err := x.setMotionMode(ctx, 0); err != nil {
-			return err
-		}
-		if err := x.setMotionState(ctx, 0); err != nil {
-			return err
-		}
-		if err := x.setTCPPayload(ctx, *p); err != nil {
+	if !x.payloadChecked.Load() {
+		if err := x.ensureTCPPayload(ctx, false); err != nil {
 			return err
 		}
 	}
@@ -471,12 +462,10 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 	}
 
 	// Gravity compensation in manual mode relies on the controller's payload
-	// model; a wrong one makes the arm drift or fight the user. Re-send it on
-	// every entry because UFACTORY Studio can overwrite it at any time.
-	if p := x.effectiveTCPPayload(); p != nil {
-		if err := x.setTCPPayload(ctx, *p); err != nil {
-			return fmt.Errorf("failed to set TCP payload before manual mode: %w", err)
-		}
+	// model; a wrong one makes the arm drift or fight the user. Re-check it on
+	// every entry because UFACTORY Studio can change it at any time.
+	if err := x.ensureTCPPayload(ctx, true); err != nil {
+		return fmt.Errorf("failed to check TCP payload before manual mode: %w", err)
 	}
 
 	// Set motion mode to 2 (manual/teaching mode)
@@ -1776,7 +1765,6 @@ func (x *xArm) setTCPPayload(ctx context.Context, p TCPPayloadConfig) error {
 	if err := x.waitForMotionStop(ctx); err != nil {
 		return err
 	}
-	x.tcpPayloadApplied.Store(true)
 	x.logger.Infof("TCP payload set: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
 		p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z)
 	return nil

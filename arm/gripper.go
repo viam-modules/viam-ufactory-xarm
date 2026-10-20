@@ -166,7 +166,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 	}
 
 	g.detected = probeGripper(ctx, g.arm, gripperKindBio, logger)
-	g.releasePayload = claimGripperPayload(g.arm, ModelNameGripperLite, logger)
+	g.releasePayload = registerGripperPreset(g.arm, ModelNameGripperLite, g.detected, logger)
 
 	return g, nil
 }
@@ -363,7 +363,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 			return nil, fmt.Errorf("failed to set gripper speed: %w", err)
 		}
 	}
-	g.releasePayload = claimGripperPayload(x, ModelNameGripper, logger)
+	g.releasePayload = registerGripperPreset(x, ModelNameGripper, detected, logger)
 
 	return g, nil
 }

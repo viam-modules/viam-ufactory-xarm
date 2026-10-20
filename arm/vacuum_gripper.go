@@ -112,7 +112,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	g.detected = probeGripper(ctx, g.arm, gripperKindVacuum, logger)
 
 	g.connType = resolveGripperConnectionType(newConf.ConnectionType, g.detected.submodel, config.Model, logger)
-	g.releasePayload = claimGripperPayload(g.arm, config.Model.Name, logger)
+	g.releasePayload = registerGripperPreset(g.arm, config.Model.Name, g.detected, logger)
 
 	return g, nil
 }
