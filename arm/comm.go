@@ -476,6 +476,7 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
 	x.manualExit.cancel()
+	x.report.close()
 	if x.proxyServer != nil {
 		x.stopProxy()
 	}

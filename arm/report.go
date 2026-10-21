@@ -3,14 +3,17 @@ package arm
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/golang/geo/r3"
+	"go.viam.com/rdk/logging"
 )
 
 // The controller pushes a status packet on each of its report ports to every
@@ -19,7 +22,16 @@ import (
 // command socket on port 502 has no register to read.
 const (
 	defaultReportPort = 30002
-	reportReadTimeout = 3 * time.Second
+	// reportStaleAfter bounds how old the latest packet may be before readers
+	// stop trusting it, and how long a connection may go silent before it is
+	// dropped. The controller pushes several packets a second, so a gap this
+	// long means the stream is down.
+	reportStaleAfter   = 2 * time.Second
+	reportDialTimeout  = 3 * time.Second
+	reportRetryInitial = 500 * time.Millisecond
+	reportRetryCeiling = 10 * time.Second
+	reportFirstTimeout = 3 * time.Second
+	reportPollInterval = 50 * time.Millisecond
 )
 
 // Byte offsets into a rich report packet, counted from the start of the
@@ -37,6 +49,8 @@ const (
 	reportMaxLength = 4096
 )
 
+var errNoReport = errors.New("no controller report received yet")
+
 // reportedTCPLoad is the payload the controller is currently compensating for,
 // whichever source set it: UFACTORY Studio, the saved controller config, or a
 // SetLoadParam call.
@@ -47,36 +61,189 @@ type reportedTCPLoad struct {
 	CenterOfGravityMM r3.Vector
 }
 
-// controllerReport is the part of a rich report packet the module reads.
+// controllerReport is the part of a rich report packet the module decodes.
 type controllerReport struct {
 	State   byte
 	Mode    byte
 	TCPLoad reportedTCPLoad
 }
 
-// readReport connects to a report port at addr, reads one packet, and closes
-// the connection.
-func readReport(ctx context.Context, addr string) (controllerReport, error) {
-	ctx, cancel := context.WithTimeout(ctx, reportReadTimeout)
-	defer cancel()
+// reportStream keeps a connection to a controller report port open in a
+// background goroutine and holds the most recent packet.
+//
+// To expose another report field, decode it in decodeReport and add a reader
+// that goes through latestReport, like tcpLoad. Readers never touch the
+// network, so they are cheap to call from any code path.
+type reportStream struct {
+	addr   string
+	logger logging.Logger
 
+	// staleAfter and the retry bounds are fields so tests can shrink them.
+	staleAfter                 time.Duration
+	retryInitial, retryCeiling time.Duration
+
+	mu       sync.RWMutex
+	latest   controllerReport
+	received time.Time // zero until the first packet
+
+	cancel context.CancelFunc
+	done   chan struct{} // closed when run returns
+}
+
+// newReportStream starts streaming from addr until close is called.
+func newReportStream(addr string, logger logging.Logger) *reportStream {
+	return startReportStream(&reportStream{
+		addr:         addr,
+		logger:       logger,
+		staleAfter:   reportStaleAfter,
+		retryInitial: reportRetryInitial,
+		retryCeiling: reportRetryCeiling,
+	})
+}
+
+func startReportStream(s *reportStream) *reportStream {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
+	s.done = make(chan struct{})
+	go func() {
+		defer close(s.done)
+		s.run(ctx)
+	}()
+	return s
+}
+
+// close stops the background goroutine and waits for it to exit, so nothing
+// logs or holds a socket after the arm is closed. Safe to call on a nil
+// stream and more than once.
+func (s *reportStream) close() {
+	if s == nil {
+		return
+	}
+	s.cancel()
+	<-s.done
+}
+
+// run reconnects with exponential backoff until ctx is cancelled. A controller
+// reboot drops the connection, so reconnecting is the normal path, not an
+// exceptional one.
+func (s *reportStream) run(ctx context.Context) {
+	backoff := s.retryInitial
+	first := true
+	for {
+		gotPacket, err := s.stream(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		// Warn when a working connection drops or the very first attempt fails;
+		// stay at debug while it keeps failing so an unreachable port doesn't
+		// flood the logs.
+		if gotPacket || first {
+			s.logger.Warnf("controller report stream on %s failed, reconnecting: %v", s.addr, err)
+			backoff = s.retryInitial
+		} else {
+			s.logger.Debugf("controller report stream on %s still failing: %v", s.addr, err)
+		}
+		first = false
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(2*backoff, s.retryCeiling)
+	}
+}
+
+// stream reads packets from one connection until it fails. gotPacket reports
+// whether at least one packet was stored, which run uses to tell a dropped
+// connection from one that never came up.
+func (s *reportStream) stream(ctx context.Context) (gotPacket bool, err error) {
+	dialCtx, cancel := context.WithTimeout(ctx, reportDialTimeout)
+	defer cancel()
 	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	conn, err := d.DialContext(dialCtx, "tcp", s.addr)
 	if err != nil {
-		return controllerReport{}, fmt.Errorf("failed to connect to report port %s: %w", addr, err)
+		return false, err
 	}
 	defer func() { _ = conn.Close() }() //nolint:errcheck // read-only socket; nothing to recover on close
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetReadDeadline(deadline); err != nil {
-			return controllerReport{}, err
+	// Unblock the read below as soon as the stream is closed.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() }) //nolint:errcheck
+	defer stop()
+
+	for {
+		// A controller that stops sending without closing the socket would
+		// otherwise leave the stream blocked on a dead connection forever.
+		if err = conn.SetReadDeadline(time.Now().Add(s.staleAfter)); err != nil {
+			return gotPacket, err
+		}
+		var pkt []byte
+		if pkt, err = readReportPacket(conn); err != nil {
+			return gotPacket, err
+		}
+		// A packet that fails to decode means the stream has lost its framing,
+		// so reconnect rather than keep reading at the wrong offset.
+		var r controllerReport
+		if r, err = decodeReport(pkt); err != nil {
+			return gotPacket, err
+		}
+		s.store(r)
+		if !gotPacket {
+			gotPacket = true
+			s.logger.Debugf("controller report stream on %s connected", s.addr)
 		}
 	}
+}
 
-	pkt, err := readReportPacket(conn)
-	if err != nil {
-		return controllerReport{}, fmt.Errorf("failed to read report from %s: %w", addr, err)
+func (s *reportStream) store(r controllerReport) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.latest = r
+	s.received = time.Now()
+}
+
+// waitForFirstReport blocks until a fresh packet is available, so callers right
+// after startup don't see errNoReport while the connection is still opening.
+func (s *reportStream) waitForFirstReport(ctx context.Context) error {
+	t := time.NewTicker(reportPollInterval)
+	defer t.Stop()
+	for {
+		_, err := s.latestReport()
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for a controller report: %w (%w)", err, ctx.Err())
+		case <-t.C:
+		}
 	}
-	return decodeReport(pkt)
+}
+
+// latestReport returns a copy of the most recent packet, or an error if there
+// is none fresh enough to trust. Every reader goes through it so locking and
+// staleness are handled in one place.
+func (s *reportStream) latestReport() (controllerReport, error) {
+	if s == nil {
+		return controllerReport{}, errNoReport
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.received.IsZero() {
+		return controllerReport{}, errNoReport
+	}
+	if age := time.Since(s.received); age > s.staleAfter {
+		return controllerReport{}, fmt.Errorf("latest controller report is %v old", age.Round(time.Millisecond))
+	}
+	return s.latest, nil
+}
+
+// tcpLoad returns the payload the controller is currently compensating for.
+func (s *reportStream) tcpLoad() (reportedTCPLoad, error) {
+	r, err := s.latestReport()
+	if err != nil {
+		return reportedTCPLoad{}, err
+	}
+	return r.TCPLoad, nil
 }
 
 // readReportPacket reads one length-prefixed packet, prefix included. The
@@ -128,7 +295,6 @@ func reportFloat32(pkt []byte, off int) float64 {
 	return float64(math.Float32frombits(binary.LittleEndian.Uint32(pkt[off : off+4])))
 }
 
-// readReport reads one rich report from this arm's controller.
-func (x *xArm) readReport(ctx context.Context) (controllerReport, error) {
-	return readReport(ctx, net.JoinHostPort(x.conf.Host, strconv.Itoa(defaultReportPort)))
+func reportAddr(host string) string {
+	return net.JoinHostPort(host, strconv.Itoa(defaultReportPort))
 }

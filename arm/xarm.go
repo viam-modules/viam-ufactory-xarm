@@ -162,6 +162,8 @@ type xArm struct {
 	motion      motion.Service
 	trajGen     mlmodel.Service
 	proxyServer *http.Server
+	// report streams the controller's rich report; nil until NewXArm starts it.
+	report *reportStream
 
 	// below is all configuration things
 	dof    int
@@ -582,11 +584,15 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	if r, err := x.readReport(ctx); err != nil {
-		logger.Warnf("could not read the controller report on port %d: %v", defaultReportPort, err)
-	} else {
+	x.report = newReportStream(reportAddr(newConf.Host), logger)
+	waitCtx, cancelWait := context.WithTimeout(ctx, reportFirstTimeout)
+	err = x.report.waitForFirstReport(waitCtx)
+	cancelWait()
+	if err != nil {
+		logger.Warnf("controller report on port %d unavailable: %v", defaultReportPort, err)
+	} else if load, err := x.report.tcpLoad(); err == nil {
 		logger.Infof("controller TCP payload: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
-			r.TCPLoad.MassKg, r.TCPLoad.CenterOfGravityMM.X, r.TCPLoad.CenterOfGravityMM.Y, r.TCPLoad.CenterOfGravityMM.Z)
+			load.MassKg, load.CenterOfGravityMM.X, load.CenterOfGravityMM.Y, load.CenterOfGravityMM.Z)
 	}
 
 	err = x.start(ctx, false)
@@ -638,7 +644,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	if newConf.Sensitivity != nil {
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
-			return nil, err
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/golang/geo/r3"
+	"go.viam.com/rdk/logging"
 	"go.viam.com/test"
 )
 
@@ -81,27 +84,159 @@ func TestReadReportPacket(t *testing.T) {
 	})
 }
 
-func TestReadReport(t *testing.T) {
+// fakeReportServer accepts report connections and, for each one, sends the
+// packets from the next entry of conns, then closes it. Once conns runs out,
+// the connection is held open and silent until the server closes.
+type fakeReportServer struct {
+	ln   net.Listener
+	done chan struct{}
+}
+
+func newFakeReportServer(t *testing.T, conns ...[][]byte) *fakeReportServer {
+	t.Helper()
 	var lc net.ListenConfig
 	ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
 	test.That(t, err, test.ShouldBeNil)
-	defer func() { test.That(t, ln.Close(), test.ShouldBeNil) }()
-
-	// Send the packet in two writes so the reader has to reassemble it.
-	pkt := buildReport(587, 0, 1, g1Load)
+	s := &fakeReportServer{ln: ln, done: make(chan struct{})}
 	go func() {
-		c, err := ln.Accept()
-		if err != nil {
+		for i := 0; ; i++ {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if i >= len(conns) {
+				go func() {
+					<-s.done
+					_ = c.Close()
+				}()
+				continue
+			}
+			for _, pkt := range conns[i] {
+				// Split each packet across two writes so the reader has to reassemble it.
+				_, _ = c.Write(pkt[:100])
+				_, _ = c.Write(pkt[100:])
+			}
+			_ = c.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		close(s.done)
+		_ = ln.Close()
+	})
+	return s
+}
+
+func newTestReportStream(t *testing.T, addr string, staleAfter time.Duration) *reportStream {
+	t.Helper()
+	s := startReportStream(&reportStream{
+		addr:         addr,
+		logger:       logging.NewTestLogger(t),
+		staleAfter:   staleAfter,
+		retryInitial: 10 * time.Millisecond,
+		retryCeiling: 50 * time.Millisecond,
+	})
+	t.Cleanup(s.close)
+	return s
+}
+
+func waitForTCPLoadMass(t *testing.T, s *reportStream, want float64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		load, err := s.tcpLoad()
+		if err == nil && math.Abs(load.MassKg-want) < 1e-6 {
 			return
 		}
-		defer func() { _ = c.Close() }()
-		_, _ = c.Write(pkt[:100])
-		_, _ = c.Write(pkt[100:])
-	}()
+		if time.Now().After(deadline) {
+			t.Fatalf("tcpLoad never reported mass %v; last: %+v, %v", want, load, err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
-	r, err := readReport(context.Background(), ln.Addr().String())
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r.Mode, test.ShouldEqual, 1)
-	test.That(t, r.TCPLoad.MassKg, test.ShouldAlmostEqual, 0.82, 1e-6)
-	test.That(t, r.TCPLoad.CenterOfGravityMM.Z, test.ShouldEqual, 48)
+func TestReportStream(t *testing.T) {
+	t.Run("streams the latest packet", func(t *testing.T) {
+		srv := newFakeReportServer(t, [][]byte{
+			buildReport(587, 0, 1, reportedTCPLoad{MassKg: 0.5}),
+			buildReport(587, 0, 1, g1Load),
+		})
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		test.That(t, s.waitForFirstReport(ctx), test.ShouldBeNil)
+		waitForTCPLoadMass(t, s, 0.82)
+
+		r, err := s.latestReport()
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, r.Mode, test.ShouldEqual, 1)
+		test.That(t, r.TCPLoad.CenterOfGravityMM, test.ShouldResemble, r3.Vector{X: 1.5, Y: -2, Z: 48})
+	})
+
+	t.Run("reconnects after the controller drops the connection", func(t *testing.T) {
+		srv := newFakeReportServer(t,
+			[][]byte{buildReport(587, 0, 0, g1Load)},
+			[][]byte{buildReport(587, 0, 0, reportedTCPLoad{MassKg: 0.61, CenterOfGravityMM: r3.Vector{Z: 53}})},
+		)
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+		waitForTCPLoadMass(t, s, 0.61)
+	})
+
+	t.Run("reconnects after a misframed packet", func(t *testing.T) {
+		bad := buildReport(587, 0, 0, g1Load)
+		bad[reportOffsetStateMode] = 0xFF
+		srv := newFakeReportServer(t,
+			[][]byte{bad, buildReport(587, 0, 0, reportedTCPLoad{MassKg: 0.5})},
+			[][]byte{buildReport(587, 0, 0, g1Load)},
+		)
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+		waitForTCPLoadMass(t, s, 0.82)
+	})
+
+	t.Run("goes stale when the controller stops sending", func(t *testing.T) {
+		srv := newFakeReportServer(t, [][]byte{buildReport(587, 0, 0, g1Load)})
+		s := newTestReportStream(t, srv.ln.Addr().String(), 100*time.Millisecond)
+		waitForTCPLoadMass(t, s, 0.82)
+
+		time.Sleep(200 * time.Millisecond)
+		_, err := s.tcpLoad()
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "old")
+	})
+
+	t.Run("no report before the first packet", func(t *testing.T) {
+		srv := newFakeReportServer(t) // accepts but never sends
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+		_, err := s.tcpLoad()
+		test.That(t, errors.Is(err, errNoReport), test.ShouldBeTrue)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		test.That(t, s.waitForFirstReport(ctx), test.ShouldNotBeNil)
+	})
+
+	t.Run("close returns while blocked on a silent connection", func(t *testing.T) {
+		srv := newFakeReportServer(t)
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+		time.Sleep(50 * time.Millisecond) // let it connect and block on the read
+
+		closed := make(chan struct{})
+		go func() {
+			s.close()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.After(time.Second):
+			t.Fatal("close did not return")
+		}
+		s.close() // a second close is a no-op
+	})
+
+	t.Run("nil stream", func(t *testing.T) {
+		var s *reportStream
+		_, err := s.tcpLoad()
+		test.That(t, errors.Is(err, errNoReport), test.ShouldBeTrue)
+		s.close()
+	})
 }
