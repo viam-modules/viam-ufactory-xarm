@@ -162,6 +162,8 @@ type xArm struct {
 	motion      motion.Service
 	trajGen     mlmodel.Service
 	proxyServer *http.Server
+	// report streams the controller's rich report; nil until NewXArm starts it.
+	report *reportStream
 
 	// below is all configuration things
 	dof    int
@@ -552,6 +554,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, err
 	}
 
+	// Started right after the command socket so its first packet arrives while
+	// hardware detection runs.
+	x.report, err = newReportStream(ctx, reportAddr(newConf.Host), logger)
+	if err != nil {
+		return nil, multierr.Combine(err, x.Close(ctx))
+	}
+
 	// Try to open a dedicated socket on port 503 for gripper-bus Modbus
 	// traffic. The xArm controller serves this as a sibling of port 502
 	// specifically so gripper writes don't contend with arm motion on the
@@ -580,6 +589,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 			logger.Infof("xArm hardware detected: model=%s axis=%d device_type=%d (configured as %s)",
 				d.model, d.axis, d.deviceType, modelName)
 		}
+	}
+
+	if err := x.report.waitForFirstReport(ctx, reportFirstTimeout); err != nil {
+		logger.Warnf("controller report on port %d unavailable: %v", defaultReportPort, err)
+	} else if load, err := x.report.tcpLoad(); err == nil {
+		logger.Infof("controller TCP payload: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
+			load.MassKg, load.CenterOfGravityMM.X, load.CenterOfGravityMM.Y, load.CenterOfGravityMM.Z)
 	}
 
 	err = x.start(ctx, false)
@@ -631,7 +647,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	if newConf.Sensitivity != nil {
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
-			return nil, err
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 
