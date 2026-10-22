@@ -181,6 +181,13 @@ type xArm struct {
 	// ever set. Clearing the FnCxx control mode resets Fn303, so we need this to put it back.
 	gripperSpeed atomic.Uint32
 
+	// ftEnabled records whether F/T sampling was ever turned on. An F/T fault makes the
+	// controller stop sampling and clearing the error does not restart it, so checkReadyState
+	// replays the enable. Same shape as gripperControlMode/gripperSpeed above.
+	ftEnabled atomic.Bool
+	// ftRestoreNano rate-limits that replay; see ftRestoreCooldown.
+	ftRestoreNano atomic.Int64
+
 	detectedArm detectedArm
 }
 
@@ -1063,8 +1070,13 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		}
 		validCommand = true
 	}
-	if _, ok := cmd[ftSensorEnableKey]; ok {
-		if err := x.setFTSensorEnable(ctx); err != nil {
+	if val, ok := cmd[ftSensorEnableKey]; ok {
+		// Any non-bool value keeps the historical "presence means enable" behavior.
+		enable := true
+		if b, isBool := val.(bool); isBool {
+			enable = b
+		}
+		if err := x.setFTSensorEnable(ctx, enable); err != nil {
 			return nil, err
 		}
 		validCommand = true
