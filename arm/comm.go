@@ -31,6 +31,20 @@ const notReadyForMotionState = 1 << 4
 const ftSensorValueCount = 6
 const isHoldingWord = 0x0202
 
+// F/T fault codes whose firmware handler runs the stop-FT path, which turns the
+// sensor's sampling-enabled flag off. ClearError does not turn it back on.
+const (
+	errCodeFTRead     = 0x32
+	errCodeFTOverload = 0x35
+)
+
+// ftRestoreCooldown bounds how often a cleared F/T fault re-enables sampling.
+// The controller re-runs its overload check on every control cycle, so a tool
+// that is still loaded past the limit re-trips the fault on the first sample
+// after the enable. Without a cooldown, every subsequent command would pay for
+// another clear-and-retrip round trip.
+const ftRestoreCooldown = 10 * time.Second
+
 var regMap = map[string]byte{
 	"Version":        0x01,
 	"ActualCurrent":  0x05,
@@ -303,6 +317,10 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		// we assume that if we run into an error we will need to restart the servos etc.
 		x.started.Store(-1)
 
+		// Capture the code before clearing it. The reply to ClearError carries only a
+		// state byte, so this is the last chance to see which fault we recovered from.
+		clearedCode := currentState[1]
+
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
 		c := x.newCmd(regMap["ClearError"])
@@ -315,6 +333,9 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 				errors.New(armBoxErrorMap[currentState[1]]))
 		}
 		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxErrorMap[currentState[1]]))
+
+		// Clearing an F/T fault does not restart the sensor; replay the enable.
+		x.restoreFTSensor(ctx, clearedCode)
 	}
 	if currentState[0]&warningState != 0 {
 		// we are in warning state, we will attempt to clear the warning
@@ -1638,11 +1659,70 @@ func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	return err
 }
 
-func (x *xArm) setFTSensorEnable(ctx context.Context) error {
+// setFTSensorEnable starts or stops F/T sampling (0xC9).
+//
+// Disabling is a real off switch, not just a mute: the controller stops reading
+// the sensor over the bus entirely and zeroes the sample buffers, so while it is
+// off the overload thresholds are never evaluated and neither the overload
+// (0x35) nor the internal-error (0x32) fault can be raised. That makes it usable
+// to deliberately push a tool past the sensor's trip point - at the cost of
+// losing the controller's protection of the sensor hardware for that window.
+//
+// Note the controller puts itself in state 5 (not motion-ready) on either value,
+// the same as any other parameter change. The motion paths re-assert state 0 via
+// checkReadyState, but a caller that toggles the sensor and then expects the arm
+// to move immediately should not assume it is still in state 0.
+func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
 	c := x.newCmd(regMap["FTSensorEnable"])
-	c.params = append(c.params, 1) // 1 = enable
-	_, err := x.send(ctx, c, true)
-	return err
+	var enByte byte
+	if enable {
+		enByte = 1
+	}
+	c.params = append(c.params, enByte)
+	if _, err := x.send(ctx, c, true); err != nil {
+		return err
+	}
+	// Track the intent so a cleared F/T fault restarts sampling only if sampling
+	// was meant to be on - a deliberate disable must not be undone by a clear.
+	x.ftEnabled.Store(enable)
+	return nil
+}
+
+// restoreFTSensor restarts F/T sampling after an F/T fault has just been cleared.
+//
+// On an overload (0x35) or a repeated internal sensor error (0x32) the controller
+// runs its stop-FT path, which clears the sensor's sampling-enabled flag.
+// ClearError resets the error code but not that flag, so without this the force
+// stream stays dead for good - and silently, because the error that would have
+// explained it was just cleared.
+//
+// Best-effort by design: the overload check re-runs on every control cycle, so a
+// tool that is still loaded re-trips the fault on the first sample after the
+// enable. That is a condition only the operator can fix, so report it as a log
+// line rather than failing the caller's motion command, and rate-limit the retry
+// so a stuck-overloaded sensor is not re-enabled on every single command.
+func (x *xArm) restoreFTSensor(ctx context.Context, clearedCode byte) {
+	if clearedCode != errCodeFTOverload && clearedCode != errCodeFTRead {
+		return
+	}
+	if !x.ftEnabled.Load() {
+		// Sampling was never turned on, so there is nothing to put back.
+		return
+	}
+
+	now := time.Now().UnixNano()
+	last := x.ftRestoreNano.Load()
+	if now-last < ftRestoreCooldown.Nanoseconds() || !x.ftRestoreNano.CompareAndSwap(last, now) {
+		x.logger.Debugf("cleared F/T fault 0x%02x; skipping re-enable, within cooldown", clearedCode)
+		return
+	}
+
+	if err := x.setFTSensorEnable(ctx, true); err != nil {
+		x.logger.Warnf("cleared F/T fault 0x%02x but could not restart sampling; "+
+			"the tool may still be loaded past the sensor limit: %v", clearedCode, err)
+		return
+	}
+	x.logger.Infof("cleared F/T fault 0x%02x and restarted F/T sampling", clearedCode)
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
