@@ -128,13 +128,14 @@ func newFakeReportServer(t *testing.T, conns ...[][]byte) *fakeReportServer {
 
 func newTestReportStream(t *testing.T, addr string, staleAfter time.Duration) *reportStream {
 	t.Helper()
-	s := startReportStream(&reportStream{
+	s := &reportStream{
 		addr:         addr,
 		logger:       logging.NewTestLogger(t),
 		staleAfter:   staleAfter,
 		retryInitial: 10 * time.Millisecond,
 		retryCeiling: 50 * time.Millisecond,
-	})
+	}
+	test.That(t, s.start(context.Background()), test.ShouldBeNil)
 	t.Cleanup(s.close)
 	return s
 }
@@ -162,9 +163,7 @@ func TestReportStream(t *testing.T) {
 		})
 		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		test.That(t, s.waitForFirstReport(ctx), test.ShouldBeNil)
+		test.That(t, s.waitForFirstReport(context.Background(), 2*time.Second), test.ShouldBeNil)
 		waitForTCPLoadMass(t, s, 0.82)
 
 		r, err := s.latestReport()
@@ -210,9 +209,33 @@ func TestReportStream(t *testing.T) {
 		_, err := s.tcpLoad()
 		test.That(t, errors.Is(err, errNoReport), test.ShouldBeTrue)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-		test.That(t, s.waitForFirstReport(ctx), test.ShouldNotBeNil)
+		test.That(t, s.waitForFirstReport(context.Background(), 100*time.Millisecond), test.ShouldNotBeNil)
+	})
+
+	t.Run("fails fast when the port is unreachable", func(t *testing.T) {
+		var lc net.ListenConfig
+		ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		test.That(t, err, test.ShouldBeNil)
+		addr := ln.Addr().String()
+		test.That(t, ln.Close(), test.ShouldBeNil)
+
+		start := time.Now()
+		s, err := newReportStream(context.Background(), addr, logging.NewTestLogger(t))
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, s, test.ShouldBeNil)
+		test.That(t, time.Since(start), test.ShouldBeLessThan, reportDialTimeout)
+	})
+
+	t.Run("recovers after a connection that sends nothing", func(t *testing.T) {
+		// The second connection closes without a packet, the path run logs at
+		// debug; the third one delivers again.
+		srv := newFakeReportServer(t,
+			[][]byte{buildReport(587, 0, 0, g1Load)},
+			[][]byte{},
+			[][]byte{buildReport(587, 0, 0, reportedTCPLoad{MassKg: 0.3})},
+		)
+		s := newTestReportStream(t, srv.ln.Addr().String(), time.Second)
+		waitForTCPLoadMass(t, s, 0.3)
 	})
 
 	t.Run("close returns while blocked on a silent connection", func(t *testing.T) {

@@ -554,6 +554,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, err
 	}
 
+	// Started right after the command socket so its first packet arrives while
+	// hardware detection runs.
+	x.report, err = newReportStream(ctx, reportAddr(newConf.Host), logger)
+	if err != nil {
+		return nil, multierr.Combine(err, x.Close(ctx))
+	}
+
 	// Try to open a dedicated socket on port 503 for gripper-bus Modbus
 	// traffic. The xArm controller serves this as a sibling of port 502
 	// specifically so gripper writes don't contend with arm motion on the
@@ -584,11 +591,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	x.report = newReportStream(reportAddr(newConf.Host), logger)
-	waitCtx, cancelWait := context.WithTimeout(ctx, reportFirstTimeout)
-	err = x.report.waitForFirstReport(waitCtx)
-	cancelWait()
-	if err != nil {
+	if err := x.report.waitForFirstReport(ctx, reportFirstTimeout); err != nil {
 		logger.Warnf("controller report on port %d unavailable: %v", defaultReportPort, err)
 	} else if load, err := x.report.tcpLoad(); err == nil {
 		logger.Infof("controller TCP payload: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",

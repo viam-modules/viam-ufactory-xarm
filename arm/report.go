@@ -26,11 +26,16 @@ const (
 	// stop trusting it, and how long a connection may go silent before it is
 	// dropped. The controller pushes several packets a second, so a gap this
 	// long means the stream is down.
-	reportStaleAfter   = 2 * time.Second
-	reportDialTimeout  = 3 * time.Second
+	reportStaleAfter = 2 * time.Second
+	// The report port is on the same host as the command socket, which is
+	// already connected by the time the stream starts, so a dial either
+	// succeeds or is refused almost at once.
+	reportDialTimeout = time.Second
+	// reportFirstTimeout bounds how long startup waits for the first packet on
+	// a connection that is already open.
+	reportFirstTimeout = time.Second
 	reportRetryInitial = 500 * time.Millisecond
 	reportRetryCeiling = 10 * time.Second
-	reportFirstTimeout = 3 * time.Second
 	reportPollInterval = 50 * time.Millisecond
 )
 
@@ -90,26 +95,45 @@ type reportStream struct {
 	done   chan struct{} // closed when run returns
 }
 
-// newReportStream starts streaming from addr until close is called.
-func newReportStream(addr string, logger logging.Logger) *reportStream {
-	return startReportStream(&reportStream{
+// newReportStream connects to the report port at addr and streams from it
+// until close is called. The first connection is made before returning, so a
+// wrong host or a blocked port fails construction at once instead of showing
+// up later as missing data.
+func newReportStream(ctx context.Context, addr string, logger logging.Logger) (*reportStream, error) {
+	s := &reportStream{
 		addr:         addr,
 		logger:       logger,
 		staleAfter:   reportStaleAfter,
 		retryInitial: reportRetryInitial,
 		retryCeiling: reportRetryCeiling,
-	})
+	}
+	if err := s.start(ctx); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
-func startReportStream(s *reportStream) *reportStream {
-	ctx, cancel := context.WithCancel(context.Background())
+// start makes the first connection and hands it to the background goroutine.
+func (s *reportStream) start(ctx context.Context) error {
+	conn, err := s.dial(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot connect to the controller report port %s: %w", s.addr, err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	go func() {
 		defer close(s.done)
-		s.run(ctx)
+		s.run(runCtx, conn)
 	}()
-	return s
+	return nil
+}
+
+func (s *reportStream) dial(ctx context.Context) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, reportDialTimeout)
+	defer cancel()
+	var d net.Dialer
+	return d.DialContext(ctx, "tcp", s.addr)
 }
 
 // close stops the background goroutine and waits for it to exit, so nothing
@@ -123,27 +147,26 @@ func (s *reportStream) close() {
 	<-s.done
 }
 
-// run reconnects with exponential backoff until ctx is cancelled. A controller
-// reboot drops the connection, so reconnecting is the normal path, not an
-// exceptional one.
-func (s *reportStream) run(ctx context.Context) {
+// run streams from conn, then reconnects with exponential backoff until ctx is
+// cancelled. A controller reboot drops the connection, so reconnecting is the
+// normal path, not an exceptional one. Only losing a working connection is a
+// warning; retries stay at debug so a controller that stays down doesn't flood
+// the logs.
+func (s *reportStream) run(ctx context.Context, conn net.Conn) {
 	backoff := s.retryInitial
-	first := true
 	for {
-		gotPacket, err := s.stream(ctx)
-		if ctx.Err() != nil {
-			return
+		if conn != nil {
+			gotPacket, err := s.stream(ctx, conn)
+			if ctx.Err() != nil {
+				return
+			}
+			if gotPacket {
+				s.logger.Warnf("controller report stream on %s dropped, reconnecting: %v", s.addr, err)
+				backoff = s.retryInitial
+			} else {
+				s.logger.Debugf("controller report stream on %s failed: %v", s.addr, err)
+			}
 		}
-		// Warn when a working connection drops or the very first attempt fails;
-		// stay at debug while it keeps failing so an unreachable port doesn't
-		// flood the logs.
-		if gotPacket || first {
-			s.logger.Warnf("controller report stream on %s failed, reconnecting: %v", s.addr, err)
-			backoff = s.retryInitial
-		} else {
-			s.logger.Debugf("controller report stream on %s still failing: %v", s.addr, err)
-		}
-		first = false
 
 		select {
 		case <-ctx.Done():
@@ -151,20 +174,19 @@ func (s *reportStream) run(ctx context.Context) {
 		case <-time.After(backoff):
 		}
 		backoff = min(2*backoff, s.retryCeiling)
+
+		var err error
+		if conn, err = s.dial(ctx); err != nil {
+			conn = nil
+			s.logger.Debugf("reconnecting controller report stream on %s: %v", s.addr, err)
+		}
 	}
 }
 
-// stream reads packets from one connection until it fails. gotPacket reports
-// whether at least one packet was stored, which run uses to tell a dropped
-// connection from one that never came up.
-func (s *reportStream) stream(ctx context.Context) (gotPacket bool, err error) {
-	dialCtx, cancel := context.WithTimeout(ctx, reportDialTimeout)
-	defer cancel()
-	var d net.Dialer
-	conn, err := d.DialContext(dialCtx, "tcp", s.addr)
-	if err != nil {
-		return false, err
-	}
+// stream reads packets from conn until it fails, then closes it. gotPacket
+// reports whether at least one packet was stored, which run uses to tell a
+// dropped connection from one that never delivered anything.
+func (s *reportStream) stream(ctx context.Context, conn net.Conn) (gotPacket bool, err error) {
 	defer func() { _ = conn.Close() }() //nolint:errcheck // read-only socket; nothing to recover on close
 	// Unblock the read below as soon as the stream is closed.
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() }) //nolint:errcheck
@@ -201,9 +223,11 @@ func (s *reportStream) store(r controllerReport) {
 	s.received = time.Now()
 }
 
-// waitForFirstReport blocks until a fresh packet is available, so callers right
-// after startup don't see errNoReport while the connection is still opening.
-func (s *reportStream) waitForFirstReport(ctx context.Context) error {
+// waitForFirstReport waits up to timeout for a fresh packet, so callers right
+// after startup don't see errNoReport while the first packet is in flight.
+func (s *reportStream) waitForFirstReport(ctx context.Context, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	t := time.NewTicker(reportPollInterval)
 	defer t.Stop()
 	for {
@@ -222,6 +246,11 @@ func (s *reportStream) waitForFirstReport(ctx context.Context) error {
 // latestReport returns a copy of the most recent packet, or an error if there
 // is none fresh enough to trust. Every reader goes through it so locking and
 // staleness are handled in one place.
+//
+// Each call copies the whole controllerReport under the read lock, even when
+// the reader needs one field. That is cheap while the struct holds a few
+// fields; if readers become frequent or it grows (joint arrays, GPIO states),
+// switch readers to copying only their field while holding the lock.
 func (s *reportStream) latestReport() (controllerReport, error) {
 	if s == nil {
 		return controllerReport{}, errNoReport
