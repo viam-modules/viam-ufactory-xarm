@@ -50,6 +50,29 @@ const (
 	defaultGripperForceG2 = 50
 )
 
+// The finger model's drive_joint is 0 rad fully open and 0.85 rad fully closed,
+// linear in the raw position: (850 - pulse) / 1000, on both G1 and G2.
+const (
+	gripperPulseMax    = 850
+	gripperDriveMaxRad = 0.85
+	// gripperGoToInputsTolerance, in raw pulses, protects GoToInputs against
+	// jitter in the reported position.
+	gripperGoToInputsTolerance = 10
+)
+
+// pulseToDriveAngle maps a raw gripper position to the drive_joint input,
+// (a closed G2 can report -1).
+func pulseToDriveAngle(pulse int) float64 {
+	pulse = min(max(pulse, 0), gripperPulseMax)
+	return float64(gripperPulseMax-pulse) / 1000
+}
+
+// driveAngleToPulse is the inverse of pulseToDriveAngle.
+func driveAngleToPulse(q float64) int {
+	q = min(max(q, 0), gripperDriveMaxRad)
+	return int(math.Round(gripperPulseMax - q*1000))
+}
+
 // gripperStatusTimeout bounds the G2 move poll, matching the SDKs' 10s default.
 const gripperStatusTimeout = 10 * time.Second
 
@@ -72,6 +95,9 @@ type GripperConfig struct {
 	// default) the gripper reports the hand-authored bounding boxes that
 	// shipped before mesh support landed.
 	UseURDFs bool `json:"use_urdfs,omitempty"`
+	// MovingFingers makes the jaw opening a kinematic input, so the fingers
+	// move in the model. Off by default: the motion planner may change it.
+	MovingFingers bool `json:"moving_fingers,omitempty"`
 	// MeshDecimationRatio only applies when UseURDFs is true. Each gripper
 	// URDF has exactly one mesh, so a scalar is enough. Pointer so a
 	// missing field (nil) is distinguishable from an explicit value; the
@@ -318,12 +344,10 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	submodel := detected.submodel
 
 	if newConf.UseURDFs && submodel == submodelG2 {
-		logger.Warn("gripper: use_urdfs is set but only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
+		logger.Warn("gripper: use_urdfs is set but only a G1 mesh is available, so this G2 will report G1 collision geometry; " +
 			"unset use_urdfs to get the G2 bounding boxes")
 	}
-	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, func() ([]spatialmath.Geometry, error) {
-		return standardGripperGeometries(submodel)
-	})
+	mf, err := newStandardGripperKinematics(newConf, submodel, logger)
 	if err != nil {
 		return nil, fmt.Errorf("gripper kinematics: %w", err)
 	}
@@ -664,43 +688,107 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	if g.useURDFs {
-		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
-		if err != nil {
-			return nil, err
-		}
-		return gif.Geometries(), nil
+	if len(g.mf.DoF()) == 0 && !g.useURDFs {
+		return standardGripperGeometries(g.submodel())
 	}
-	return standardGripperGeometries(g.submodel())
+	inputs, err := g.CurrentInputs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gif, err := g.mf.Geometries(inputs)
+	if err != nil {
+		return nil, err
+	}
+	return gif.Geometries(), nil
 }
 
 func (g *myGripper) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return g.mf, nil
 }
 
+// CurrentInputs reports the drive_joint angle of the moving-finger model, and
+// nothing when moving_fingers is unset.
 func (g *myGripper) CurrentInputs(ctx context.Context) ([]referenceframe.Input, error) {
-	return []referenceframe.Input{}, nil
+	if len(g.mf.DoF()) == 0 {
+		return []referenceframe.Input{}, nil
+	}
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []referenceframe.Input{pulseToDriveAngle(pos)}, nil
 }
 
+// GoToInputs moves the jaws to the last requested drive_joint angle. The motion
+// service calls it even when the inputs are unchanged, so a target within
+// gripperGoToInputsTolerance is a no-op.
 func (g *myGripper) GoToInputs(ctx context.Context, inputs ...[]referenceframe.Input) error {
-	return nil
+	if len(g.mf.DoF()) == 0 || len(inputs) == 0 {
+		return nil
+	}
+	last := inputs[len(inputs)-1]
+	if len(last) != len(g.mf.DoF()) {
+		return fmt.Errorf("gripper expects %d input, got %d", len(g.mf.DoF()), len(last))
+	}
+	goal := driveAngleToPulse(last[0])
+
+	pos, err := g.getPosition(ctx)
+	if err != nil {
+		return err
+	}
+	if math.Abs(float64(min(max(pos, 0), gripperPulseMax)-goal)) <= gripperGoToInputsTolerance {
+		return nil
+	}
+
+	if g.submodel() == submodelG2 {
+		_, err = g.moveG2(ctx, goal)
+		return err
+	}
+	_, err = g.goToPosition(ctx, goal)
+	return err
 }
 
 func (g *myGripper) Status(_ context.Context) (map[string]any, error) {
 	return map[string]any{}, nil
 }
 
+// newStandardGripperKinematics returns the zero-DoF model without
+// moving_fingers, and the moving-finger model with it.
+func newStandardGripperKinematics(conf *GripperConfig, submodel string, logger logging.Logger) (referenceframe.Model, error) {
+	if !conf.MovingFingers {
+		return newGripperKinematics(ModelNameGripper, conf, logger, func() ([]spatialmath.Geometry, error) {
+			return standardGripperGeometries(submodel)
+		})
+	}
+	if conf.UseURDFs {
+		return loadStandardGripperFingerModel(ModelNameGripper, conf.MeshDecimationRatio, logger)
+	}
+	return standardGripperBoxModel(ModelNameGripper, submodel)
+}
+
+// standardGripperCaseLabel labels the case box.
+const standardGripperCaseLabel = "case-gripper"
+
+// standardGripperCaseSize is the size of the hand-authored case box.
+func standardGripperCaseSize(version string) r3.Vector {
+	if version == submodelG2 {
+		return r3.Vector{X: 75, Y: 110, Z: 110}
+	}
+	return r3.Vector{X: 50, Y: 100, Z: 100}
+}
+
+// standardGripperGeometries is the hand-authored case and claws, the model
+// used when neither moving_fingers nor use_urdfs is set.
 func standardGripperGeometries(version string) ([]spatialmath.Geometry, error) {
-	caseBoxSize := r3.Vector{X: 50, Y: 100, Z: 100}
+	caseBoxSize := standardGripperCaseSize(version)
 	clawSize := r3.Vector{X: 40, Y: 170, Z: 105}
 	if version == submodelG2 {
-		caseBoxSize = r3.Vector{X: 75, Y: 110, Z: 110}
 		clawSize = r3.Vector{X: 45, Y: 120, Z: 112}
 	}
 
 	caseBox, err := spatialmath.NewBox(
 		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseBoxSize.Z / -2}),
-		caseBoxSize, "case-gripper")
+		caseBoxSize, standardGripperCaseLabel)
 	if err != nil {
 		return nil, err
 	}
