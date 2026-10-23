@@ -152,7 +152,11 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 	}
 
 	// Vacuum takes time to build, so wait for the seal.
-	deadline := time.Now().Add(vacuumSealTimeout)
+	timeout := defaultVacuumSealTimeout
+	if g.conf.VacuumSealTimeoutMS > 0 {
+		timeout = time.Duration(g.conf.VacuumSealTimeoutMS) * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
 	for {
 		status, err := g.IsHoldingSomething(ctx, nil)
 		if err != nil {
@@ -167,7 +171,7 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 	}
 }
 
-const vacuumSealTimeout = 100 * time.Millisecond
+const defaultVacuumSealTimeout = 100 * time.Millisecond
 
 func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)

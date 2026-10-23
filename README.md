@@ -398,6 +398,7 @@ For use with the standard xArm vacuum gripper. Both wiring interfaces are suppor
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
+| `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
@@ -416,6 +417,7 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 |-----------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
+| `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `lite_vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
