@@ -176,6 +176,26 @@ resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 
 The following commands are available via `DoCommand` on the arm component.
 
+#### Guarded joint-limit error clearing
+
+```json
+{"clear_joint_limit_error": true}
+```
+
+Clears only controller C23 ([Joints Angle Exceed Limit](https://docs.api.ufactory.cc/websocket_api/2.xarm_api_code.html)).
+Returns `{"cleared": true}` after verifying the fault is gone, or
+`{"cleared": false}` when no controller fault or warning exists. Refuses
+other faults, warnings, an active arm operation, manual mode, or controller
+states other than sleeping/paused/stopped. Viam pauses a failed execution, so
+its latched C23 can be cleared without enabling the arm. A fault change before clearing or an
+unsuccessful clear returns an error. The command must be the sole key and true.
+
+This command does not move or enable the arm, release a gripper, or replay a
+trajectory. The caller must replan from measured joints with scene and carried
+geometry intact. Current RDK permits inward interpolation from measured joints
+outside the configured bounds while still rejecting farther-out targets;
+drivers built with RDK 1.1.0 cannot perform that inward recovery.
+
 #### Speed and Acceleration
 
 **Go:**
