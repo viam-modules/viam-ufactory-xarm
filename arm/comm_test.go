@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"path/filepath"
@@ -273,4 +274,34 @@ func TestVacuumPumpOnFromResponse(t *testing.T) {
 
 	_, err := vacuumPumpOnFromResponse([]byte{0}, connectionPlugin)
 	test.That(t, err, test.ShouldNotBeNil)
+}
+
+// TestRestoreFTSensorSkips covers the three gates that make restoreFTSensor a
+// no-op: a non-F/T fault, an F/T fault while sampling was never enabled, and an
+// F/T fault within the re-enable cooldown. Each must leave the cooldown slot
+// untouched; a proceed would claim it (and then hit the controller).
+func TestRestoreFTSensorSkips(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	recent := time.Now().UnixNano()
+
+	for _, tc := range []struct {
+		name    string
+		code    byte
+		enabled bool
+		nano    int64
+	}{
+		{"non-F/T fault is ignored", 0x21, true, 0},
+		{"F/T fault ignored when sampling was never enabled", errCodeFTOverload, false, 0},
+		{"F/T fault skipped within the cooldown", errCodeFTOverload, true, recent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := &xArm{logger: logger}
+			x.ftEnabled.Store(tc.enabled)
+			x.ftRestoreNano.Store(tc.nano)
+
+			x.restoreFTSensor(context.Background(), tc.code)
+
+			test.That(t, x.ftRestoreNano.Load(), test.ShouldEqual, tc.nano)
+		})
+	}
 }
