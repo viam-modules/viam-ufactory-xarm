@@ -141,7 +141,8 @@ type myGripperLite struct {
 	arm      arm.Arm
 	isMoving atomic.Bool
 
-	detected detectedGripper
+	detected       detectedGripper
+	releasePayload func()
 
 	logger logging.Logger
 }
@@ -171,6 +172,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 	}
 
 	g.detected = probeGripper(ctx, g.arm, gripperKindBio, logger)
+	g.releasePayload = registerGripperPreset(g.arm, ModelNameGripperLite, g.detected, logger)
 
 	return g, nil
 }
@@ -231,6 +233,9 @@ func (g *myGripperLite) Name() resource.Name {
 }
 
 func (g *myGripperLite) Close(ctx context.Context) error {
+	if g.releasePayload != nil {
+		g.releasePayload()
+	}
 	return g.Stop(ctx, nil)
 }
 
@@ -289,7 +294,8 @@ type myGripper struct {
 	goToPositionLock sync.Mutex
 	isMoving         atomic.Bool
 
-	detected detectedGripper
+	detected       detectedGripper
+	releasePayload func()
 	// speed and force are the resolved G2 FnCxx parameters. Unused on G1.
 	speed, force uint16
 
@@ -363,6 +369,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 			return nil, fmt.Errorf("failed to set gripper speed: %w", err)
 		}
 	}
+	g.releasePayload = registerGripperPreset(x, ModelNameGripper, detected, logger)
 
 	return g, nil
 }
@@ -623,6 +630,9 @@ func (g *myGripper) Name() resource.Name {
 }
 
 func (g *myGripper) Close(ctx context.Context) error {
+	if g.releasePayload != nil {
+		g.releasePayload()
+	}
 	return g.Stop(ctx, nil)
 }
 
