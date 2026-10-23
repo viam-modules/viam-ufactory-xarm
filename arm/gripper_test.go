@@ -28,3 +28,12 @@ func TestGripperConfigValidateVersionAndForce(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "gripper_force")
 }
+
+func TestGripperConfigValidateVacuumSealTimeout(t *testing.T) {
+	_, _, err := (&GripperConfig{Arm: "a", VacuumSealTimeoutMS: 500}).Validate("p")
+	test.That(t, err, test.ShouldBeNil)
+
+	_, _, err = (&GripperConfig{Arm: "a", VacuumSealTimeoutMS: -1}).Validate("p")
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "vacuum_seal_timeout_ms")
+}

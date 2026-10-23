@@ -68,6 +68,9 @@ type GripperConfig struct {
 	// ConnectionType overrides vacuum wiring detection: "plugin" or "contact".
 	// Empty means auto-detect from the arm model.
 	ConnectionType string `json:"connection_type,omitempty"`
+	// VacuumSealTimeoutMS is how long Grab waits for the vacuum seal sensor
+	// before reporting a miss. 0 means defaultVacuumSealTimeout.
+	VacuumSealTimeoutMS int `json:"vacuum_seal_timeout_ms,omitempty"`
 	// UseURDFs opts into URDF-derived mesh geometries. When false (the
 	// default) the gripper reports the hand-authored bounding boxes that
 	// shipped before mesh support landed.
@@ -100,6 +103,9 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	case "", string(connectionPlugin), string(connectionContact):
 	default:
 		return nil, nil, fmt.Errorf(`connection_type must be "plugin" or "contact", got %q`, cfg.ConnectionType)
+	}
+	if cfg.VacuumSealTimeoutMS < 0 {
+		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
 	}
 	if cfg.MeshDecimationRatio != nil {
 		r := *cfg.MeshDecimationRatio

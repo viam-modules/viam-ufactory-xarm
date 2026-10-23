@@ -253,6 +253,29 @@ func TestVacuumStateFromResponse(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
+func TestVacuumPumpOnFromResponse(t *testing.T) {
+	for _, tc := range []struct {
+		lo   byte
+		ct   connectionType
+		want bool
+	}{
+		{0x01, connectionPlugin, true},
+		{0x02, connectionPlugin, false},
+		{0x00, connectionPlugin, false},
+		{0x03, connectionPlugin, false},
+		{0x04, connectionContact, true},
+		{0x08, connectionContact, false},
+		{0x01, connectionContact, false},
+	} {
+		got, err := vacuumPumpOnFromResponse([]byte{0, 0, 0, 0, tc.lo}, tc.ct)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, got, test.ShouldEqual, tc.want)
+	}
+
+	_, err := vacuumPumpOnFromResponse([]byte{0}, connectionPlugin)
+	test.That(t, err, test.ShouldNotBeNil)
+}
+
 // TestRestoreFTSensorSkips covers the three gates that make restoreFTSensor a
 // no-op: a non-F/T fault, an F/T fault while sampling was never enabled, and an
 // F/T fault within the re-enable cooldown. Each must leave the cooldown slot
