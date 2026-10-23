@@ -298,11 +298,13 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 ## Gripper payload defaults
 
-The arm reads the controller's current TCP payload before its next move and each time it enters manual mode, then picks one in this order:
+The arm checks the controller's current TCP payload each time it enters manual mode through Viam, and on startup, after a reconnect, after `Stop`, after leaving manual mode, and after a cleared error. It picks one in this order:
 
 1. The arm's `tcp_payload`, if set. It is sent whenever the controller holds a different value.
 2. Otherwise, a non-zero payload already on the controller is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
 3. Otherwise, the configured gripper's preset from the table below is sent.
+
+The arm starts before its gripper, so on startup the gripper's preset isn't known yet and the arm applies it at the next of those checks, typically the first manual-mode entry. Manual mode started from UFACTORY Studio or the button on the arm doesn't go through Viam, so it uses whatever payload the controller already has.
 
 The arm logs which payload is in use. It logs a warning when the payload in use is lighter than the configured gripper's preset, since the arm then sags or drifts in manual mode. The arm fails to start if it can't connect to the controller's report port 30002. If that stream drops later, only an explicit `tcp_payload` is sent until it reconnects.
 

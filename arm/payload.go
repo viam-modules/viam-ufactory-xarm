@@ -52,10 +52,12 @@ func presetFor(gripperModel string, detected detectedGripper) (gripperPreset, bo
 }
 
 // registerGripperPreset tells the arm which UFACTORY gripper is mounted, so the
-// arm's next payload check can fall back to its preset. Nothing is sent here:
-// the check runs on the arm's next start() or manual-mode entry, so a gripper
-// never switches controller modes underneath a running motion. It returns a
-// release func for the gripper's Close.
+// arm's next payload check can fall back to its preset. Nothing is sent here,
+// so a gripper never switches controller modes underneath a running motion.
+// The check runs on the next manual-mode entry, or on the next start() that
+// re-asserts the motion mode (after Stop, a cleared error, leaving manual mode,
+// or a reconnect); start() skips it while the arm is already in that mode. It
+// returns a release func for the gripper's Close.
 func registerGripperPreset(a arm.Arm, gripperModel string, detected detectedGripper, logger logging.Logger) func() {
 	noop := func() {}
 	p, ok := presetFor(gripperModel, detected)
