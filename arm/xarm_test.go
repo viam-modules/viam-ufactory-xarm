@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/utils"
@@ -41,30 +40,6 @@ func TestStreamLimitToleranceRatio(t *testing.T) {
 	cfg.StreamLimitToleranceRatio = 0.9
 	_, _, err = cfg.Validate("")
 	test.That(t, err, test.ShouldNotBeNil)
-}
-
-func TestValidateTCPPayload(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		payload TCPPayloadConfig
-		wantErr bool
-	}{
-		{"valid", TCPPayloadConfig{MassKg: 0.8, CenterOfGravityMM: r3.Vector{Z: 50}}, false},
-		{"zero mass", TCPPayloadConfig{}, false},
-		{"negative mass", TCPPayloadConfig{MassKg: -0.1}, true},
-		{"NaN mass", TCPPayloadConfig{MassKg: math.NaN()}, true},
-		{"infinite center", TCPPayloadConfig{MassKg: 1, CenterOfGravityMM: r3.Vector{X: math.Inf(1)}}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{Host: "localhost", TCPPayload: &tc.payload}
-			_, _, err := cfg.Validate("")
-			if tc.wantErr {
-				test.That(t, err, test.ShouldNotBeNil)
-			} else {
-				test.That(t, err, test.ShouldBeNil)
-			}
-		})
-	}
 }
 
 // armDir returns the absolute path to the arm/ directory containing test data.

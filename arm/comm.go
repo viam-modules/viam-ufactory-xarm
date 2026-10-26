@@ -1741,7 +1741,7 @@ func (x *xArm) restoreFTSensor(ctx context.Context, clearedCode byte) {
 
 // encodeTCPPayload packs SetLoadParam's arguments as four little-endian float32
 // values: mass in kg, then the center of gravity in mm in the tool frame.
-func encodeTCPPayload(p TCPPayloadConfig) []byte {
+func encodeTCPPayload(p tcpPayload) []byte {
 	vals := []float64{p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z}
 	out := make([]byte, 0, 4*len(vals))
 	for _, v := range vals {
@@ -1754,7 +1754,7 @@ func encodeTCPPayload(p TCPPayloadConfig) []byte {
 // compensation and collision detection. The controller queues it like a motion
 // command, so it only runs while the arm is in motion state 0. It is not saved
 // to the controller's config and is lost on controller reboot.
-func (x *xArm) setTCPPayload(ctx context.Context, p TCPPayloadConfig) error {
+func (x *xArm) setTCPPayload(ctx context.Context, p tcpPayload) error {
 	c := x.newCmd(regMap["SetLoadParam"])
 	c.params = encodeTCPPayload(p)
 	if _, err := x.send(ctx, c, true); err != nil {

@@ -55,7 +55,6 @@ Copy and paste the following attributes into your JSON configuration:
 | `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `0.25` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
-| `tcp_payload` | object | Optional | — | Payload mounted on the flange (gripper, tooling, held part), sent to the controller for gravity compensation and collision detection. Takes `mass_kg` and `center_of_gravity_mm` (`{"x", "y", "z"}`, relative to the flange in the tool frame). Checked on startup, after every reconnect, and each time manual mode is entered, and sent whenever the controller holds a different value, overriding any value set in UFACTORY Studio. When unset, a non-zero payload already on the controller is kept; otherwise a UFACTORY gripper from this module configured on the arm supplies its preset (see [Gripper payload defaults](#gripper-payload-defaults)). An incorrect payload makes the arm drift or resist in manual mode. Mass must not exceed the model's rated payload. Example: `{"mass_kg": 0.82, "center_of_gravity_mm": {"x": 0, "y": 0, "z": 48}}`. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
 | `use_urdfs` | bool | Optional | `false` | When `true`, builds the kinematic model from the arm's URDF file, attaching mesh-based collision geometries to each link for more accurate collision checking. Hardware auto-detection selects a variant URDF when applicable — e.g. an xArm6 reporting arm-type code `1305` is loaded from `xarm6_1305.urdf` with its distinct link meshes; other arms use the base URDF for their model. Gripper meshes are opt-in separately via each gripper's own `use_urdfs` flag. |
@@ -275,7 +274,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 ```
 
 > [!CAUTION]
-> Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
+> Ensure the arm's payload and mounting orientation are correctly configured in UFACTORY Studio before entering manual mode, or gravity compensation will be inaccurate and the arm may drift. See [Gripper payload defaults](#gripper-payload-defaults) for the payload the module assumes.
 
 ### UFactory Studio Proxy
 
@@ -298,15 +297,18 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 ## Gripper payload defaults
 
-The arm checks the controller's current TCP payload each time it enters manual mode through Viam, and on startup, after a reconnect, after `Stop`, after leaving manual mode, and after a cleared error. It picks one in this order:
+The TCP payload (the mass and center of gravity on the flange) is managed in UFACTORY Studio. The module never overwrites a payload set there; it only fills in a gripper preset when the controller has none.
 
-1. The arm's `tcp_payload`, if set. It is sent whenever the controller holds a different value.
-2. Otherwise, a non-zero payload already on the controller is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
-3. Otherwise, the configured gripper's preset from the table below is sent.
+The arm checks the controller's current TCP payload each time it enters manual mode through Viam, and on startup, after a reconnect, after `Stop`, after leaving manual mode, and after a cleared error:
+
+1. If the controller has a non-zero payload, it is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
+2. Otherwise, the configured gripper's preset from the table below is sent. It isn't saved on the controller, so it lasts until the control box reboots, and the next check sends it again.
+
+Each check logs the payload the arm assumes is on the end effector. It logs a warning when that payload is more than 0.1 kg away from the configured gripper's preset, or is non-zero with no UFACTORY gripper configured. If the logged payload doesn't match what is mounted (for example, the gripper holds tooling or a heavy part), set the correct payload in UFACTORY Studio. A wrong payload makes the arm drift or resist in manual mode.
 
 The arm starts before its gripper, so on startup the gripper's preset isn't known yet and the arm applies it at the next of those checks, typically the first manual-mode entry. Manual mode started from UFACTORY Studio or the button on the arm doesn't go through Viam, so it uses whatever payload the controller already has.
 
-The arm logs which payload is in use. It logs a warning when the payload in use is lighter than the configured gripper's preset, since the arm then sags or drifts in manual mode. The arm fails to start if it can't connect to the controller's report port 30002. If that stream drops later, only an explicit `tcp_payload` is sent until it reconnects.
+The arm fails to start if it can't connect to the controller's report port 30002. If that stream drops later, the payload is left unchanged until it reconnects.
 
 | Gripper model | Mass (kg) | Center of gravity (mm) | Source |
 |---|---|---|---|

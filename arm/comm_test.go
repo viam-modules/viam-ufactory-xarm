@@ -285,7 +285,7 @@ func TestRestoreFTSensorSkips(t *testing.T) {
 }
 
 func TestEncodeTCPPayload(t *testing.T) {
-	b := encodeTCPPayload(TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{X: 1.5, Y: -2, Z: 48}})
+	b := encodeTCPPayload(tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{X: 1.5, Y: -2, Z: 48}})
 	test.That(t, len(b), test.ShouldEqual, 16)
 	want := []float32{0.82, 1.5, -2, 48}
 	for i, w := range want {

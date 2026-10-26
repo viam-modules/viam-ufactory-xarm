@@ -11,11 +11,25 @@ import (
 	"go.viam.com/rdk/logging"
 )
 
+// tcpPayload is the load on the arm's flange (gripper, tooling and any held
+// part), which the controller uses for gravity compensation in manual mode and
+// for collision detection.
+type tcpPayload struct {
+	MassKg float64
+	// CenterOfGravityMM is in mm, relative to the flange in the tool frame.
+	CenterOfGravityMM r3.Vector
+}
+
+// presetToleranceKg is how far the controller's payload mass may be from the
+// mounted gripper's preset and still count as that preset. Studio presets,
+// spec-sheet weights and the report's float32 values differ by tens of grams.
+const presetToleranceKg = 0.1
+
 // gripperPreset is the payload a UFACTORY gripper puts on the flange. It is only
 // applied when the controller reports no payload at all.
 type gripperPreset struct {
 	label   string
-	payload TCPPayloadConfig
+	payload tcpPayload
 }
 
 // The xArm Gripper G1 and Vacuum Gripper values are UFACTORY Studio's built-in
@@ -24,11 +38,11 @@ type gripperPreset struct {
 // UFACTORY publishes no preset for the Lite 6 grippers, so theirs come from the
 // inertial blocks of the bundled URDFs.
 var (
-	presetGripperG1         = gripperPreset{"xArm Gripper G1", TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}
-	presetGripperG2         = gripperPreset{"xArm Gripper G2", TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}
-	presetVacuumGripper     = gripperPreset{"xArm Vacuum Gripper", TCPPayloadConfig{MassKg: 0.61, CenterOfGravityMM: r3.Vector{Z: 53}}}
-	presetGripperLite       = gripperPreset{"Lite 6 Gripper", TCPPayloadConfig{MassKg: 0.25, CenterOfGravityMM: r3.Vector{Z: 30}}}
-	presetVacuumGripperLite = gripperPreset{"Lite 6 Vacuum Gripper", TCPPayloadConfig{MassKg: 0.14, CenterOfGravityMM: r3.Vector{Z: 30}}}
+	presetGripperG1         = gripperPreset{"xArm Gripper G1", tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}
+	presetGripperG2         = gripperPreset{"xArm Gripper G2", tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}
+	presetVacuumGripper     = gripperPreset{"xArm Vacuum Gripper", tcpPayload{MassKg: 0.61, CenterOfGravityMM: r3.Vector{Z: 53}}}
+	presetGripperLite       = gripperPreset{"Lite 6 Gripper", tcpPayload{MassKg: 0.25, CenterOfGravityMM: r3.Vector{Z: 30}}}
+	presetVacuumGripperLite = gripperPreset{"Lite 6 Vacuum Gripper", tcpPayload{MassKg: 0.14, CenterOfGravityMM: r3.Vector{Z: 30}}}
 )
 
 // presetFor returns the preset for a gripper model, using the detected
@@ -79,65 +93,51 @@ func registerGripperPreset(a arm.Arm, gripperModel string, detected detectedGrip
 	return func() { x.gripperPreset.CompareAndSwap(&p, nil) }
 }
 
-// decideTCPPayload picks the payload to send, or nil to leave the controller's
-// alone. In order:
-//  1. An explicit tcp_payload in the arm config always wins.
-//  2. Otherwise a non-zero payload on the controller was set by the user (a
-//     UFACTORY Studio preset, payload identification, or the saved config) and
-//     is never overwritten.
-//  3. Otherwise the mounted gripper's preset is applied. A zero mass counts as
-//     unset: with a UFACTORY gripper mounted it is never correct.
+// decideTCPPayload returns the gripper preset to send, or nil to leave the
+// controller's payload alone. UFACTORY Studio owns the payload: a non-zero
+// value on the controller (a Studio preset, payload identification, or the
+// saved config) is never overwritten. A zero mass counts as unset, and with a
+// UFACTORY gripper mounted it is never correct, so the gripper's preset fills
+// in.
 //
-// reported is nil when the controller's payload could not be read.
-func decideTCPPayload(configured, reported *TCPPayloadConfig, preset *gripperPreset, logger logging.Logger) *TCPPayloadConfig {
+// Every call logs the payload the arm will assume, and warns when that is not
+// the mounted gripper's preset, since a wrong payload makes the arm drift or
+// resist in manual mode. reported is nil when the controller's payload could
+// not be read.
+func decideTCPPayload(reported *tcpPayload, preset *gripperPreset, logger logging.Logger) *tcpPayload {
 	switch {
-	case configured != nil:
-		logger.Infof("using tcp_payload from the arm config %s; controller has %s", formatPayload(configured), formatPayload(reported))
-		warnIfLighterThanPreset("configured tcp_payload", configured, preset, logger)
-		return configured
 	case reported == nil:
 		logger.Warn("controller's TCP payload is unknown; leaving it unchanged")
 		return nil
-	case reported.MassKg > 0:
-		logger.Infof("controller already has TCP payload %s; not overriding it", formatPayload(reported))
-		warnIfLighterThanPreset("controller TCP payload", reported, preset, logger)
-		return nil
-	case preset != nil:
+	case reported.MassKg <= 0 && preset != nil:
 		logger.Infof("controller has no TCP payload set; applying the %s preset %s", preset.label, formatPayload(&preset.payload))
 		return &preset.payload
+	case reported.MassKg <= 0:
+		logger.Info("controller has no TCP payload set and no UFACTORY gripper is registered with this arm; " +
+			"the arm assumes nothing is mounted on the end effector")
+		return nil
+	case preset != nil && math.Abs(reported.MassKg-preset.payload.MassKg) <= presetToleranceKg:
+		logger.Infof("the arm assumes TCP payload %s, which matches the %s preset", formatPayload(reported), preset.label)
+		return nil
 	default:
-		logger.Debug("controller has no TCP payload set and no UFACTORY gripper is registered; leaving it unchanged")
+		expected := "no UFACTORY gripper is registered with this arm"
+		if preset != nil {
+			expected = fmt.Sprintf("the %s preset is %.3fkg", preset.label, preset.payload.MassKg)
+		}
+		logger.Warnf("the arm assumes TCP payload %s is mounted on the end effector, but %s. "+
+			"If that is not what is mounted, set the payload in UFACTORY Studio; "+
+			"a wrong payload makes the arm drift or resist in manual mode.",
+			formatPayload(reported), expected)
 		return nil
 	}
 }
 
-func warnIfLighterThanPreset(what string, p *TCPPayloadConfig, preset *gripperPreset, logger logging.Logger) {
-	if preset == nil || p.MassKg >= preset.payload.MassKg {
-		return
-	}
-	logger.Warnf("%s mass %.3fkg is lighter than the %s preset's %.3fkg; the arm may sag or drift in manual mode. "+
-		"Include the gripper and any tooling or held part in the payload.",
-		what, p.MassKg, preset.label, preset.payload.MassKg)
-}
-
-func formatPayload(p *TCPPayloadConfig) string {
+func formatPayload(p *tcpPayload) string {
 	if p == nil {
 		return "unknown"
 	}
 	return fmt.Sprintf("mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
 		p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z)
-}
-
-// payloadMatches reports whether the controller already holds p. The report
-// carries float32 values, so exact comparison would always fail.
-func payloadMatches(p, reported *TCPPayloadConfig) bool {
-	const massTolKg, cogTolMM = 1e-3, 0.1
-	if reported == nil {
-		return false
-	}
-	d := p.CenterOfGravityMM.Sub(reported.CenterOfGravityMM)
-	return math.Abs(p.MassKg-reported.MassKg) <= massTolKg &&
-		math.Abs(d.X) <= cogTolMM && math.Abs(d.Y) <= cogTolMM && math.Abs(d.Z) <= cogTolMM
 }
 
 // reportedTCPLoad returns the controller's current payload from the report
@@ -154,25 +154,19 @@ func (x *xArm) reportedTCPLoad(ctx context.Context) (reportedTCPLoad, error) {
 	return x.report.tcpLoad()
 }
 
-// ensureTCPPayload reads the controller's payload and sends whatever
-// decideTCPPayload picks. Sending requires mode 0 / state 0 (see
+// ensureTCPPayload reads the controller's payload and sends the gripper
+// preset if decideTCPPayload picks it. Sending requires mode 0 / state 0 (see
 // setTCPPayload); pass inPositionMode when the caller has already put the arm
 // there, otherwise the mode is switched only if something is actually sent.
 func (x *xArm) ensureTCPPayload(ctx context.Context, inPositionMode bool) error {
-	var reported *TCPPayloadConfig
+	var reported *tcpPayload
 	if load, err := x.reportedTCPLoad(ctx); err != nil {
 		x.logger.Warnf("could not read the controller's TCP payload: %v", err)
 	} else {
-		reported = &TCPPayloadConfig{MassKg: load.MassKg, CenterOfGravityMM: load.CenterOfGravityMM}
+		reported = &tcpPayload{MassKg: load.MassKg, CenterOfGravityMM: load.CenterOfGravityMM}
 	}
 
-	var configured *TCPPayloadConfig
-	if x.conf != nil {
-		configured = x.conf.TCPPayload
-	}
-	p := decideTCPPayload(configured, reported, x.gripperPreset.Load(), x.logger)
-
-	if p != nil && !payloadMatches(p, reported) {
+	if p := decideTCPPayload(reported, x.gripperPreset.Load(), x.logger); p != nil {
 		if !inPositionMode {
 			if err := x.setMotionMode(ctx, 0); err != nil {
 				return err

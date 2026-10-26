@@ -1,7 +1,6 @@
 package arm
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -10,60 +9,50 @@ import (
 	"go.viam.com/test"
 )
 
-func TestTCPPayloadConfigJSON(t *testing.T) {
-	var p TCPPayloadConfig
-	err := json.Unmarshal([]byte(`{"mass_kg": 0.82, "center_of_gravity_mm": {"x": 1, "y": -2, "z": 48}}`), &p)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, p, test.ShouldResemble, TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{X: 1, Y: -2, Z: 48}})
-}
-
 func TestDecideTCPPayload(t *testing.T) {
-	configured := &TCPPayloadConfig{MassKg: 1.2, CenterOfGravityMM: r3.Vector{Z: 70}}
-	light := &TCPPayloadConfig{MassKg: 0.3, CenterOfGravityMM: r3.Vector{Z: 20}}
-	heavy := &TCPPayloadConfig{MassKg: 1.0, CenterOfGravityMM: r3.Vector{Z: 60}}
-	unset := &TCPPayloadConfig{}
 	preset := &presetGripperG2
+	unset := &tcpPayload{}
+	// The report carries float32 values, so a stored preset reads back slightly off.
+	roundTripped := &tcpPayload{MassKg: float64(float32(0.82)), CenterOfGravityMM: r3.Vector{Z: 48}}
+	withinTolerance := &tcpPayload{MassKg: 0.90, CenterOfGravityMM: r3.Vector{Z: 50}}
+	heavy := &tcpPayload{MassKg: 4.0, CenterOfGravityMM: r3.Vector{Z: 60}}
+	light := &tcpPayload{MassKg: 0.3, CenterOfGravityMM: r3.Vector{Z: 20}}
 
 	for _, tc := range []struct {
-		name       string
-		configured *TCPPayloadConfig
-		reported   *TCPPayloadConfig
-		preset     *gripperPreset
-		want       *TCPPayloadConfig
-		wantWarn   string
+		name     string
+		reported *tcpPayload
+		preset   *gripperPreset
+		want     *tcpPayload
+		wantInfo string
+		wantWarn string
 	}{
-		{name: "config wins over controller", configured: configured, reported: heavy, preset: preset, want: configured},
-		{name: "config wins when report unreadable", configured: configured, preset: preset, want: configured},
-		{name: "light config warns", configured: light, reported: unset, preset: preset, want: light, wantWarn: "lighter than the xArm Gripper G2"},
-		{name: "controller payload kept", reported: heavy, preset: preset},
-		{name: "light controller payload kept with warning", reported: light, preset: preset, wantWarn: "lighter than the xArm Gripper G2"},
-		{name: "unset controller gets preset", reported: unset, preset: preset, want: &preset.payload},
-		{name: "unset controller without gripper left alone", reported: unset},
+		{name: "unset controller gets preset", reported: unset, preset: preset, want: &preset.payload, wantInfo: "applying the xArm Gripper G2 preset"},
+		{name: "unset controller without gripper", reported: unset, wantInfo: "assumes nothing is mounted"},
+		{name: "preset already on controller", reported: roundTripped, preset: preset, wantInfo: "matches the xArm Gripper G2 preset"},
+		{name: "close to preset counts as preset", reported: withinTolerance, preset: preset, wantInfo: "matches the xArm Gripper G2 preset"},
+		{name: "heavy Studio payload kept with warning", reported: heavy, preset: preset, wantWarn: "mass=4.000kg"},
+		{name: "light Studio payload kept with warning", reported: light, preset: preset, wantWarn: "the xArm Gripper G2 preset is 0.820kg"},
+		{name: "payload without gripper kept with warning", reported: heavy, wantWarn: "no UFACTORY gripper is registered"},
 		{name: "unreadable controller left alone", preset: preset, wantWarn: "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger, logs := logging.NewObservedTestLogger(t)
-			got := decideTCPPayload(tc.configured, tc.reported, tc.preset, logger)
+			got := decideTCPPayload(tc.reported, tc.preset, logger)
 			test.That(t, got, test.ShouldEqual, tc.want)
 
+			if tc.wantInfo != "" {
+				test.That(t, logs.FilterLevelExact(zapcore.InfoLevel).FilterMessageSnippet(tc.wantInfo).Len(), test.ShouldEqual, 1)
+			}
 			warns := logs.FilterLevelExact(zapcore.WarnLevel)
 			if tc.wantWarn == "" {
 				test.That(t, warns.Len(), test.ShouldEqual, 0)
 			} else {
 				test.That(t, warns.FilterMessageSnippet(tc.wantWarn).Len(), test.ShouldEqual, 1)
+				test.That(t, warns.FilterMessageSnippet("UFACTORY Studio").Len()+warns.FilterMessageSnippet("unknown").Len(),
+					test.ShouldEqual, 1)
 			}
 		})
 	}
-}
-
-func TestPayloadMatches(t *testing.T) {
-	p := &TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}
-	// The report carries float32, so a round trip must still match.
-	roundTripped := &TCPPayloadConfig{MassKg: float64(float32(0.82)), CenterOfGravityMM: r3.Vector{Z: 48}}
-	test.That(t, payloadMatches(p, roundTripped), test.ShouldBeTrue)
-	test.That(t, payloadMatches(p, nil), test.ShouldBeFalse)
-	test.That(t, payloadMatches(p, &TCPPayloadConfig{MassKg: 0.83, CenterOfGravityMM: r3.Vector{Z: 48}}), test.ShouldBeFalse)
-	test.That(t, payloadMatches(p, &TCPPayloadConfig{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 50}}), test.ShouldBeFalse)
 }
 
 func TestPresetFor(t *testing.T) {
@@ -82,7 +71,7 @@ func TestPresetFor(t *testing.T) {
 		got, ok := presetFor(tc.model, detectedGripper{submodel: tc.submodel})
 		test.That(t, ok, test.ShouldBeTrue)
 		test.That(t, got, test.ShouldResemble, tc.want)
-		test.That(t, got.payload.validate(), test.ShouldBeNil)
+		test.That(t, got.payload.MassKg, test.ShouldBeGreaterThan, 0)
 	}
 
 	_, ok := presetFor("not-a-gripper", detectedGripper{})
