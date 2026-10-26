@@ -304,7 +304,7 @@ The arm checks the controller's current TCP payload each time it enters manual m
 1. If the controller has a non-zero payload, it is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
 2. Otherwise, the configured gripper's preset from the table below is sent. It isn't saved on the controller, so it lasts until the control box reboots, and the next check sends it again.
 
-Each check logs the payload the arm assumes is on the end effector. It logs a warning when that payload is more than 0.1 kg away from the configured gripper's preset, or is non-zero with no UFACTORY gripper configured. If the logged payload doesn't match what is mounted (for example, the gripper holds tooling or a heavy part), set the correct payload in UFACTORY Studio. A wrong payload makes the arm drift or resist in manual mode.
+Each check logs the payload the arm assumes is on the end effector. It logs a warning when that payload is more than 0.05 kg away from the configured gripper's preset, or is non-zero with no UFACTORY gripper configured. If the logged payload doesn't match what is mounted (for example, the gripper holds tooling or a heavy part), set the correct payload in UFACTORY Studio. A wrong payload makes the arm drift or resist in manual mode.
 
 The arm starts before its gripper, so on startup the gripper's preset isn't known yet and the arm applies it at the next of those checks, typically the first manual-mode entry. Manual mode started from UFACTORY Studio or the button on the arm doesn't go through Viam, so it uses whatever payload the controller already has.
 

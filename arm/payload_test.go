@@ -14,7 +14,7 @@ func TestDecideTCPPayload(t *testing.T) {
 	unset := &tcpPayload{}
 	// The report carries float32 values, so a stored preset reads back slightly off.
 	roundTripped := &tcpPayload{MassKg: float64(float32(0.82)), CenterOfGravityMM: r3.Vector{Z: 48}}
-	withinTolerance := &tcpPayload{MassKg: 0.90, CenterOfGravityMM: r3.Vector{Z: 50}}
+	withinTolerance := &tcpPayload{MassKg: 0.86, CenterOfGravityMM: r3.Vector{Z: 50}}
 	heavy := &tcpPayload{MassKg: 4.0, CenterOfGravityMM: r3.Vector{Z: 60}}
 	light := &tcpPayload{MassKg: 0.3, CenterOfGravityMM: r3.Vector{Z: 20}}
 
