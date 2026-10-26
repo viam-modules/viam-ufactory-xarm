@@ -19,6 +19,7 @@ This module is particularly useful in applications that require an xArm to be op
   - [Error Handling](#error-handling)
   - [DoCommand Reference](#docommand-reference)
   - [UFactory Studio Proxy](#ufactory-studio-proxy)
+- [Gripper payload defaults](#gripper-payload-defaults)
 - [Gripper](#gripper)
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
@@ -273,7 +274,7 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 ```
 
 > [!CAUTION]
-> Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
+> Ensure the arm's payload and mounting orientation are correctly configured in UFACTORY Studio before entering manual mode, or gravity compensation will be inaccurate and the arm may drift. See [Gripper payload defaults](#gripper-payload-defaults) for the payload the module assumes.
 
 ### UFactory Studio Proxy
 
@@ -293,6 +294,29 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 > [!CAUTION]
 > The proxy listens on all interfaces with no authentication. Anyone who can reach that port has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or restrict access with firewall rules.
+
+## Gripper payload defaults
+
+The TCP payload (the mass and center of gravity on the flange) is managed in UFACTORY Studio. The module never overwrites a payload set there; it only fills in a gripper preset when the controller has none.
+
+The arm checks the controller's current TCP payload each time it enters manual mode through Viam, and on startup, after a reconnect, after `Stop`, after leaving manual mode, and after a cleared error:
+
+1. If the controller has a non-zero payload, it is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
+2. Otherwise, the configured gripper's preset from the table below is sent. It isn't saved on the controller, so it lasts until the control box reboots, and the next check sends it again.
+
+Each check logs the payload the arm assumes is on the end effector. It logs a warning when that payload is more than 0.05 kg away from the configured gripper's preset, or is non-zero with no UFACTORY gripper configured. If the logged payload doesn't match what is mounted (for example, the gripper holds tooling or a heavy part), set the correct payload in UFACTORY Studio. A wrong payload makes the arm drift or resist in manual mode.
+
+The arm starts before its gripper, so on startup the gripper's preset isn't known yet and the arm applies it at the next of those checks, typically the first manual-mode entry. Manual mode started from UFACTORY Studio or the button on the arm doesn't go through Viam, so it uses whatever payload the controller already has.
+
+The arm fails to start if it can't connect to the controller's report port 30002. If that stream drops later, the payload is left unchanged until it reconnects.
+
+| Gripper model | Mass (kg) | Center of gravity (mm) | Source |
+|---|---|---|---|
+| `gripper` (G1) | 0.82 | (0, 0, 48) | UFACTORY Studio preset |
+| `gripper` (G2) | 0.82 | (0, 0, 48) | G1 preset; UFACTORY publishes no G2 preset |
+| `vacuum_gripper` | 0.61 | (0, 0, 53) | UFACTORY Studio preset |
+| `gripper_lite` | 0.25 | (0, 0, 30) | Bundled URDF |
+| `vacuum_gripper_lite` | 0.14 | (0, 0, 30) | Bundled URDF |
 
 ## Gripper
 

@@ -190,6 +190,15 @@ type xArm struct {
 	// ftRestoreNano rate-limits that replay; see ftRestoreCooldown.
 	ftRestoreNano atomic.Int64
 
+	// gripperPreset is the payload preset of the mounted UFACTORY gripper,
+	// applied only when the controller reports no payload.
+	gripperPreset atomic.Pointer[gripperPreset]
+	// payloadChecked records whether ensureTCPPayload has run on the current
+	// connection. A controller reboot drops our socket and reverts the payload
+	// to its saved value, so this is cleared on every connection reset, and
+	// whenever a gripper registers a preset.
+	payloadChecked atomic.Bool
+
 	detectedArm detectedArm
 }
 
@@ -518,7 +527,10 @@ func NewXArm(ctx context.Context, name resource.Name,
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
+	x.cmdConn = newModbusConn(newConf.host(), logger, func() {
+		x.started.Store(-1)
+		x.payloadChecked.Store(false)
+	})
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
 	x.gripperControlMode.Store(true)
 
@@ -596,13 +608,6 @@ func NewXArm(ctx context.Context, name resource.Name,
 			logger.Infof("xArm hardware detected: model=%s axis=%d device_type=%d (configured as %s)",
 				d.model, d.axis, d.deviceType, modelName)
 		}
-	}
-
-	if err := x.report.waitForFirstReport(ctx, reportFirstTimeout); err != nil {
-		logger.Warnf("controller report on port %d unavailable: %v", defaultReportPort, err)
-	} else if load, err := x.report.tcpLoad(); err == nil {
-		logger.Infof("controller TCP payload: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
-			load.MassKg, load.CenterOfGravityMM.X, load.CenterOfGravityMM.Y, load.CenterOfGravityMM.Z)
 	}
 
 	err = x.start(ctx, false)
