@@ -23,7 +23,7 @@ type tcpPayload struct {
 // presetToleranceKg is how far the controller's payload mass may be from the
 // mounted gripper's preset and still count as that preset. Studio presets,
 // spec-sheet weights and the report's float32 values differ by tens of grams.
-const presetToleranceKg = 0.1
+const presetToleranceKg = 0.05
 
 // gripperPreset is the payload a UFACTORY gripper puts on the flange. It is only
 // applied when the controller reports no payload at all.
@@ -125,8 +125,7 @@ func decideTCPPayload(reported *tcpPayload, preset *gripperPreset, logger loggin
 			expected = fmt.Sprintf("the %s preset is %.3fkg", preset.label, preset.payload.MassKg)
 		}
 		logger.Warnf("the arm assumes TCP payload %s is mounted on the end effector, but %s. "+
-			"If that is not what is mounted, set the payload in UFACTORY Studio; "+
-			"a wrong payload makes the arm drift or resist in manual mode.",
+			"If that is not what is mounted, set the payload in UFACTORY Studio.",
 			formatPayload(reported), expected)
 		return nil
 	}
