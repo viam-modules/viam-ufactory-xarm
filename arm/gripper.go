@@ -41,6 +41,12 @@ const fullyClosedThreshold = 10
 const fullyOpenThreshold = 830
 const fullyOpenPosition = 840
 
+// gripperGoalTolerance is how close (in raw position units) the jaws must be to
+// a moveG2 goal to count the move as already done. The G2 settles a few units
+// off its target — an Open to 840 rests around 837-841 — so this is a little
+// wider than goToPosition's ±6.
+const gripperGoalTolerance = 10
+
 // G2 defaults. Speed is in raw Fn303/FnC01 pulses: UFactory's documented G2
 // default is 2000 (G1's is 1500, which we leave to the gripper's own firmware
 // rather than writing it). Force is the 1-100 percentage the SDKs default to in
@@ -493,11 +499,35 @@ func (g *myGripper) moveG2(ctx context.Context, goal int) (uint16, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	// Fast path: writing the goal and then waiting for a motion that never starts
+	// costs ~2s (notStartedPolls * pollInterval). If the jaws are already idle at
+	// the goal there is nothing to move, so return the current status at once. An
+	// Open on already-open jaws and a Grab on jaws already closed on nothing both
+	// take this path; a Grab on jaws holding an object does not (see atMoveG2Goal),
+	// so its object-detected status stays authoritative. The reads are best-effort:
+	// any error just falls through to the full write+wait path below.
+	if status, err := g.getStatus(ctx); err == nil {
+		if pos, err := g.getPosition(ctx); err == nil && atMoveG2Goal(status, pos, goal) {
+			return status, nil
+		}
+	}
+
 	if err := writeForceControlBlock(ctx, x, g.speed, g.force, uint32(goal)); err != nil { //nolint:gosec // goal is 0..850.
 		return 0, err
 	}
 
 	return g.waitForStatus(ctx, gripperStatusTimeout)
+}
+
+// atMoveG2Goal reports whether the jaws are already idle at goal, letting moveG2
+// skip the force write and the waitForStatus poll. It requires the stopped state
+// specifically: a fault must still surface through the write path, and an
+// object-detected hold keeps the full write+wait so a re-Grab's returned status
+// stays authoritative rather than being decided from a stale read.
+func atMoveG2Goal(status uint16, pos, goal int) bool {
+	return status&gripperStateMask == gripperStateStop &&
+		math.Abs(float64(pos-goal)) <= gripperGoalTolerance
 }
 
 // waitForStatus mirrors _check_gripper_status in both UFactory SDKs: a move is
