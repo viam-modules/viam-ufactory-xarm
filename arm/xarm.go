@@ -166,9 +166,13 @@ type xArm struct {
 	report *reportStream
 
 	// below is all configuration things
-	dof    int
-	model  referenceframe.Model
-	moveHZ float64 // Number of joint positions to send per second
+	dof int
+	// modelName is the UFactory arm model this component was configured as (ModelName6DOF,
+	// ModelNameLite, ...). It keys the 3D model lookup; model.Name() is the component's
+	// resource name, not the arm model, so it cannot be used for that.
+	modelName string
+	model     referenceframe.Model
+	moveHZ    float64 // Number of joint positions to send per second
 
 	// TODO: remove this lock and make this not settable
 	confLock     sync.Mutex // speed and acceleration are both able to be read/written to, so they need to be protected by a mutex
@@ -518,11 +522,12 @@ func NewXArm(ctx context.Context, name resource.Name,
 	newConf *Config, logger logging.Logger, modelName string, deps resource.Dependencies) (arm.Arm, error) {
 	var err error
 	x := xArm{
-		name:   name,
-		conf:   newConf,
-		moveHZ: newConf.moveHZ(),
-		opMgr:  operation.NewSingleOperationManager(),
-		logger: logger,
+		name:      name,
+		conf:      newConf,
+		modelName: modelName,
+		moveHZ:    newConf.moveHZ(),
+		opMgr:     operation.NewSingleOperationManager(),
+		logger:    logger,
 
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
@@ -813,15 +818,18 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]any) ([]spatialm
 	return gif.Geometries(), nil
 }
 
+// Get3DModels returns the GLB mesh for each link of the configured arm model, keyed by link
+// name. Arm models without shipped meshes (xArm7, xArm850) return an empty map.
 func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[string]*commonpb.Mesh, error) {
 	models := make(map[string]*commonpb.Mesh)
-	armModelParts := armTo3DModelParts[x.model.Name()]
+	armModelParts := armTo3DModelParts[x.modelName]
 	if armModelParts == nil {
+		x.logger.Debugf("no 3D models shipped for arm model %q", x.modelName)
 		return models, nil
 	}
 
 	for _, modelPart := range armModelParts {
-		modelPartMesh, err := threeDMeshFromName(x.model.Name(), modelPart)
+		modelPartMesh, err := threeDMeshFromName(x.modelName, modelPart)
 		if err != nil {
 			return nil, err
 		}

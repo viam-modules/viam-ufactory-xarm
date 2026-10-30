@@ -1,6 +1,7 @@
 package arm
 
 import (
+	"context"
 	"math"
 	"os"
 	"path/filepath"
@@ -382,4 +383,34 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
+}
+
+func TestGet3DModels(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	for _, modelName := range []string{ModelName6DOF, ModelNameLite} {
+		t.Run(modelName, func(t *testing.T) {
+			m, err := MakeModelFrame("arm-1", modelName, nil, nil, true, nil, logger, 0, 0, 0)
+			test.That(t, err, test.ShouldBeNil)
+			test.That(t, m.Name(), test.ShouldEqual, "arm-1")
+
+			x := &xArm{modelName: modelName, model: m, logger: logger}
+			meshes, err := x.Get3DModels(context.Background(), nil)
+			test.That(t, err, test.ShouldBeNil)
+			test.That(t, len(meshes), test.ShouldEqual, len(armTo3DModelParts[modelName]))
+			for _, part := range armTo3DModelParts[modelName] {
+				test.That(t, meshes[part], test.ShouldNotBeNil)
+				test.That(t, meshes[part].ContentType, test.ShouldEqual, "model/gltf-binary")
+				test.That(t, len(meshes[part].Mesh), test.ShouldBeGreaterThan, 0)
+			}
+		})
+	}
+
+	t.Run("no shipped models", func(t *testing.T) {
+		x := &xArm{modelName: ModelName7DOF, logger: logger}
+		meshes, err := x.Get3DModels(context.Background(), nil)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, meshes, test.ShouldBeEmpty)
+	})
 }
