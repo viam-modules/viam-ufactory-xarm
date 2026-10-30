@@ -1,0 +1,176 @@
+{
+  "network": {
+    "bind_address": "localhost:18080",
+    "no_tls": true
+  },
+  "modules": [
+    {
+      "type": "local",
+      "name": "xarm",
+      "executable_path": "MODULE_PATH"
+    }
+  ],
+  "components": [
+    {
+      "name": "xarm6-mounting-plate",
+      "api": "rdk:component:gripper",
+      "model": "viam:ufactory:xarm6_mounting_plate",
+      "attributes": {},
+      "frame": {
+        "parent": "world",
+        "translation": {
+          "x": 0,
+          "y": -5,
+          "z": -8
+        }
+      }
+    },
+    {
+      "name": "arm",
+      "api": "rdk:component:arm",
+      "model": "rdk:builtin:fake",
+      "attributes": {
+        "arm-model": "xarm6"
+      },
+      "frame": {
+        "parent": "xarm6-mounting-plate"
+      }
+    },
+    {
+      "name": "gripper",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "arm",
+        "translation": {
+          "x": 0,
+          "y": 0,
+          "z": 105
+        },
+        "orientation": {
+          "type": "ov_degrees",
+          "value": {
+            "x": 0,
+            "y": 0,
+            "z": 1,
+            "th": 180
+          }
+        },
+        "geometry": {
+          "type": "box",
+          "x": 40,
+          "y": 170,
+          "z": 105,
+          "translation": {
+            "x": 0,
+            "y": 0,
+            "z": -2.5
+          },
+          "label": "claws"
+        }
+      }
+    },
+    {
+      "name": "gripper-case",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "gripper",
+        "geometry": {
+          "type": "box",
+          "x": 50,
+          "y": 100,
+          "z": 100,
+          "translation": {
+            "x": 0,
+            "y": 0,
+            "z": -50
+          },
+          "label": "case"
+        }
+      }
+    },
+    {
+      "name": "table",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "world",
+        "translation": {
+          "x": 0,
+          "y": 0,
+          "z": -108
+        },
+        "geometry": {
+          "type": "box",
+          "x": 3000,
+          "y": 3000,
+          "z": 200
+        }
+      }
+    },
+    {
+      "name": "wall-back",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "world",
+        "translation": {
+          "x": -550,
+          "y": 0,
+          "z": 488
+        },
+        "geometry": {
+          "type": "box",
+          "x": 50,
+          "y": 1500,
+          "z": 1024
+        }
+      }
+    },
+    {
+      "name": "wall-left",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "world",
+        "translation": {
+          "x": 0,
+          "y": 650,
+          "z": 488
+        },
+        "geometry": {
+          "type": "box",
+          "x": 1500,
+          "y": 50,
+          "z": 1024
+        }
+      }
+    },
+    {
+      "name": "ceiling",
+      "api": "rdk:component:generic",
+      "model": "rdk:builtin:fake",
+      "attributes": {},
+      "frame": {
+        "parent": "world",
+        "translation": {
+          "x": 0,
+          "y": 0,
+          "z": 1050
+        },
+        "geometry": {
+          "type": "box",
+          "x": 3000,
+          "y": 3000,
+          "z": 100
+        }
+      }
+    }
+  ]
+}

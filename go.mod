@@ -7,6 +7,7 @@ require (
 	github.com/axw/gocov v1.1.0
 	github.com/edaniels/golinters v0.0.5-0.20220906153528-641155550742
 	github.com/fullstorydev/grpcurl v1.8.6
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/golang/geo v0.0.0-20230421003525-6adc56603217
 	github.com/pkg/errors v0.9.1
 	github.com/rhysd/actionlint v1.7.8
@@ -16,6 +17,7 @@ require (
 	go.viam.com/rdk v1.12.0
 	go.viam.com/test v1.2.5
 	go.viam.com/utils v0.14.0
+	google.golang.org/protobuf v1.36.12
 	gorgonia.org/tensor v0.9.24
 	gotest.tools/gotestsum v1.12.2
 )
@@ -102,7 +104,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-nlopt/nlopt v0.0.0-20230219125344-443d3362dcb5 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
@@ -238,7 +239,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/grpc v1.84.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorgonia.org/vecf32 v0.9.0 // indirect
