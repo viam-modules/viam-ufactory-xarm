@@ -24,6 +24,7 @@ This module is particularly useful in applications that require an xArm to be op
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
 - [Vacuum Gripper Lite](#vacuum-gripper-lite)
+- [xArm6 Mounting Plate](#xarm6-mounting-plate)
 - [UFactory xArm Resources](#ufactory-xarm-resources)
 
 ## Getting Started
@@ -444,6 +445,37 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 | `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `lite_vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
+
+## xArm6 Mounting Plate
+
+A static obstacle modeling the xArm6 mounting plate, a 185 × 136 × 8 mm box. It implements the gripper API; `Grab` and `Open` return errors. It takes no attributes.
+
+The model has two frames:
+
+```
+<name>_origin   bottom-face center: set by this component's frame parent and pose
+  └─ plate      185 × 136 × 8 box, centered at z = +4
+       └─ <name>   bolt-circle center on the top face, at (0, 5, 8)
+```
+
+Set the arm's frame parent to the plate's name to mount the arm on the bolt circle:
+
+```json
+{
+  "name": "xarm6-mounting-plate",
+  "api": "rdk:component:gripper",
+  "model": "viam:ufactory:xarm6_mounting_plate",
+  "attributes": {},
+  "frame": { "parent": "world" }
+},
+{
+  "name": "my-xarm",
+  "api": "rdk:component:arm",
+  "model": "viam:ufactory:xArm6",
+  "attributes": { "host": "192.168.1.205" },
+  "frame": { "parent": "xarm6-mounting-plate" }
+}
+```
 
 ## Force Torque Sensor
 

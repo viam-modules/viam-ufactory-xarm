@@ -54,6 +54,12 @@
       "short_description": "gripper lite component driver for two fingers gripper install on lite6"
     },
     {
+      "api": "rdk:component:gripper",
+      "model": "viam:ufactory:xarm6_mounting_plate",
+      "markdown_link": "README.md#xarm6-mounting-plate",
+      "short_description": "static obstacle modeling the xArm6 mounting plate, with a frame at the arm's bolt circle"
+    },
+    {
       "api": "rdk:component:sensor",
       "model": "viam:ufactory:ft_sensor",
       "markdown_link": "README.md#force-torque-sensor",

@@ -20,6 +20,7 @@ func main() {
 		resource.APIModel{API: gripper.API, Model: xarm.GripperModelLite},
 		resource.APIModel{API: gripper.API, Model: xarm.VacuumGripperModel},
 		resource.APIModel{API: gripper.API, Model: xarm.VacuumGripperModelLite},
+		resource.APIModel{API: gripper.API, Model: xarm.MountingPlateModel},
 		resource.APIModel{API: sensor.API, Model: xarm.FTSensorModel},
 	)
 }
