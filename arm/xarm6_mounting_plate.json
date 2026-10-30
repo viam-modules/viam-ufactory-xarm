@@ -1,0 +1,34 @@
+{
+    "name": "xarm6_mounting_plate",
+    "links": [
+        {
+            "id": "plate",
+            "parent": "world",
+            "translation": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+            "geometry": {
+                "type": "box",
+                "x": 185,
+                "y": 136,
+                "z": 8,
+                "translation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 4
+                }
+            }
+        },
+        {
+            "id": "bolt_circle",
+            "parent": "plate",
+            "translation": {
+                "x": 0,
+                "y": 5,
+                "z": 8
+            }
+        }
+    ]
+}
