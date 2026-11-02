@@ -37,6 +37,12 @@ const (
 	reportRetryInitial = 500 * time.Millisecond
 	reportRetryCeiling = 10 * time.Second
 	reportPollInterval = 50 * time.Millisecond
+	// reportConfirmTimeout bounds how long a caller waits for the report to
+	// reflect a command it just sent. Packets arrive every 200 ms, so this
+	// covers one missed packet, one sent just before the command took effect,
+	// and a poll interval. On hardware the report showed a mode change within
+	// 50-201 ms.
+	reportConfirmTimeout = 500 * time.Millisecond
 )
 
 // Byte offsets into a rich report packet, counted from the start of the
@@ -44,7 +50,12 @@ const (
 // (xarm/x3/base.py, __handle_report_normal, which the rich parser runs first).
 const (
 	reportLengthSize       = 4
-	reportOffsetStateMode  = 4   // low nibble state, high nibble mode
+	reportOffsetStateMode  = 4  // low nibble state, high nibble mode
+	reportOffsetCmdNum     = 5  // queued commands; big-endian uint16
+	reportOffsetBrake      = 87 // bit n set: joint n+1's brake is released
+	reportOffsetEnable     = 88 // bit n set: joint n+1's servo is enabled
+	reportOffsetErrorCode  = 89
+	reportOffsetWarnCode   = 90
 	reportOffsetTCPLoad    = 115 // mass kg, then center of gravity x, y, z mm; 4 x float32
 	reportOffsetCollisSens = 131
 	reportOffsetTeachSens  = 132
@@ -66,11 +77,37 @@ type reportedTCPLoad struct {
 	CenterOfGravityMM r3.Vector
 }
 
+// Motion states the controller reports; 3 is paused, 4 stopped, and 5 and up
+// not ready. Mode values are the ones setMotionMode sends.
+const (
+	reportStateMoving   = 1
+	reportStateSleeping = 2 // idle and ready for the next command
+)
+
 // controllerReport is the part of a rich report packet the module decodes.
 type controllerReport struct {
-	State   byte
-	Mode    byte
-	TCPLoad reportedTCPLoad
+	State     byte
+	Mode      byte
+	CmdNum    uint16
+	ErrorCode byte
+	WarnCode  byte
+	// BrakeMask and EnableMask hold one bit per joint, joint 1 in bit 0.
+	BrakeMask  byte
+	EnableMask byte
+	TCPLoad    reportedTCPLoad
+}
+
+// readyForMotion reports whether the arm accepts motion commands: it is moving
+// or idle rather than paused, stopped or not ready (state 5 and up), and the
+// first axes joints all have their servo enabled and brake released. This is
+// the Python SDK's is_ready check, minus its allowance for state 3, since a
+// paused arm ignores motion commands until it is set back to state 0.
+func (r controllerReport) readyForMotion(axes int) bool {
+	if r.State != 0 && r.State != reportStateMoving && r.State != reportStateSleeping {
+		return false
+	}
+	want := byte(1<<axes - 1)
+	return r.BrakeMask&want == want && r.EnableMask&want == want
 }
 
 // reportStream keeps a connection to a controller report port open in a
@@ -226,44 +263,78 @@ func (s *reportStream) store(r controllerReport) {
 // waitForFirstReport waits up to timeout for a fresh packet, so callers right
 // after startup don't see errNoReport while the first packet is in flight.
 func (s *reportStream) waitForFirstReport(ctx context.Context, timeout time.Duration) error {
+	_, err := s.waitForReport(ctx, time.Time{}, timeout, nil)
+	return err
+}
+
+// waitForReport waits up to timeout for a fresh packet received after since
+// for which ok returns true; a nil ok accepts any packet. It returns the last
+// packet it saw along with the error on timeout, so callers can log what the
+// controller reported instead.
+//
+// Packets arrive a few times a second, so a packet received just after since
+// may have been sent just before it. Callers that wait on the effect of a
+// command they sent should pass ok rather than trust the first packet.
+func (s *reportStream) waitForReport(
+	ctx context.Context, since time.Time, timeout time.Duration, ok func(controllerReport) bool,
+) (controllerReport, error) {
+	if s == nil {
+		return controllerReport{}, errNoReport
+	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	t := time.NewTicker(reportPollInterval)
 	defer t.Stop()
+	var last controllerReport
 	for {
-		_, err := s.latestReport()
+		r, received, err := s.snapshot()
 		if err == nil {
-			return nil
+			last = r
+			switch {
+			case !received.After(since):
+				err = fmt.Errorf("no controller report since %v", since.Format(time.StampMilli))
+			case ok != nil && !ok(r):
+				err = errors.New("controller report does not match yet")
+			default:
+				return r, nil
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for a controller report: %w (%w)", err, ctx.Err())
+			return last, fmt.Errorf("waiting for a controller report: %w (%w)", err, ctx.Err())
 		case <-t.C:
 		}
 	}
 }
 
 // latestReport returns a copy of the most recent packet, or an error if there
-// is none fresh enough to trust. Every reader goes through it so locking and
-// staleness are handled in one place.
+// is none fresh enough to trust.
+func (s *reportStream) latestReport() (controllerReport, error) {
+	r, _, err := s.snapshot()
+	return r, err
+}
+
+// snapshot returns a copy of the most recent packet and when it arrived, or an
+// error if there is none fresh enough to trust. Every reader goes through it
+// so locking and staleness are handled in one place.
 //
 // Each call copies the whole controllerReport under the read lock, even when
 // the reader needs one field. That is cheap while the struct holds a few
 // fields; if readers become frequent or it grows (joint arrays, GPIO states),
 // switch readers to copying only their field while holding the lock.
-func (s *reportStream) latestReport() (controllerReport, error) {
+func (s *reportStream) snapshot() (controllerReport, time.Time, error) {
 	if s == nil {
-		return controllerReport{}, errNoReport
+		return controllerReport{}, time.Time{}, errNoReport
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.received.IsZero() {
-		return controllerReport{}, errNoReport
+		return controllerReport{}, time.Time{}, errNoReport
 	}
 	if age := time.Since(s.received); age > s.staleAfter {
-		return controllerReport{}, fmt.Errorf("latest controller report is %v old", age.Round(time.Millisecond))
+		return controllerReport{}, time.Time{}, fmt.Errorf("latest controller report is %v old", age.Round(time.Millisecond))
 	}
-	return s.latest, nil
+	return s.latest, s.received, nil
 }
 
 // tcpLoad returns the payload the controller is currently compensating for.
@@ -302,8 +373,13 @@ func decodeReport(pkt []byte) (controllerReport, error) {
 		return controllerReport{}, fmt.Errorf("report is %d bytes, need at least %d", len(pkt), reportMinLength)
 	}
 	r := controllerReport{
-		State: pkt[reportOffsetStateMode] & 0x0F,
-		Mode:  pkt[reportOffsetStateMode] >> 4,
+		State:      pkt[reportOffsetStateMode] & 0x0F,
+		Mode:       pkt[reportOffsetStateMode] >> 4,
+		CmdNum:     binary.BigEndian.Uint16(pkt[reportOffsetCmdNum:]),
+		ErrorCode:  pkt[reportOffsetErrorCode],
+		WarnCode:   pkt[reportOffsetWarnCode],
+		BrakeMask:  pkt[reportOffsetBrake],
+		EnableMask: pkt[reportOffsetEnable],
 		TCPLoad: reportedTCPLoad{
 			MassKg: reportFloat32(pkt, reportOffsetTCPLoad),
 			CenterOfGravityMM: r3.Vector{

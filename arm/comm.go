@@ -112,7 +112,7 @@ func (c *cmd) bytes() []byte {
 type modbusConn struct {
 	addr    string // host:port
 	logger  logging.Logger
-	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.started)
+	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.payloadChecked)
 
 	lock sync.Mutex
 	conn net.Conn
@@ -183,10 +183,6 @@ func (m *modbusConn) send(ctx context.Context, c cmd, checkError bool) (cmd, err
 				// overcurrent estop has occurred, must be manually cleared by user.
 				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
 					"through UFACTORY Studio or clear_error do command")
-			}
-			// Check for manual mode error (0x25)
-			if errCode == 0x25 {
-				return cmd{}, fmt.Errorf("arm is in manual mode: use DoCommand with 'exit_manual_mode' to return to normal operation")
 			}
 			// Any other errors are cleared automatically by the driver.
 			return cmd{}, decodeError(params)
@@ -315,9 +311,6 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	}
 
 	if currentState[0]&errorState != 0 {
-		// we assume that if we run into an error we will need to restart the servos etc.
-		x.started.Store(-1)
-
 		// Capture the code before clearing it. The reply to ClearError carries only a
 		// state byte, so this is the last chance to see which fault we recovered from.
 		clearedCode := currentState[1]
@@ -326,6 +319,7 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		// if we fail we will return the error code
 		c := x.newCmd(regMap["ClearError"])
 		newState, err := x.send(ctx, c, false)
+		x.markStateWrite()
 		if err != nil {
 			return multierr.Combine(fmt.Errorf("unable to reset the error %w", errors.New(armBoxErrorMap[currentState[1]])), err)
 		}
@@ -333,7 +327,9 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
 				errors.New(armBoxErrorMap[currentState[1]]))
 		}
-		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxErrorMap[currentState[1]]))
+		// Callers that only read, like JointPositions, clear errors too, so this
+		// line may be the only trace of a fault raised during another operation.
+		x.logger.Warnf("cleared controller error: %v", controllerError(clearedCode))
 
 		// Clearing an F/T fault does not restart the sensor; replay the enable.
 		x.restoreFTSensor(ctx, clearedCode)
@@ -343,6 +339,7 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 		// if we fail we will return the warning code
 		c := x.newCmd(regMap["ClearWarn"])
 		newState, err := x.send(ctx, c, false)
+		x.markStateWrite()
 		if err != nil {
 			return multierr.Combine(fmt.Errorf("unable to reset the warning %w", errors.New(armBoxWarnMap[currentState[2]])), err)
 		}
@@ -350,11 +347,11 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
 				errors.New(armBoxWarnMap[currentState[2]]))
 		}
-		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
+		x.logger.Infof("cleared controller warning: %s (code 0x%02x)", armBoxWarnMap[currentState[2]], currentState[2])
 	}
 	if currentState[0]&notReadyForMotionState != 0 && enableMotion {
 		// Check if we're intentionally in manual mode - if so, don't "fix" it
-		if x.started.Load() == int32(manualMode) {
+		if r, err := x.reportAfterStateWrite(ctx); err == nil && r.Mode == manualMode {
 			x.logger.Debug("Arm is in manual mode, skipping motion ready check")
 			return nil
 		}
@@ -373,6 +370,7 @@ func (x *xArm) setMotionState(ctx context.Context, state byte) error {
 	c := x.newCmd(regMap["SetState"])
 	c.params = append(c.params, state)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
@@ -385,6 +383,7 @@ func (x *xArm) setMotionMode(ctx context.Context, state byte) error {
 	c := x.newCmd(regMap["SetMode"])
 	c.params = append(c.params, state)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
@@ -399,19 +398,56 @@ func (x *xArm) toggleServos(ctx context.Context, enable bool) error {
 	}
 	c.params = append(c.params, 8, enByte)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
+// markStateWrite records that a command that can change the controller's mode
+// or state was just sent, so readers of the report stream wait for a packet
+// that arrived after it. Call it whether or not the command succeeded: a
+// failed command may still have been applied.
+func (x *xArm) markStateWrite() {
+	now := time.Now()
+	x.stateWrite.Store(&now)
+}
+
+// lastStateWrite returns when markStateWrite was last called, or the zero time
+// if never.
+func (x *xArm) lastStateWrite() time.Time {
+	if t := x.stateWrite.Load(); t != nil {
+		return *t
+	}
+	return time.Time{}
+}
+
+// reportAfterStateWrite returns the first report packet received after the
+// last markStateWrite, waiting up to reportConfirmTimeout for it.
+func (x *xArm) reportAfterStateWrite(ctx context.Context) (controllerReport, error) {
+	return x.report.waitForReport(ctx, x.lastStateWrite(), reportConfirmTimeout, nil)
+}
+
+// start puts the arm in servo mode, or position mode when direct, ready for
+// motion. It skips the setup when the report stream shows the arm is already
+// there.
 func (x *xArm) start(ctx context.Context, direct bool) error {
 	mode := byte(servoMotionMode)
 	if direct {
 		mode = 0
 	}
 
-	if x.started.Load() == int32(mode) {
+	r, err := x.reportAfterStateWrite(ctx)
+	if err == nil && r.Mode == mode && r.ErrorCode == 0 && r.WarnCode == 0 && r.readyForMotion(x.dof) {
 		return nil
 	}
+	if err != nil {
+		x.logger.Debugf("cannot tell the arm's mode from the controller report, setting it up: %v", err)
+	}
+	return x.setupMotion(ctx, mode)
+}
 
+// setupMotion clears errors, enables the servos and puts the arm in mode with
+// state 0, whatever the report stream says it is in.
+func (x *xArm) setupMotion(ctx context.Context, mode byte) error {
 	if err := x.checkReadyState(ctx, false); err != nil {
 		return err
 	}
@@ -434,7 +470,43 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return err
 	}
-	x.started.Store(int32(mode))
+	return x.confirmMode(ctx, mode)
+}
+
+// confirmMode waits for the report stream to show the controller in mode and
+// ready for motion. The commands that set a mode succeed before the controller
+// has run the mode, so a fault the mode itself triggers only shows up here: it
+// fails if the report shows a controller error, or after reportConfirmTimeout
+// still shows another mode or an arm that is not ready, such as one whose
+// servos are still disabled after an e-stop.
+//
+// When the stream is unavailable it only warns, since that says nothing about
+// the arm, and the module must keep working without the report port.
+func (x *xArm) confirmMode(ctx context.Context, mode byte) error {
+	since := x.lastStateWrite()
+	r, err := x.report.waitForReport(ctx, since, reportConfirmTimeout, func(r controllerReport) bool {
+		return (r.Mode == mode && r.readyForMotion(x.dof)) || r.ErrorCode != 0
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, streamErr := x.report.latestReport(); streamErr != nil {
+			x.logger.Warnf("cannot confirm the arm switched to mode %d, controller report unavailable: %v", mode, err)
+			return nil //nolint:nilerr // an unavailable report stream must not fail the mode change
+		}
+		// A fault raised and then cleared by a concurrent checkReadyState
+		// leaves the arm stopped with no error code to show, so point at the
+		// log line that clear leaves.
+		return fmt.Errorf("controller did not switch to mode %d and become ready: it reports mode %d state %d, "+
+			"servos enabled %08b, brakes released %08b; check the logs for a cleared controller error",
+			mode, r.Mode, r.State, r.EnableMask, r.BrakeMask)
+	}
+	if r.ErrorCode != 0 {
+		return fmt.Errorf("controller reported an error after switching to mode %d: %w", mode, controllerError(r.ErrorCode))
+	}
+	x.logger.Debugf("controller report shows mode %d state %d %v after setting it",
+		mode, r.State, time.Since(since).Round(time.Millisecond))
 	return nil
 }
 
@@ -448,6 +520,13 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 	// Clear any errors before entering manual mode
 	if err := x.checkReadyState(ctx, false); err != nil {
 		x.logger.Warnf("Could not fully clear ready state: %v", err)
+	}
+
+	// An e-stop disables the servos and engages the brakes, and clearing its
+	// error does not undo that. Without this the controller accepts mode 2 but
+	// stays not ready (state 5), leaving the arm locked.
+	if err := x.toggleServos(ctx, true); err != nil {
+		return fmt.Errorf("failed to enable servos before manual mode: %w", err)
 	}
 
 	// It appears that the xArm controller cannot transition from mode 1 (servoJ)
@@ -480,7 +559,9 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		return fmt.Errorf("failed to activate manual mode: %w", err)
 	}
 
-	x.started.Store(int32(manualMode))
+	if err := x.confirmMode(ctx, manualMode); err != nil {
+		return fmt.Errorf("failed to enter manual mode: %w", err)
+	}
 	x.logger.Info("Manual mode enabled - arm is freely moveable by hand with gravity compensation")
 
 	return nil
@@ -491,15 +572,7 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 	x.manualExit.cancel()
 	x.logger.Info("Exiting manual mode")
 
-	// Reset internal state flag to force re-initialization
-	x.started.Store(-1)
-
-	// Use the existing start function to return to normal servo mode (mode 1)
-	// This will:
-	// - Set mode back to servoMotionMode (1)
-	// - Enable servos properly
-	// - Set state to 0 (ready)
-	if err := x.start(ctx, false); err != nil {
+	if err := x.setupMotion(ctx, servoMotionMode); err != nil {
 		return fmt.Errorf("failed to exit manual mode: %w", err)
 	}
 
@@ -626,9 +699,9 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	// we ignore a `direct` setting from `extra`.
 	mo.direct = false
 
-	// start() trusts its cached mode, so an arm that dropped out of motion-ready on its own (after
-	// a rejected stream, a stop, etc.) would silently ignore every setpoint. Check the arm itself,
-	// as the unary path does.
+	// start() trusts the report stream, which can trail the controller by a packet, so an arm that
+	// just dropped out of motion-ready (after a rejected stream, a parameter change, etc.) could
+	// silently ignore every setpoint. Check the arm itself, as the unary path does.
 	if err := x.checkReadyState(ctx, true); err != nil {
 		return err
 	}
@@ -1182,13 +1255,12 @@ func (x *xArm) Stop(ctx context.Context, extra map[string]any) error {
 	defer done()
 
 	x.manualExit.cancel()
-	x.started.Store(-1)
 
 	if err := x.setMotionState(ctx, 3); err != nil {
 		return err
 	}
 
-	return x.start(ctx, false)
+	return x.setupMotion(ctx, servoMotionMode)
 }
 
 // IsMoving returns whether the arm is moving.
@@ -1718,7 +1790,9 @@ func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
 		enByte = 1
 	}
 	c.params = append(c.params, enByte)
-	if _, err := x.send(ctx, c, true); err != nil {
+	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
+	if err != nil {
 		return err
 	}
 	// Track the intent so a cleared F/T fault restarts sampling only if sampling
@@ -1799,5 +1873,7 @@ func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity
 	c := x.newCmd(regMap["Sensitivity"])
 	c.params = append(c.params, byte(sensitivity)) //nolint:gosec // bounded to valid sensitivity range
 	_, err := x.send(ctx, c, true)
+	// Like any parameter change, this drops the controller out of state 0.
+	x.markStateWrite()
 	return err
 }

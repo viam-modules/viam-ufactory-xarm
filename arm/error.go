@@ -9,6 +9,17 @@ import (
 
 const errCodeCollision = 0x1F
 
+// controllerError describes a controller error code the way UFACTORY Studio
+// shows it (C plus the decimal code), so users can look it up in UFACTORY's
+// docs.
+func controllerError(code byte) error {
+	msg, ok := armBoxErrorMap[code]
+	if !ok {
+		msg = "xArm: UNKNOWN ERROR"
+	}
+	return fmt.Errorf("%s (C%d)", msg, code)
+}
+
 var servoErrorMap = map[byte]string{
 	0x00: "xArm Servo: Joint Communication Error",
 	0x0A: "xArm Servo: Current Detection Error",

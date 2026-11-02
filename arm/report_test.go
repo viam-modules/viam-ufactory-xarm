@@ -7,6 +7,8 @@ import (
 	"errors"
 	"math"
 	"net"
+	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -40,6 +42,22 @@ func TestDecodeReport(t *testing.T) {
 	test.That(t, r.TCPLoad.MassKg, test.ShouldAlmostEqual, 0.82, 1e-6)
 	test.That(t, r.TCPLoad.CenterOfGravityMM, test.ShouldResemble, r3.Vector{X: 1.5, Y: -2, Z: 48})
 
+	t.Run("status fields", func(t *testing.T) {
+		pkt := buildReport(587, 2, 1, g1Load)
+		binary.BigEndian.PutUint16(pkt[reportOffsetCmdNum:], 0x0102)
+		pkt[reportOffsetBrake] = 0x3F
+		pkt[reportOffsetEnable] = 0x1F
+		pkt[reportOffsetErrorCode] = 0x16
+		pkt[reportOffsetWarnCode] = 0x0B
+		r, err := decodeReport(pkt)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, r.CmdNum, test.ShouldEqual, 0x0102)
+		test.That(t, r.BrakeMask, test.ShouldEqual, 0x3F)
+		test.That(t, r.EnableMask, test.ShouldEqual, 0x1F)
+		test.That(t, r.ErrorCode, test.ShouldEqual, 0x16)
+		test.That(t, r.WarnCode, test.ShouldEqual, 0x0B)
+	})
+
 	t.Run("too short", func(t *testing.T) {
 		_, err := decodeReport(buildReport(reportMinLength, 0, 0, g1Load)[:reportMinLength-1])
 		test.That(t, err, test.ShouldNotBeNil)
@@ -56,6 +74,30 @@ func TestDecodeReport(t *testing.T) {
 			mutate(pkt)
 			_, err := decodeReport(pkt)
 			test.That(t, err, test.ShouldNotBeNil)
+		})
+	}
+}
+
+func TestReadyForMotion(t *testing.T) {
+	ready := controllerReport{State: reportStateSleeping, BrakeMask: 0x3F, EnableMask: 0x3F}
+	for name, tc := range map[string]struct {
+		r    func(controllerReport) controllerReport
+		axes int
+		want bool
+	}{
+		"idle with every joint live": {func(r controllerReport) controllerReport { return r }, 6, true},
+		"moving":                     {func(r controllerReport) controllerReport { r.State = reportStateMoving; return r }, 6, true},
+		"state 0":                    {func(r controllerReport) controllerReport { r.State = 0; return r }, 6, true},
+		"paused":                     {func(r controllerReport) controllerReport { r.State = 3; return r }, 6, false},
+		"stopped":                    {func(r controllerReport) controllerReport { r.State = 4; return r }, 6, false},
+		"not ready":                  {func(r controllerReport) controllerReport { r.State = 5; return r }, 6, false},
+		"one brake engaged":          {func(r controllerReport) controllerReport { r.BrakeMask = 0x3B; return r }, 6, false},
+		"one servo disabled":         {func(r controllerReport) controllerReport { r.EnableMask = 0x1F; return r }, 6, false},
+		"seventh joint not live":     {func(r controllerReport) controllerReport { return r }, 7, false},
+		"unused bits ignored":        {func(r controllerReport) controllerReport { r.BrakeMask = 0xBF; return r }, 6, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			test.That(t, tc.r(ready).readyForMotion(tc.axes), test.ShouldEqual, tc.want)
 		})
 	}
 }
@@ -260,6 +302,120 @@ func TestReportStream(t *testing.T) {
 		var s *reportStream
 		_, err := s.tcpLoad()
 		test.That(t, errors.Is(err, errNoReport), test.ShouldBeTrue)
+		_, err = s.waitForReport(context.Background(), time.Time{}, time.Second, nil)
+		test.That(t, errors.Is(err, errNoReport), test.ShouldBeTrue)
 		s.close()
 	})
+}
+
+// newStoredReportStream returns a stream with no connection whose packets the
+// test stores directly.
+func newStoredReportStream(t *testing.T) *reportStream {
+	t.Helper()
+	return &reportStream{logger: logging.NewTestLogger(t), staleAfter: time.Second}
+}
+
+func TestWaitForReport(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("accepts a packet received after since", func(t *testing.T) {
+		s := newStoredReportStream(t)
+		since := time.Now()
+		s.store(controllerReport{Mode: 1})
+		r, err := s.waitForReport(ctx, since, time.Second, nil)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, r.Mode, test.ShouldEqual, 1)
+	})
+
+	t.Run("waits for a packet received after since", func(t *testing.T) {
+		s := newStoredReportStream(t)
+		s.store(controllerReport{Mode: 1})
+		since := time.Now()
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.store(controllerReport{Mode: 2})
+		}()
+		r, err := s.waitForReport(ctx, since, time.Second, nil)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, r.Mode, test.ShouldEqual, 2)
+	})
+
+	t.Run("waits for a packet that matches", func(t *testing.T) {
+		s := newStoredReportStream(t)
+		s.store(controllerReport{Mode: 1})
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.store(controllerReport{Mode: 2})
+		}()
+		r, err := s.waitForReport(ctx, time.Time{}, time.Second, func(r controllerReport) bool { return r.Mode == 2 })
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, r.Mode, test.ShouldEqual, 2)
+	})
+
+	t.Run("returns the last packet on timeout", func(t *testing.T) {
+		s := newStoredReportStream(t)
+		s.store(controllerReport{Mode: 1, State: 4})
+		start := time.Now()
+		r, err := s.waitForReport(ctx, time.Time{}, 150*time.Millisecond, func(r controllerReport) bool { return r.Mode == 2 })
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, time.Since(start), test.ShouldBeGreaterThanOrEqualTo, 150*time.Millisecond)
+		test.That(t, r.Mode, test.ShouldEqual, 1)
+		test.That(t, r.State, test.ShouldEqual, 4)
+	})
+
+	t.Run("times out with no packet since", func(t *testing.T) {
+		s := newStoredReportStream(t)
+		s.store(controllerReport{Mode: 1})
+		_, err := s.waitForReport(ctx, time.Now(), 100*time.Millisecond, nil)
+		test.That(t, err, test.ShouldNotBeNil)
+	})
+}
+
+// TestReportRateOnHardware measures how often a real controller sends rich
+// report packets. It runs only when XARM_HOST names a reachable controller:
+//
+//	XARM_HOST=192.168.1.10 go test ./arm -run TestReportRateOnHardware -v
+func TestReportRateOnHardware(t *testing.T) {
+	host := os.Getenv("XARM_HOST")
+	if host == "" {
+		t.Skip("set XARM_HOST to a controller's address to measure its report rate")
+	}
+	const packets = 100
+
+	var d net.Dialer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := d.DialContext(ctx, "tcp", reportAddr(host))
+	test.That(t, err, test.ShouldBeNil)
+	defer func() { _ = conn.Close() }()
+	test.That(t, conn.SetReadDeadline(time.Now().Add(30*time.Second)), test.ShouldBeNil)
+
+	// The first packet may have been queued before we connected, so start
+	// timing from it rather than from the dial.
+	pkt, err := readReportPacket(conn)
+	test.That(t, err, test.ShouldBeNil)
+	prev := time.Now()
+	intervals := make([]time.Duration, 0, packets)
+	for range packets {
+		pkt, err = readReportPacket(conn)
+		test.That(t, err, test.ShouldBeNil)
+		now := time.Now()
+		intervals = append(intervals, now.Sub(prev))
+		prev = now
+	}
+	r, err := decodeReport(pkt)
+	test.That(t, err, test.ShouldBeNil)
+
+	slices.Sort(intervals)
+	var total time.Duration
+	for _, iv := range intervals {
+		total += iv
+	}
+	mean := total / time.Duration(len(intervals))
+	t.Logf("%d packets of %d bytes: mean interval %v (%.1f Hz), min %v, median %v, p95 %v, max %v",
+		len(intervals), len(pkt), mean.Round(time.Microsecond), float64(time.Second)/float64(mean),
+		intervals[0].Round(time.Microsecond), intervals[len(intervals)/2].Round(time.Microsecond),
+		intervals[len(intervals)*95/100].Round(time.Microsecond), intervals[len(intervals)-1].Round(time.Microsecond))
+	t.Logf("last packet: state=%d mode=%d cmdnum=%d error=%d warn=%d brake=%08b enable=%08b",
+		r.State, r.Mode, r.CmdNum, r.ErrorCode, r.WarnCode, r.BrakeMask, r.EnableMask)
 }

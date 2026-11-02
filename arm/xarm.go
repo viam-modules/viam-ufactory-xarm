@@ -148,8 +148,12 @@ type xArm struct {
 	cmdConn     *modbusConn
 	gripperConn *modbusConn
 
-	// state of movement things
-	started atomic.Int32 // -1 is off, >= 0 is mode
+	// stateWrite records when a command that can change the controller's mode or
+	// state was last sent (see markStateWrite); nil until the first one. Report
+	// packets received before it may not reflect that command yet. It is a
+	// time.Time rather than Unix nanoseconds so comparisons with packet arrival
+	// times use the monotonic clock and survive wall-clock jumps.
+	stateWrite atomic.Pointer[time.Time]
 
 	// manualExit auto-exits manual mode after SetManualMode's enabledFor elapses
 	manualExit exitTimer
@@ -528,7 +532,6 @@ func NewXArm(ctx context.Context, name resource.Name,
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
 	x.cmdConn = newModbusConn(newConf.host(), logger, func() {
-		x.started.Store(-1)
 		x.payloadChecked.Store(false)
 	})
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
@@ -610,7 +613,9 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	err = x.start(ctx, false)
+	// x.dof is not known yet, so start() could not check every joint's servo
+	// and brake; set the arm up unconditionally instead.
+	err = x.setupMotion(ctx, servoMotionMode)
 	if err != nil {
 		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
 	}

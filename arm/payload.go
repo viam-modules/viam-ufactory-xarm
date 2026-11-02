@@ -70,7 +70,8 @@ func presetFor(gripperModel string, detected detectedGripper) (gripperPreset, bo
 // so a gripper never switches controller modes underneath a running motion.
 // The check runs on the next manual-mode entry, or on the next start() that
 // re-asserts the motion mode (after Stop, a cleared error, leaving manual mode,
-// or a reconnect); start() skips it while the arm is already in that mode. It
+// or a controller reboot); start() skips it while the controller report shows
+// the arm already in that mode and ready. It
 // returns a release func for the gripper's Close.
 func registerGripperPreset(a arm.Arm, gripperModel string, detected detectedGripper, logger logging.Logger) func() {
 	noop := func() {}
