@@ -2,6 +2,8 @@ module github.com/viam-modules/viam-ufactory-xarm
 
 go 1.26.0
 
+godebug multipathtcp=0
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/axw/gocov v1.1.0
