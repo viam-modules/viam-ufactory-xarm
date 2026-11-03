@@ -316,3 +316,93 @@ func TestEncodeTCPPayload(t *testing.T) {
 		test.That(t, got, test.ShouldEqual, w)
 	}
 }
+
+func TestControllerError(t *testing.T) {
+	test.That(t, controllerError(0x25).Error(), test.ShouldEqual, "xArm: Abnormal Motion in Manual Mode (C37)")
+	test.That(t, controllerError(errCodeCollision).Error(), test.ShouldEqual, "xArm: Collision Caused Abnormal Current (C31)")
+	test.That(t, controllerError(0xFE).Error(), test.ShouldEqual, "xArm: UNKNOWN ERROR (C254)")
+}
+
+func TestConfirmMode(t *testing.T) {
+	ctx := context.Background()
+	newArm := func(t *testing.T, s *reportStream) *xArm {
+		t.Helper()
+		x := &xArm{logger: logging.NewTestLogger(t), report: s, dof: 6}
+		x.markStateWrite()
+		// Packets stored right after must count as received after the write.
+		time.Sleep(time.Millisecond)
+		return x
+	}
+	// Outlive reportConfirmTimeout, so a test that waits it out still sees a
+	// fresh packet rather than a stream that has gone stale.
+	newStream := func(t *testing.T) *reportStream {
+		t.Helper()
+		s := newStoredReportStream(t)
+		s.staleAfter = 5 * time.Second
+		return s
+	}
+	// manualReady is an arm in manual mode with all six joints live.
+	manualReady := controllerReport{Mode: manualMode, State: reportStateSleeping, EnableMask: 0x3F, BrakeMask: 0x3F}
+
+	t.Run("report shows the mode", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(manualReady)
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("report shows the mode but servos disabled after an e-stop", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: manualMode, State: 5})
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "reports mode 2 state 5, servos enabled 00000000")
+	})
+
+	t.Run("report shows a controller error", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0, State: 4, ErrorCode: 0x25})
+		start := time.Now()
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "C37")
+		test.That(t, time.Since(start), test.ShouldBeLessThan, reportConfirmTimeout)
+	})
+
+	t.Run("report shows another mode", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0, State: 4})
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "reports mode 0 state 4")
+	})
+
+	t.Run("report packet predates the mode change", func(t *testing.T) {
+		s := newStream(t)
+		s.store(controllerReport{Mode: 0, State: 4, ErrorCode: 0x25})
+		time.Sleep(time.Millisecond)
+		x := newArm(t, s)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.store(manualReady)
+		}()
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("no report stream", func(t *testing.T) {
+		x := newArm(t, nil)
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("cancelled context", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0})
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		test.That(t, x.confirmMode(cctx, manualMode), test.ShouldBeError, context.Canceled)
+	})
+}
