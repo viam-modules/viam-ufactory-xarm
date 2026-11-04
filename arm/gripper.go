@@ -403,7 +403,7 @@ func (g *myGripper) Grab(ctx context.Context, extra map[string]any) (bool, error
 		return status&gripperStateMask == gripperStateDetected, nil
 	}
 
-	pos, err := g.goToPosition(ctx, 2)
+	pos, err := g.goToPosition(ctx, 2, true)
 	if err != nil {
 		return false, err
 	}
@@ -417,7 +417,7 @@ func (g *myGripper) Open(ctx context.Context, extra map[string]any) error {
 		return err
 	}
 
-	_, err := g.goToPosition(ctx, fullyOpenPosition)
+	_, err := g.goToPosition(ctx, fullyOpenPosition, true)
 	return err
 }
 
@@ -591,7 +591,10 @@ func (g *myGripper) getStatus(ctx context.Context) (uint16, error) {
 	return w[0], nil
 }
 
-func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
+// goToPosition writes goal to the gripper. With wait, it polls until the jaws
+// settle (within 6 units, stalled for 1s, or 10s elapsed) and returns the final
+// position. Without wait, it returns goal as soon as the write is acknowledged.
+func (g *myGripper) goToPosition(ctx context.Context, goal int, wait bool) (int, error) {
 	g.goToPositionLock.Lock()
 	defer g.goToPositionLock.Unlock()
 
@@ -607,6 +610,9 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	}
 	if err := x.setGripperPosition(ctx, uint32(goal)); err != nil { //nolint:gosec // goal is 0..850.
 		return 0, err
+	}
+	if !wait {
+		return goal, nil
 	}
 
 	old := -1
@@ -646,6 +652,15 @@ func (g *myGripper) goToPosition(ctx context.Context, goal int) (int, error) {
 	}
 }
 
+// waitArg reads the optional "wait" bool from a DoCommand. Absent or non-bool
+// values mean true, so existing callers keep blocking until the jaws settle.
+func waitArg(cmd map[string]any) bool {
+	if w, ok := cmd["wait"].(bool); ok {
+		return w
+	}
+	return true
+}
+
 func (g *myGripper) getPosition(ctx context.Context) (int, error) {
 	x, err := g.bus()
 	if err != nil {
@@ -676,13 +691,17 @@ func (g *myGripper) DoCommand(ctx context.Context, cmd map[string]any) (map[stri
 	}
 	if posF, ok := cmd["set"].(float64); ok {
 		pos := int(posF)
-		_, err := g.goToPosition(ctx, pos)
-		if err != nil {
+		// "wait": false is for callers in a fixed-rate loop. It reports the goal,
+		// not a measured position, since the jaws haven't moved yet.
+		wait := waitArg(cmd)
+		if _, err := g.goToPosition(ctx, pos, wait); err != nil {
 			return nil, err
 		}
-		pos, err = g.getPosition(ctx)
-		if err != nil {
-			return nil, err
+		if wait {
+			var err error
+			if pos, err = g.getPosition(ctx); err != nil {
+				return nil, err
+			}
 		}
 		return map[string]interface{}{"position": pos}, nil
 	}
