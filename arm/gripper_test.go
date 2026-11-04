@@ -66,3 +66,10 @@ func TestAtMoveG2Goal(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitArg(t *testing.T) {
+	test.That(t, waitArg(map[string]any{"set": 500.0}), test.ShouldBeTrue)
+	test.That(t, waitArg(map[string]any{"set": 500.0, "wait": true}), test.ShouldBeTrue)
+	test.That(t, waitArg(map[string]any{"set": 500.0, "wait": false}), test.ShouldBeFalse)
+	test.That(t, waitArg(map[string]any{"set": 500.0, "wait": "false"}), test.ShouldBeTrue)
+}
