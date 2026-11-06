@@ -9,7 +9,12 @@
       "api": "rdk:component:arm",
       "model": "viam:ufactory:xArm6",
       "markdown_link": "README.md#configure-your-xarm",
-      "short_description": "arm component driver for the ufactory xArm6"
+      "short_description": "arm component driver for the ufactory xArm6",
+      "simulation": {
+        "model": "viam-labs:isaac-sim:ufactory-xarm6",
+        "module_id": "viam-labs:isaac-sim",
+        "version": "~0.0.6"
+      }
     },
     {
       "api": "rdk:component:arm",
