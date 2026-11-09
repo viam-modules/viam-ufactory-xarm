@@ -29,7 +29,7 @@ import (
 
 const (
 	maxSpeed = 180.  // degrees per second
-	minSpeed = 3.    // degrees per second
+	minSpeed = 0.25  // degrees per second
 	maxAccel = 1145. // degrees per second per second
 
 	defaultSpeed       = maxSpeed / 3 // degrees per second
@@ -42,6 +42,8 @@ const (
 
 	defaultTrajGenPathToleranceDeltaRads             = 0.1
 	defaultTrajGenWaypointDeduplicationToleranceRads = 1e-3
+
+	defaultStreamLimitToleranceRatio = 1.01 // accept 1% tolerance on stream vel and acc limits
 
 	// DoCommand keys.
 	loadKey                  = "load"
@@ -75,6 +77,9 @@ const (
 	gripperLiteActionClose    = "close"
 	gripperLiteActionIsClosed = "is_closed"
 	gripperLiteActionStop     = "stop"
+
+	kinematicsSourceJSON = "json"
+	kinematicsBase       = "base"
 )
 
 //go:embed xarm6_kinematics.json
@@ -116,7 +121,7 @@ var (
 var armTo3DModelParts = map[string][]string{
 	"lite6": {
 		"base_top",
-		"base",
+		kinematicsBase,
 		"gripper_mount",
 		"lower_forearm",
 		"upper_arm",
@@ -125,7 +130,7 @@ var armTo3DModelParts = map[string][]string{
 	},
 	"xArm6": {
 		"base_top",
-		"base",
+		kinematicsBase,
 		"gripper_mount",
 		"lower_forearm",
 		"upper_arm",
@@ -143,8 +148,12 @@ type xArm struct {
 	cmdConn     *modbusConn
 	gripperConn *modbusConn
 
-	// state of movement things
-	started atomic.Int32 // -1 is off, >= 0 is mode
+	// stateWrite records when a command that can change the controller's mode or
+	// state was last sent (see markStateWrite); nil until the first one. Report
+	// packets received before it may not reflect that command yet. It is a
+	// time.Time rather than Unix nanoseconds so comparisons with packet arrival
+	// times use the monotonic clock and survive wall-clock jumps.
+	stateWrite atomic.Pointer[time.Time]
 
 	// manualExit auto-exits manual mode after SetManualMode's enabledFor elapses
 	manualExit exitTimer
@@ -157,6 +166,8 @@ type xArm struct {
 	motion      motion.Service
 	trajGen     mlmodel.Service
 	proxyServer *http.Server
+	// report streams the controller's rich report; nil until NewXArm starts it.
+	report *reportStream
 
 	// below is all configuration things
 	dof    int
@@ -175,6 +186,22 @@ type xArm struct {
 	// gripperSpeed is the last speed written to the gripper's Fn303 register, or 0 if none was
 	// ever set. Clearing the FnCxx control mode resets Fn303, so we need this to put it back.
 	gripperSpeed atomic.Uint32
+
+	// ftEnabled records whether F/T sampling was ever turned on. An F/T fault makes the
+	// controller stop sampling and clearing the error does not restart it, so checkReadyState
+	// replays the enable. Same shape as gripperControlMode/gripperSpeed above.
+	ftEnabled atomic.Bool
+	// ftRestoreNano rate-limits that replay; see ftRestoreCooldown.
+	ftRestoreNano atomic.Int64
+
+	// gripperPreset is the payload preset of the mounted UFACTORY gripper,
+	// applied only when the controller reports no payload.
+	gripperPreset atomic.Pointer[gripperPreset]
+	// payloadChecked records whether ensureTCPPayload has run on the current
+	// connection. A controller reboot drops our socket and reverts the payload
+	// to its saved value, so this is cleared on every connection reset, and
+	// whenever a gripper registers a preset.
+	payloadChecked atomic.Bool
 
 	detectedArm detectedArm
 }
@@ -212,17 +239,18 @@ type TrajGenConfig struct {
 
 // Config is used for converting config attributes.
 type Config struct {
-	Host                 string         `json:"host"`
-	Port                 int            `json:"port,omitempty"`
-	Speed                float64        `json:"speed_degs_per_sec,omitempty"`
-	Acceleration         float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ               float64        `json:"move_hz,omitempty"`
-	Sensitivity          *int           `json:"collision_sensitivity,omitempty"`
-	BadJoints            []int          `json:"bad-joints"`
-	Motion               string         `json:"motion"`
-	UseURDFs             bool           `json:"use_urdfs,omitempty"`
-	TrajGen              *TrajGenConfig `json:"trajectory_generator,omitempty"`
-	MeshDecimationRatios []float64      `json:"mesh_decimation_ratios,omitempty"`
+	Host                      string         `json:"host"`
+	Port                      int            `json:"port,omitempty"`
+	Speed                     float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration              float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ                    float64        `json:"move_hz,omitempty"`
+	Sensitivity               *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints                 []int          `json:"bad-joints"`
+	Motion                    string         `json:"motion"`
+	UseURDFs                  bool           `json:"use_urdfs,omitempty"`
+	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
+	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
+	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
 
 	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
 	StudioProxyPort int  `json:"ufactory-studio-proxy-port,omitempty"`
@@ -257,6 +285,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 		if r < 0 || r > 1 {
 			return nil, nil, fmt.Errorf("mesh_decimation_ratios[%d] must be in [0, 1], got %f", i, r)
 		}
+	}
+
+	if cfg.StreamLimitToleranceRatio != 0 && cfg.StreamLimitToleranceRatio < 1 {
+		return nil, nil, fmt.Errorf("stream_limit_tolerance_ratio must be >= 1, got %f", cfg.StreamLimitToleranceRatio)
 	}
 
 	deps := []string{}
@@ -311,6 +343,13 @@ func (cfg *Config) maxBadJoint() int {
 		}
 	}
 	return maxJoint
+}
+
+func (cfg *Config) streamLimitToleranceRatio() float64 {
+	if cfg.StreamLimitToleranceRatio == 0 {
+		return defaultStreamLimitToleranceRatio
+	}
+	return cfg.StreamLimitToleranceRatio
 }
 
 // lockedJointRangeDegs returns the position bounds, in degrees, that pin a bad joint to roughly
@@ -370,7 +409,7 @@ func MakeModelFrame(
 		if len(artifact.json) == 0 {
 			return nil, referenceframe.ErrNoModelInformation
 		}
-		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: "json"}}
+		cfg = &referenceframe.ModelConfigJSON{OriginalFile: &referenceframe.ModelFile{Bytes: artifact.json, Extension: kinematicsSourceJSON}}
 		if err := json.Unmarshal(artifact.json, cfg); err != nil {
 			return nil, errors.Wrap(err, "failed to unmarshal json file")
 		}
@@ -435,13 +474,13 @@ func MakeModelFrame(
 		}
 	}
 
-	source := "json"
+	source := kinematicsSourceJSON
 	if useURDFs {
 		source = artifact.urdfBasename + ".urdf"
 	}
 	variant := artifact.variant
 	if variant == "" {
-		variant = "base"
+		variant = kinematicsBase
 	}
 	logger.Infof("kinematics: model=%s variant=%s source=%s", modelName, variant, source)
 
@@ -492,7 +531,9 @@ func NewXArm(ctx context.Context, name resource.Name,
 		acceleration: utils.DegToRad(float64(newConf.acceleration())),
 		speed:        utils.DegToRad(float64(newConf.speed())),
 	}
-	x.cmdConn = newModbusConn(newConf.host(), logger, func() { x.started.Store(-1) })
+	x.cmdConn = newModbusConn(newConf.host(), logger, func() {
+		x.payloadChecked.Store(false)
+	})
 	x.gripperConn = x.cmdConn // overwritten below if port 503 connects
 	x.gripperControlMode.Store(true)
 
@@ -535,6 +576,13 @@ func NewXArm(ctx context.Context, name resource.Name,
 		return nil, err
 	}
 
+	// Started right after the command socket so its first packet arrives while
+	// hardware detection runs.
+	x.report, err = newReportStream(ctx, reportAddr(newConf.Host), logger)
+	if err != nil {
+		return nil, multierr.Combine(err, x.Close(ctx))
+	}
+
 	// Try to open a dedicated socket on port 503 for gripper-bus Modbus
 	// traffic. The xArm controller serves this as a sibling of port 502
 	// specifically so gripper writes don't contend with arm motion on the
@@ -565,7 +613,9 @@ func NewXArm(ctx context.Context, name resource.Name,
 		}
 	}
 
-	err = x.start(ctx, false)
+	// x.dof is not known yet, so start() could not check every joint's servo
+	// and brake; set the arm up unconditionally instead.
+	err = x.setupMotion(ctx, servoMotionMode)
 	if err != nil {
 		logger.Warnf("the xArm couldn't be started because: %s clear the error status before issuing command to the arm", err)
 	}
@@ -614,7 +664,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	if newConf.Sensitivity != nil {
 		err = x.setCollisionDetectionSensitivity(ctx, *newConf.Sensitivity)
 		if err != nil {
-			return nil, err
+			return nil, multierr.Combine(err, x.Close(ctx))
 		}
 	}
 
@@ -732,7 +782,7 @@ func threeDMeshFromName(model, name string) (commonpb.Mesh, error) {
 	path := fmt.Sprintf("%s/arm/3d_models/%s/%s.glb", moduleRoot, model, name)
 
 	// the model path is safe because it is constructed from the module root and the model and name and has no user input
-	// #nosec G304
+	// #nosec G304 G703
 	glb, err := os.ReadFile(path)
 	if err != nil {
 		return commonpb.Mesh{}, err
@@ -1046,8 +1096,13 @@ func (x *xArm) DoCommand(ctx context.Context, cmd map[string]any) (map[string]an
 		}
 		validCommand = true
 	}
-	if _, ok := cmd[ftSensorEnableKey]; ok {
-		if err := x.setFTSensorEnable(ctx); err != nil {
+	if val, ok := cmd[ftSensorEnableKey]; ok {
+		// Any non-bool value keeps the historical "presence means enable" behavior.
+		enable := true
+		if b, isBool := val.(bool); isBool {
+			enable = b
+		}
+		if err := x.setFTSensorEnable(ctx, enable); err != nil {
 			return nil, err
 		}
 		validCommand = true

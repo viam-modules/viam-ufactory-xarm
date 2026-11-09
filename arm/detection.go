@@ -135,7 +135,7 @@ func (x *xArm) detectArm(ctx context.Context) (detectedArm, error) {
 		return detectedArm{model: hardwareModelUnknown}, err
 	}
 	d := detectedArm{
-		deviceType:      byte(v.deviceType),
+		deviceType:      byte(v.deviceType), //nolint:gosec // deviceType fits in a byte by protocol
 		submodel:        v.armTypeStr,
 		armTypeCode:     v.armTypeCode,
 		controlTypeCode: v.controlTypeCode,

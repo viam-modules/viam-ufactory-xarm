@@ -1,11 +1,14 @@
 package arm
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
@@ -47,6 +50,18 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 		p.Constraints = &arm.KinematicConstraints{Velocities: vels}
 		return p
 	}
+	// pointWithAcc is `point` plus a declared `Accelerations` entry on each joint.
+	pointWithAcc := func(d time.Duration, dof int, acc float64) arm.TrajectoryPoint {
+		p := point(d, dof)
+		accs := make([]float64, dof)
+		for i := range accs {
+			accs[i] = acc
+		}
+		p.Constraints = &arm.KinematicConstraints{Accelerations: accs}
+		return p
+	}
+	velLimits := []float64{1, 1, 1, 1, 1, 1}
+	accLimits := []float64{2, 2, 2, 2, 2, 2}
 
 	// The validator carries state across a stream, so each case feeds a whole sequence and asserts
 	// where, if anywhere, the first rejection lands. A `failAtIdx` of -1 means the sequence is valid.
@@ -63,17 +78,76 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 		{"positions must be non-empty", []arm.TrajectoryPoint{point(0, 0)}, 0},
 		{"first point must be at rest", []arm.TrajectoryPoint{pointWithVel(0, 6, 0.5)}, 0},
 		{"first point at rest with zero velocity is fine", []arm.TrajectoryPoint{pointWithVel(0, 6, 0), pointWithVel(10*time.Millisecond, 6, 0.5)}, -1},
+		{"velocity over the limit", []arm.TrajectoryPoint{point(0, 6), pointWithVel(10*time.Millisecond, 6, 1.5)}, 1},
+		{"acceleration over the limit", []arm.TrajectoryPoint{point(0, 6), pointWithAcc(10*time.Millisecond, 6, -2.5)}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := newTrajectoryStreamValidator()
 			firstErrIdx := -1
 			for i, pt := range tc.points {
-				if err := v.validate(pt); err != nil {
+				if err := v.validate(pt, velLimits, accLimits); err != nil {
 					firstErrIdx = i
 					break
 				}
 			}
 			test.That(t, firstErrIdx, test.ShouldEqual, tc.failAtIdx)
+		})
+	}
+}
+
+func TestStreamLimits(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+
+	const speedDegs, accelDegs, tol = 45.0, 300.0, 1.01
+	mo := moveOptions{speed: 0.5, acceleration: 2}
+
+	for _, tc := range []struct {
+		name               string
+		useURDFs           bool
+		wantVel, wantAccel float64
+	}{
+		{"json model uses its served limits", false, utils.DegToRad(speedDegs), utils.DegToRad(accelDegs)},
+		// URDF models carry no rate limits, so the move's own speed and acceleration apply.
+		{"urdf model falls back to the move options", true, mo.speed, mo.acceleration},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, tc.useURDFs, nil, logger, 0, speedDegs, accelDegs)
+			test.That(t, err, test.ShouldBeNil)
+
+			vel, acc := streamLimits(m, mo, tol)
+			test.That(t, vel, test.ShouldHaveLength, 6)
+			test.That(t, acc, test.ShouldHaveLength, 6)
+			for i := range vel {
+				test.That(t, vel[i], test.ShouldAlmostEqual, tc.wantVel*tol, 1e-9)
+				test.That(t, acc[i], test.ShouldAlmostEqual, tc.wantAccel*tol, 1e-9)
+			}
+		})
+	}
+}
+
+func TestCheckJointConstraints(t *testing.T) {
+	limits := []float64{1, 2, 3}
+
+	for _, tc := range []struct {
+		name    string
+		values  []float64
+		wantErr bool
+	}{
+		{"nil values are not checked", nil, false},
+		{"within limits", []float64{0.5, 1.5, 2.5}, false},
+		{"exactly at the limit", []float64{1, 2, 3}, false},
+		{"over the limit on one joint", []float64{0.5, 2.1, 2.5}, true},
+		{"negative values are checked by magnitude", []float64{0.5, -2.1, 2.5}, true},
+		{"length must match the limits", []float64{0.5, 1.5}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkJointConstraints("velocity", tc.values, limits)
+			if tc.wantErr {
+				test.That(t, err, test.ShouldNotBeNil)
+			} else {
+				test.That(t, err, test.ShouldBeNil)
+			}
 		})
 	}
 }
@@ -178,4 +252,157 @@ func TestVacuumStateFromResponse(t *testing.T) {
 
 	_, err = vacuumStateFromResponse([]byte{0, 0}, connectionPlugin)
 	test.That(t, err, test.ShouldNotBeNil)
+}
+
+func TestVacuumPumpOnFromResponse(t *testing.T) {
+	for _, tc := range []struct {
+		lo   byte
+		ct   connectionType
+		want bool
+	}{
+		{0x01, connectionPlugin, true},
+		{0x02, connectionPlugin, false},
+		{0x00, connectionPlugin, false},
+		{0x03, connectionPlugin, false},
+		{0x04, connectionContact, true},
+		{0x08, connectionContact, false},
+		{0x01, connectionContact, false},
+	} {
+		got, err := vacuumPumpOnFromResponse([]byte{0, 0, 0, 0, tc.lo}, tc.ct)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, got, test.ShouldEqual, tc.want)
+	}
+
+	_, err := vacuumPumpOnFromResponse([]byte{0}, connectionPlugin)
+	test.That(t, err, test.ShouldNotBeNil)
+}
+
+// TestRestoreFTSensorSkips covers the three gates that make restoreFTSensor a
+// no-op: a non-F/T fault, an F/T fault while sampling was never enabled, and an
+// F/T fault within the re-enable cooldown. Each must leave the cooldown slot
+// untouched; a proceed would claim it (and then hit the controller).
+func TestRestoreFTSensorSkips(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	recent := time.Now().UnixNano()
+
+	for _, tc := range []struct {
+		name    string
+		code    byte
+		enabled bool
+		nano    int64
+	}{
+		{"non-F/T fault is ignored", 0x21, true, 0},
+		{"F/T fault ignored when sampling was never enabled", errCodeFTOverload, false, 0},
+		{"F/T fault skipped within the cooldown", errCodeFTOverload, true, recent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			x := &xArm{logger: logger}
+			x.ftEnabled.Store(tc.enabled)
+			x.ftRestoreNano.Store(tc.nano)
+
+			x.restoreFTSensor(context.Background(), tc.code)
+
+			test.That(t, x.ftRestoreNano.Load(), test.ShouldEqual, tc.nano)
+		})
+	}
+}
+
+func TestEncodeTCPPayload(t *testing.T) {
+	b := encodeTCPPayload(tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{X: 1.5, Y: -2, Z: 48}})
+	test.That(t, len(b), test.ShouldEqual, 16)
+	want := []float32{0.82, 1.5, -2, 48}
+	for i, w := range want {
+		got := math.Float32frombits(binary.LittleEndian.Uint32(b[i*4 : i*4+4]))
+		test.That(t, got, test.ShouldEqual, w)
+	}
+}
+
+func TestControllerError(t *testing.T) {
+	test.That(t, controllerError(0x25).Error(), test.ShouldEqual, "xArm: Abnormal Motion in Manual Mode (C37)")
+	test.That(t, controllerError(errCodeCollision).Error(), test.ShouldEqual, "xArm: Collision Caused Abnormal Current (C31)")
+	test.That(t, controllerError(0xFE).Error(), test.ShouldEqual, "xArm: UNKNOWN ERROR (C254)")
+}
+
+func TestConfirmMode(t *testing.T) {
+	ctx := context.Background()
+	newArm := func(t *testing.T, s *reportStream) *xArm {
+		t.Helper()
+		x := &xArm{logger: logging.NewTestLogger(t), report: s, dof: 6}
+		x.markStateWrite()
+		// Packets stored right after must count as received after the write.
+		time.Sleep(time.Millisecond)
+		return x
+	}
+	// Outlive reportConfirmTimeout, so a test that waits it out still sees a
+	// fresh packet rather than a stream that has gone stale.
+	newStream := func(t *testing.T) *reportStream {
+		t.Helper()
+		s := newStoredReportStream(t)
+		s.staleAfter = 5 * time.Second
+		return s
+	}
+	// manualReady is an arm in manual mode with all six joints live.
+	manualReady := controllerReport{Mode: manualMode, State: reportStateSleeping, EnableMask: 0x3F, BrakeMask: 0x3F}
+
+	t.Run("report shows the mode", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(manualReady)
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("report shows the mode but servos disabled after an e-stop", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: manualMode, State: 5})
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "reports mode 2 state 5, servos enabled 00000000")
+	})
+
+	t.Run("report shows a controller error", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0, State: 4, ErrorCode: 0x25})
+		start := time.Now()
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "C37")
+		test.That(t, time.Since(start), test.ShouldBeLessThan, reportConfirmTimeout)
+	})
+
+	t.Run("report shows another mode", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0, State: 4})
+		err := x.confirmMode(ctx, manualMode)
+		test.That(t, err, test.ShouldNotBeNil)
+		test.That(t, err.Error(), test.ShouldContainSubstring, "reports mode 0 state 4")
+	})
+
+	t.Run("report packet predates the mode change", func(t *testing.T) {
+		s := newStream(t)
+		s.store(controllerReport{Mode: 0, State: 4, ErrorCode: 0x25})
+		time.Sleep(time.Millisecond)
+		x := newArm(t, s)
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.store(manualReady)
+		}()
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("no report stream", func(t *testing.T) {
+		x := newArm(t, nil)
+		test.That(t, x.confirmMode(ctx, manualMode), test.ShouldBeNil)
+	})
+
+	t.Run("cancelled context", func(t *testing.T) {
+		s := newStream(t)
+		x := newArm(t, s)
+		s.store(controllerReport{Mode: 0})
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		test.That(t, x.confirmMode(cctx, manualMode), test.ShouldBeError, context.Canceled)
+	})
 }

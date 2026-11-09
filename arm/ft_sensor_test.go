@@ -2,7 +2,6 @@ package arm
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"go.viam.com/rdk/components/arm"
@@ -56,56 +55,26 @@ func TestFTSensorDoCommandTare(t *testing.T) {
 	test.That(t, fa.lastCmd[ftSensorZeroKey], test.ShouldEqual, true)
 }
 
-func TestFTSensorReadingsSelfHeal(t *testing.T) {
-	// Stream starts disabled (all-zeros). After enable, the controller needs a
-	// moment to stream real data, so the first post-enable read is still zero
-	// (modeling the measured ~ms settle) and only the next read is live — this
-	// exercises the readAfterEnable poll loop, not a single re-read.
-	enabled := false
-	postEnableReads := 0
-	zero := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}
-	live := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{-0.21, 0.14, -0.3, 0, 0, 0})}
+func TestFTSensorReadingsDoesNotEnable(t *testing.T) {
+	// A deliberately disabled stream reads all zeros; Readings must pass them
+	// through rather than turn the sensor back on.
+	var cmds []map[string]any
 	fa := &fakeArm{doFn: func(cmd map[string]any) (map[string]any, error) {
-		if _, ok := cmd[ftSensorEnableKey]; ok {
-			enabled = true
-			return map[string]any{}, nil
-		}
-		if !enabled {
-			return zero, nil
-		}
-		postEnableReads++
-		if postEnableReads == 1 {
-			return zero, nil // settle: first read after enable still zero
-		}
-		return live, nil
+		cmds = append(cmds, cmd)
+		return map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}, nil
 	}}
 	s := &ftSensor{arm: fa, logger: logging.NewTestLogger(t)}
 
 	readings, err := s.Readings(context.Background(), nil)
 	test.That(t, err, test.ShouldBeNil)
-	test.That(t, enabled, test.ShouldBeTrue)
-	test.That(t, readings["Fx_N"], test.ShouldEqual, -0.21)
-}
-
-func TestFTSensorReadingsOverloadSurfaced(t *testing.T) {
-	// Stream stuck all-zero and enable fails (faulted/overloaded sensor).
-	zero := map[string]any{ftSensorDataKey: ftReadingsMap([]float64{0, 0, 0, 0, 0, 0})}
-	fa := &fakeArm{doFn: func(cmd map[string]any) (map[string]any, error) {
-		if _, ok := cmd[ftSensorEnableKey]; ok {
-			return nil, errors.New("controller error 18")
-		}
-		return zero, nil
-	}}
-	s := &ftSensor{arm: fa, logger: logging.NewTestLogger(t)}
-
-	_, err := s.Readings(context.Background(), nil)
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "power-cycle")
+	test.That(t, readings["Fx_N"], test.ShouldEqual, 0.0)
+	test.That(t, cmds, test.ShouldHaveLength, 1)
+	test.That(t, cmds[0][getFTSensorDataKey], test.ShouldEqual, true)
 }
 
 func TestFTSensorConstructsWithoutEnabling(t *testing.T) {
-	// Construction only resolves the arm dep; it must NOT enable (that's the
-	// Readings self-heal's job) and must NOT fail on hardware state.
+	// Construction only resolves the arm dep; it must NOT enable and must NOT
+	// fail on hardware state.
 	fa := &fakeArm{resp: map[string]any{}}
 	deps := resource.Dependencies{arm.Named("myarm"): fa}
 	conf := resource.Config{

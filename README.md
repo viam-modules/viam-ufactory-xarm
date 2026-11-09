@@ -17,8 +17,10 @@ This module is particularly useful in applications that require an xArm to be op
   - [Trajectory Generator](#trajectory-generator)
   - [Using within a Frame System](#using-within-a-frame-system)
   - [Error Handling](#error-handling)
+  - [Arm State](#arm-state)
   - [DoCommand Reference](#docommand-reference)
   - [UFactory Studio Proxy](#ufactory-studio-proxy)
+- [Gripper payload defaults](#gripper-payload-defaults)
 - [Gripper](#gripper)
 - [Gripper Lite](#gripper-lite)
 - [Vacuum Gripper](#vacuum-gripper)
@@ -51,7 +53,7 @@ Copy and paste the following attributes into your JSON configuration:
 |------|------|-----------|---------|-------------|
 | `host` | string | **Required** | — | IP address of the xArm. Found on the sticker on the control box. See [Networking](#networking) below. |
 | `port` | int | Optional | `502` | TCP port for the arm's Modbus interface. |
-| `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `3` and `180`. |
+| `speed_degs_per_sec` | float32 | Optional | `60` | Joint speed in degrees/second. Must be between `0.25` and `180`. |
 | `acceleration_degs_per_sec_per_sec` | float32 | Optional | `381.67` | Joint acceleration in degrees/second². Must not exceed `1145`. |
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
@@ -148,7 +150,11 @@ For an attached gripper, set its parent to the arm's name:
 
 ### Error Handling
 
-When a collision or other fault occurs, the arm enters an error state and will not accept motion commands. The driver attempts to clear transient errors automatically on each command. A collision (overcurrent error) requires manual intervention:
+When a collision or other fault occurs, the arm enters an error state and will not accept motion commands. The driver attempts to clear transient errors automatically on each command, including reads such as joint positions. Each automatic clear is logged as a warning, so a fault cleared in the background still shows up in the logs.
+
+After an emergency stop is released, the next move, `Stop`, or manual-mode change re-enables the servos, which releases the joint brakes.
+
+A collision (overcurrent error) requires manual intervention:
 
 1. Remove any obstacles causing the collision.
 2. Clear the error using `DoCommand` (Go):
@@ -171,6 +177,16 @@ resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{
 resp, _ := xArmComponent.DoCommand(context.Background(), map[string]interface{}{"get_error": true})
 // resp["error info"] contains raw error bytes
 ```
+
+### Arm State
+
+The module reads the arm's mode, state, error codes, and per-joint servo and brake status from the controller's report port 30002, which sends a status packet every 200 ms. It does not assume the arm is still in the mode it last set, so changes made outside Viam, such as from UFACTORY Studio, an emergency stop, or a controller fault, are picked up within one packet.
+
+- Before a move, the arm is set up again unless the report shows it already in the right mode, with no error or warning, and every joint ready.
+- After each mode change, the module waits up to 500 ms for the report to show the arm in the new mode and ready. If the controller reports an error instead, or the arm isn't ready by then, the call fails with the reported mode, state, and error.
+- `ManualMode` returns the mode the controller reports, so it also reflects manual mode started from UFACTORY Studio or the button on the arm.
+
+The arm fails to start if it can't connect to the report port. If the stream drops later, it reconnects in the background. Until it does, every move sets the arm up again, mode changes are not confirmed (a warning is logged), and `ManualMode` returns an error.
 
 ### DoCommand Reference
 
@@ -273,7 +289,9 @@ xArmComponent.DoCommand(ctx, map[string]interface{}{"exit_manual_mode": true})
 ```
 
 > [!CAUTION]
-> Ensure the arm's payload and mounting orientation are correctly configured before entering manual mode, or gravity compensation will be inaccurate and the arm may drift.
+> Ensure the arm's payload and mounting orientation are correctly configured in UFACTORY Studio before entering manual mode, or gravity compensation will be inaccurate and the arm may drift. See [Gripper payload defaults](#gripper-payload-defaults) for the payload the module assumes.
+
+Entering manual mode fails if the controller doesn't reach it, and the error says why. Entering it while the arm touches something, such as the table or a fixture, typically raises controller error C37 (Abnormal Motion in Manual Mode): as the arm goes compliant, the contact moves it in a way the controller doesn't expect, so it stops the arm and leaves it stiff. Move the arm clear of the contact and enter manual mode again.
 
 ### UFactory Studio Proxy
 
@@ -293,6 +311,29 @@ Access Studio at `http://<viam-server-ip>:18333`. If port 18333 is in use, set `
 
 > [!CAUTION]
 > The proxy listens on all interfaces with no authentication. Anyone who can reach that port has full access to UFactory Studio, which can command the arm to move, change settings, and update firmware. Only enable this on trusted networks, or restrict access with firewall rules.
+
+## Gripper payload defaults
+
+The TCP payload (the mass and center of gravity on the flange) is managed in UFACTORY Studio. The module never overwrites a payload set there; it only fills in a gripper preset when the controller has none.
+
+The arm checks the controller's current TCP payload each time it enters manual mode through Viam, and on startup, after a controller reboot, after `Stop`, after leaving manual mode, and after a cleared error:
+
+1. If the controller has a non-zero payload, it is kept as is. It may come from a UFACTORY Studio preset, payload identification, or the controller's saved settings.
+2. Otherwise, the configured gripper's preset from the table below is sent. It isn't saved on the controller, so it lasts until the control box reboots, and the next check sends it again.
+
+Each check logs the payload the arm assumes is on the end effector. It logs a warning when that payload is more than 0.05 kg away from the configured gripper's preset, or is non-zero with no UFACTORY gripper configured. If the logged payload doesn't match what is mounted (for example, the gripper holds tooling or a heavy part), set the correct payload in UFACTORY Studio. A wrong payload makes the arm drift or resist in manual mode.
+
+The arm starts before its gripper, so on startup the gripper's preset isn't known yet and the arm applies it at the next of those checks, typically the first manual-mode entry. Manual mode started from UFACTORY Studio or the button on the arm doesn't go through Viam, so it uses whatever payload the controller already has.
+
+The payload is read from the controller's report port 30002 (see [Arm State](#arm-state)). If that stream drops, the payload is left unchanged until it reconnects.
+
+| Gripper model | Mass (kg) | Center of gravity (mm) | Source |
+|---|---|---|---|
+| `gripper` (G1) | 0.82 | (0, 0, 48) | UFACTORY Studio preset |
+| `gripper` (G2) | 0.82 | (0, 0, 48) | G1 preset; UFACTORY publishes no G2 preset |
+| `vacuum_gripper` | 0.61 | (0, 0, 53) | UFACTORY Studio preset |
+| `gripper_lite` | 0.25 | (0, 0, 30) | Bundled URDF |
+| `vacuum_gripper_lite` | 0.14 | (0, 0, 30) | Bundled URDF |
 
 ## Gripper
 
@@ -398,6 +439,7 @@ For use with the standard xArm vacuum gripper. Both wiring interfaces are suppor
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
+| `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 
@@ -416,6 +458,7 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 |-----------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
+| `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `use_urdfs` | bool | Optional | When `true`, reports mesh-derived collision geometry from `lite_vacuum_gripper.urdf` (packaged in the module) instead of the default hand-authored bounding box. `vacuum_length_mm` still adds a suction-tube collision body in both modes. |
 | `mesh_decimation_ratio` | float64 | Optional | Only applies when `use_urdfs` is `true`. Simplification ratio in `(0, 1]` for the gripper mesh; `0` keeps it at full fidelity. |
 

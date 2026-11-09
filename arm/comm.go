@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,6 +31,20 @@ const notReadyForMotionState = 1 << 4
 const ftSensorValueCount = 6
 const isHoldingWord = 0x0202
 
+// F/T fault codes whose firmware handler runs the stop-FT path, which turns the
+// sensor's sampling-enabled flag off. ClearError does not turn it back on.
+const (
+	errCodeFTRead     = 0x32
+	errCodeFTOverload = 0x35
+)
+
+// ftRestoreCooldown bounds how often a cleared F/T fault re-enables sampling.
+// The controller re-runs its overload check on every control cycle, so a tool
+// that is still loaded past the limit re-trips the fault on the first sample
+// after the enable. Without a cooldown, every subsequent command would pay for
+// another clear-and-retrip round trip.
+const ftRestoreCooldown = 10 * time.Second
+
 var regMap = map[string]byte{
 	"Version":        0x01,
 	"ActualCurrent":  0x05,
@@ -47,6 +62,7 @@ var regMap = map[string]byte{
 	"ZeroJoints":     0x19,
 	"JointPos":       0x2A,
 	"Sensitivity":    0x25,
+	"SetLoadParam":   0x24,
 	"SetBound":       0x34,
 	"EnableBound":    0x34,
 	"CurrentTorque":  0x37,
@@ -96,7 +112,7 @@ func (c *cmd) bytes() []byte {
 type modbusConn struct {
 	addr    string // host:port
 	logger  logging.Logger
-	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.started)
+	onReset func() // optional callback invoked after the socket is reset (used by cmdConn to clear x.payloadChecked)
 
 	lock sync.Mutex
 	conn net.Conn
@@ -167,10 +183,6 @@ func (m *modbusConn) send(ctx context.Context, c cmd, checkError bool) (cmd, err
 				// overcurrent estop has occurred, must be manually cleared by user.
 				return cmd{}, fmt.Errorf("collision caused overcurrent: ensure robot is clear of obstacles and clear error " +
 					"through UFACTORY Studio or clear_error do command")
-			}
-			// Check for manual mode error (0x25)
-			if errCode == 0x25 {
-				return cmd{}, fmt.Errorf("arm is in manual mode: use DoCommand with 'exit_manual_mode' to return to normal operation")
 			}
 			// Any other errors are cleared automatically by the driver.
 			return cmd{}, decodeError(params)
@@ -299,13 +311,15 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 	}
 
 	if currentState[0]&errorState != 0 {
-		// we assume that if we run into an error we will need to restart the servos etc.
-		x.started.Store(-1)
+		// Capture the code before clearing it. The reply to ClearError carries only a
+		// state byte, so this is the last chance to see which fault we recovered from.
+		clearedCode := currentState[1]
 
 		// we are in error state, we will attempt to clear the error
 		// if we fail we will return the error code
 		c := x.newCmd(regMap["ClearError"])
 		newState, err := x.send(ctx, c, false)
+		x.markStateWrite()
 		if err != nil {
 			return multierr.Combine(fmt.Errorf("unable to reset the error %w", errors.New(armBoxErrorMap[currentState[1]])), err)
 		}
@@ -313,13 +327,19 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
 				errors.New(armBoxErrorMap[currentState[1]]))
 		}
-		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxErrorMap[currentState[1]]))
+		// Callers that only read, like JointPositions, clear errors too, so this
+		// line may be the only trace of a fault raised during another operation.
+		x.logger.Warnf("cleared controller error: %v", controllerError(clearedCode))
+
+		// Clearing an F/T fault does not restart the sensor; replay the enable.
+		x.restoreFTSensor(ctx, clearedCode)
 	}
 	if currentState[0]&warningState != 0 {
 		// we are in warning state, we will attempt to clear the warning
 		// if we fail we will return the warning code
 		c := x.newCmd(regMap["ClearWarn"])
 		newState, err := x.send(ctx, c, false)
+		x.markStateWrite()
 		if err != nil {
 			return multierr.Combine(fmt.Errorf("unable to reset the warning %w", errors.New(armBoxWarnMap[currentState[2]])), err)
 		}
@@ -327,11 +347,11 @@ func (x *xArm) checkReadyState(ctx context.Context, enableMotion bool) error {
 			return fmt.Errorf("the arm is in an error state and couldn't be reset, check if the e-stopped is released. Error is %w ",
 				errors.New(armBoxWarnMap[currentState[2]]))
 		}
-		x.logger.Debugf("arm error %s has been cleared", errors.New(armBoxWarnMap[currentState[2]]))
+		x.logger.Infof("cleared controller warning: %s (code 0x%02x)", armBoxWarnMap[currentState[2]], currentState[2])
 	}
 	if currentState[0]&notReadyForMotionState != 0 && enableMotion {
 		// Check if we're intentionally in manual mode - if so, don't "fix" it
-		if x.started.Load() == int32(manualMode) {
+		if r, err := x.reportAfterStateWrite(ctx); err == nil && r.Mode == manualMode {
 			x.logger.Debug("Arm is in manual mode, skipping motion ready check")
 			return nil
 		}
@@ -350,6 +370,7 @@ func (x *xArm) setMotionState(ctx context.Context, state byte) error {
 	c := x.newCmd(regMap["SetState"])
 	c.params = append(c.params, state)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
@@ -362,6 +383,7 @@ func (x *xArm) setMotionMode(ctx context.Context, state byte) error {
 	c := x.newCmd(regMap["SetMode"])
 	c.params = append(c.params, state)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
@@ -376,19 +398,56 @@ func (x *xArm) toggleServos(ctx context.Context, enable bool) error {
 	}
 	c.params = append(c.params, 8, enByte)
 	_, err := x.send(ctx, c, true)
+	x.markStateWrite()
 	return err
 }
 
+// markStateWrite records that a command that can change the controller's mode
+// or state was just sent, so readers of the report stream wait for a packet
+// that arrived after it. Call it whether or not the command succeeded: a
+// failed command may still have been applied.
+func (x *xArm) markStateWrite() {
+	now := time.Now()
+	x.stateWrite.Store(&now)
+}
+
+// lastStateWrite returns when markStateWrite was last called, or the zero time
+// if never.
+func (x *xArm) lastStateWrite() time.Time {
+	if t := x.stateWrite.Load(); t != nil {
+		return *t
+	}
+	return time.Time{}
+}
+
+// reportAfterStateWrite returns the first report packet received after the
+// last markStateWrite, waiting up to reportConfirmTimeout for it.
+func (x *xArm) reportAfterStateWrite(ctx context.Context) (controllerReport, error) {
+	return x.report.waitForReport(ctx, x.lastStateWrite(), reportConfirmTimeout, nil)
+}
+
+// start puts the arm in servo mode, or position mode when direct, ready for
+// motion. It skips the setup when the report stream shows the arm is already
+// there.
 func (x *xArm) start(ctx context.Context, direct bool) error {
 	mode := byte(servoMotionMode)
 	if direct {
 		mode = 0
 	}
 
-	if x.started.Load() == int32(mode) {
+	r, err := x.reportAfterStateWrite(ctx)
+	if err == nil && r.Mode == mode && r.ErrorCode == 0 && r.WarnCode == 0 && r.readyForMotion(x.dof) {
 		return nil
 	}
+	if err != nil {
+		x.logger.Debugf("cannot tell the arm's mode from the controller report, setting it up: %v", err)
+	}
+	return x.setupMotion(ctx, mode)
+}
 
+// setupMotion clears errors, enables the servos and puts the arm in mode with
+// state 0, whatever the report stream says it is in.
+func (x *xArm) setupMotion(ctx context.Context, mode byte) error {
 	if err := x.checkReadyState(ctx, false); err != nil {
 		return err
 	}
@@ -398,6 +457,12 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 		return err
 	}
 
+	if !x.payloadChecked.Load() {
+		if err := x.ensureTCPPayload(ctx, false); err != nil {
+			return err
+		}
+	}
+
 	err = x.setMotionMode(ctx, mode)
 	if err != nil {
 		return err
@@ -405,7 +470,43 @@ func (x *xArm) start(ctx context.Context, direct bool) error {
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return err
 	}
-	x.started.Store(int32(mode))
+	return x.confirmMode(ctx, mode)
+}
+
+// confirmMode waits for the report stream to show the controller in mode and
+// ready for motion. The commands that set a mode succeed before the controller
+// has run the mode, so a fault the mode itself triggers only shows up here: it
+// fails if the report shows a controller error, or after reportConfirmTimeout
+// still shows another mode or an arm that is not ready, such as one whose
+// servos are still disabled after an e-stop.
+//
+// When the stream is unavailable it only warns, since that says nothing about
+// the arm, and the module must keep working without the report port.
+func (x *xArm) confirmMode(ctx context.Context, mode byte) error {
+	since := x.lastStateWrite()
+	r, err := x.report.waitForReport(ctx, since, reportConfirmTimeout, func(r controllerReport) bool {
+		return (r.Mode == mode && r.readyForMotion(x.dof)) || r.ErrorCode != 0
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, streamErr := x.report.latestReport(); streamErr != nil {
+			x.logger.Warnf("cannot confirm the arm switched to mode %d, controller report unavailable: %v", mode, err)
+			return nil //nolint:nilerr // an unavailable report stream must not fail the mode change
+		}
+		// A fault raised and then cleared by a concurrent checkReadyState
+		// leaves the arm stopped with no error code to show, so point at the
+		// log line that clear leaves.
+		return fmt.Errorf("controller did not switch to mode %d and become ready: it reports mode %d state %d, "+
+			"servos enabled %08b, brakes released %08b; check the logs for a cleared controller error",
+			mode, r.Mode, r.State, r.EnableMask, r.BrakeMask)
+	}
+	if r.ErrorCode != 0 {
+		return fmt.Errorf("controller reported an error after switching to mode %d: %w", mode, controllerError(r.ErrorCode))
+	}
+	x.logger.Debugf("controller report shows mode %d state %d %v after setting it",
+		mode, r.State, time.Since(since).Round(time.Millisecond))
 	return nil
 }
 
@@ -421,6 +522,13 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		x.logger.Warnf("Could not fully clear ready state: %v", err)
 	}
 
+	// An e-stop disables the servos and engages the brakes, and clearing its
+	// error does not undo that. Without this the controller accepts mode 2 but
+	// stays not ready (state 5), leaving the arm locked.
+	if err := x.toggleServos(ctx, true); err != nil {
+		return fmt.Errorf("failed to enable servos before manual mode: %w", err)
+	}
+
 	// It appears that the xArm controller cannot transition from mode 1 (servoJ)
 	// to mode 2 (teach mode)
 	// As a work around we transition the controller to mode 0 (position) then
@@ -430,6 +538,13 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 	}
 	if err := x.setMotionState(ctx, 0); err != nil {
 		return fmt.Errorf("failed to activate position mode before manual: %w", err)
+	}
+
+	// Gravity compensation in manual mode relies on the controller's payload
+	// model; a wrong one makes the arm drift or fight the user. Re-check it on
+	// every entry because UFACTORY Studio can change it at any time.
+	if err := x.ensureTCPPayload(ctx, true); err != nil {
+		return fmt.Errorf("failed to check TCP payload before manual mode: %w", err)
 	}
 
 	// Set motion mode to 2 (manual/teaching mode)
@@ -444,7 +559,9 @@ func (x *xArm) enterManualMode(ctx context.Context) error {
 		return fmt.Errorf("failed to activate manual mode: %w", err)
 	}
 
-	x.started.Store(int32(manualMode))
+	if err := x.confirmMode(ctx, manualMode); err != nil {
+		return fmt.Errorf("failed to enter manual mode: %w", err)
+	}
 	x.logger.Info("Manual mode enabled - arm is freely moveable by hand with gravity compensation")
 
 	return nil
@@ -455,15 +572,7 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 	x.manualExit.cancel()
 	x.logger.Info("Exiting manual mode")
 
-	// Reset internal state flag to force re-initialization
-	x.started.Store(-1)
-
-	// Use the existing start function to return to normal servo mode (mode 1)
-	// This will:
-	// - Set mode back to servoMotionMode (1)
-	// - Enable servos properly
-	// - Set state to 0 (ready)
-	if err := x.start(ctx, false); err != nil {
+	if err := x.setupMotion(ctx, servoMotionMode); err != nil {
 		return fmt.Errorf("failed to exit manual mode: %w", err)
 	}
 
@@ -474,6 +583,7 @@ func (x *xArm) exitManualMode(ctx context.Context) error {
 // Close shuts down the arm servos and engages brakes.
 func (x *xArm) Close(ctx context.Context) error {
 	x.manualExit.cancel()
+	x.report.close()
 	if x.proxyServer != nil {
 		x.stopProxy()
 	}
@@ -589,6 +699,13 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	// we ignore a `direct` setting from `extra`.
 	mo.direct = false
 
+	// start() trusts the report stream, which can trail the controller by a packet, so an arm that
+	// just dropped out of motion-ready (after a rejected stream, a parameter change, etc.) could
+	// silently ignore every setpoint. Check the arm itself, as the unary path does.
+	if err := x.checkReadyState(ctx, true); err != nil {
+		return err
+	}
+
 	if err := x.start(ctx, false); err != nil {
 		return err
 	}
@@ -601,6 +718,8 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	// setpoint until we catch up. Keeping the arm fed is the caller's contract, not ours to repair.
 	var anchor time.Time
 	validator := newTrajectoryStreamValidator()
+
+	velLimits, accLimits := streamLimits(x.model, mo, x.conf.streamLimitToleranceRatio())
 
 	// Read batches until the client ends the stream or the operation is cancelled. We select on
 	// `ctx.Done()` rather than plainly ranging over `batches`: a cancellation, whether a `Stop`, a
@@ -622,7 +741,7 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 		}
 
 		for _, p := range batch {
-			if err := validator.validate(p); err != nil {
+			if err := validator.validate(p, velLimits, accLimits); err != nil {
 				return err
 			}
 			// The servo command encodes one value per joint, so a point whose `Positions` length does
@@ -670,6 +789,39 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 	}
 }
 
+// streamLimits returns the per-joint velocity and acceleration bounds a streamed trajectory is
+// checked against, scaled by tol so planner rounding just over a limit is not rejected.
+func streamLimits(model referenceframe.Model, mo moveOptions, tol float64) (velLimits, accLimits []float64) {
+	velLimits, accLimits, ok := referenceframe.TrajectoryLimits(model.DoF())
+	if !ok {
+		// The model carries no rate limits when use_urdfs is set, so fall back to the speed and
+		// acceleration this move would run at.
+		dof := len(model.DoF())
+		velLimits = slices.Repeat([]float64{mo.speed}, dof)
+		accLimits = slices.Repeat([]float64{mo.acceleration}, dof)
+	}
+	for i := range velLimits {
+		velLimits[i] *= tol
+		accLimits[i] *= tol
+	}
+	return velLimits, accLimits
+}
+
+func checkJointConstraints(kind string, values, limits []float64) error {
+	if values == nil {
+		return nil
+	}
+	if len(values) != len(limits) {
+		return fmt.Errorf("trajectory point has %d %s values but %d DoF", len(values), kind, len(limits))
+	}
+	for i, v := range values {
+		if math.Abs(v) > limits[i] {
+			return fmt.Errorf("joint %d %s %v exceeds limit %v", i, kind, v, limits[i])
+		}
+	}
+	return nil
+}
+
 // trajectoryStreamValidator enforces the shape invariants a streamed trajectory must satisfy,
 // checking one point at a time as it arrives. It holds only cross-point state, the running time and
 // the joint count, and nothing xArm-specific, so it can move into RDK to be shared by every Go arm
@@ -686,10 +838,11 @@ func newTrajectoryStreamValidator() *trajectoryStreamValidator {
 }
 
 // validate checks a single point in stream order: the first point must be at time zero, every later
-// point must be strictly later than its predecessor, and all points must carry the same non-empty
-// `Positions`. These are the client's contractual obligations; we recheck them so a malformed stream
+// point must be strictly later than its predecessor, all points must carry the same non-empty
+// `Positions`, and any declared velocities and accelerations must lie within the given per-joint
+// limits. These are the client's contractual obligations; we recheck them so a malformed stream
 // is rejected before it can drive the arm.
-func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
+func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint, velLimits, accLimits []float64) error {
 	if len(p.Positions) == 0 {
 		return errors.New("trajectory point has no joint positions")
 	}
@@ -716,6 +869,14 @@ func (v *trajectoryStreamValidator) validate(p arm.TrajectoryPoint) error {
 	}
 	if len(p.Positions) != v.dof {
 		return fmt.Errorf("trajectory points must all have %d joint positions, got %d", v.dof, len(p.Positions))
+	}
+	if c := p.Constraints; c != nil {
+		if err := checkJointConstraints("velocity", c.Velocities, velLimits); err != nil {
+			return err
+		}
+		if err := checkJointConstraints("acceleration", c.Accelerations, accLimits); err != nil {
+			return err
+		}
 	}
 	v.lastTime = p.Time
 	return nil
@@ -1094,13 +1255,12 @@ func (x *xArm) Stop(ctx context.Context, extra map[string]any) error {
 	defer done()
 
 	x.manualExit.cancel()
-	x.started.Store(-1)
 
 	if err := x.setMotionState(ctx, 3); err != nil {
 		return err
 	}
 
-	return x.start(ctx, false)
+	return x.setupMotion(ctx, servoMotionMode)
 }
 
 // IsMoving returns whether the arm is moving.
@@ -1198,7 +1358,7 @@ func (x *xArm) writeGripperRegisters(ctx context.Context, addr uint16, values []
 	c := x.gripperPreamble(true)
 	c.params = binary.BigEndian.AppendUint16(c.params, addr)
 	c.params = binary.BigEndian.AppendUint16(c.params, uint16(len(values))) //nolint:gosec // bounded by the caller.
-	c.params = append(c.params, byte(2*len(values)))
+	c.params = append(c.params, byte(2*len(values)))                        //nolint:gosec // len is bounded by the caller
 	for _, v := range values {
 		c.params = binary.BigEndian.AppendUint16(c.params, v)
 	}
@@ -1235,7 +1395,7 @@ func (x *xArm) setGripperMode(ctx context.Context, speed bool) error {
 
 func (x *xArm) setGripperPosition(ctx context.Context, position uint32) error {
 	return x.writeGripperRegisters(ctx, gripperTargetPosReg,
-		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)}) //nolint:gosec // split of a 32-bit value.
+		[]uint16{uint16(position >> 16), uint16(position & 0xFFFF)})
 }
 
 func (x *xArm) setGripperSpeed(ctx context.Context, speed uint16) error {
@@ -1404,7 +1564,32 @@ func vacuumStateFromResponse(params []byte, ct connectionType) (bool, error) {
 	return params[4]&mask != 0, nil
 }
 
+// vacuumPumpOnFromResponse decodes DIGITAL_OUT (0x0A18); user pins 0,1,3,4 map to bits 0-3.
+func vacuumPumpOnFromResponse(params []byte, ct connectionType) (bool, error) {
+	if len(params) != 5 {
+		return false, fmt.Errorf("unexpected length for vacuum output readback: %d %v", len(params), params)
+	}
+	onMask, offMask := byte(0x01), byte(0x02)
+	if ct == connectionContact {
+		onMask, offMask = 0x04, 0x08
+	}
+	return params[4]&onMask != 0 && params[4]&offMask == 0, nil
+}
+
+// getVacuumStatus gates the seal sensor on the pump being on, since the sensor
+// can read high with the pump off (as the SDK's check_on does).
 func (x *xArm) getVacuumStatus(ctx context.Context, ct connectionType) (bool, error) {
+	out := x.newCmd(regMap["VacuumState"])
+	out.params = append(out.params, 0x09, 0x0A, 0x18)
+	outRes, err := x.send(ctx, out, true)
+	if err != nil {
+		return false, err
+	}
+	on, err := vacuumPumpOnFromResponse(outRes.params, ct)
+	if err != nil || !on {
+		return false, err
+	}
+
 	c := x.newCmd(regMap["VacuumState"])
 	c.params = append(c.params, 0x09, 0x0A, 0x14)
 	res, err := x.send(ctx, c, true)
@@ -1585,16 +1770,110 @@ func (x *xArm) setFTSensorZero(ctx context.Context) error {
 	return err
 }
 
-func (x *xArm) setFTSensorEnable(ctx context.Context) error {
+// setFTSensorEnable starts or stops F/T sampling (0xC9).
+//
+// Disabling is a real off switch, not just a mute: the controller stops reading
+// the sensor over the bus entirely and zeroes the sample buffers, so while it is
+// off the overload thresholds are never evaluated and neither the overload
+// (0x35) nor the internal-error (0x32) fault can be raised. That makes it usable
+// to deliberately push a tool past the sensor's trip point - at the cost of
+// losing the controller's protection of the sensor hardware for that window.
+//
+// Note the controller puts itself in state 5 (not motion-ready) on either value,
+// the same as any other parameter change. The motion paths re-assert state 0 via
+// checkReadyState, but a caller that toggles the sensor and then expects the arm
+// to move immediately should not assume it is still in state 0.
+func (x *xArm) setFTSensorEnable(ctx context.Context, enable bool) error {
 	c := x.newCmd(regMap["FTSensorEnable"])
-	c.params = append(c.params, 1) // 1 = enable
+	var enByte byte
+	if enable {
+		enByte = 1
+	}
+	c.params = append(c.params, enByte)
 	_, err := x.send(ctx, c, true)
-	return err
+	x.markStateWrite()
+	if err != nil {
+		return err
+	}
+	// Track the intent so a cleared F/T fault restarts sampling only if sampling
+	// was meant to be on - a deliberate disable must not be undone by a clear.
+	x.ftEnabled.Store(enable)
+	return nil
+}
+
+// restoreFTSensor restarts F/T sampling after an F/T fault has just been cleared.
+//
+// On an overload (0x35) or a repeated internal sensor error (0x32) the controller
+// runs its stop-FT path, which clears the sensor's sampling-enabled flag.
+// ClearError resets the error code but not that flag, so without this the force
+// stream stays dead for good - and silently, because the error that would have
+// explained it was just cleared.
+//
+// Best-effort by design: the overload check re-runs on every control cycle, so a
+// tool that is still loaded re-trips the fault on the first sample after the
+// enable. That is a condition only the operator can fix, so report it as a log
+// line rather than failing the caller's motion command, and rate-limit the retry
+// so a stuck-overloaded sensor is not re-enabled on every single command.
+func (x *xArm) restoreFTSensor(ctx context.Context, clearedCode byte) {
+	if clearedCode != errCodeFTOverload && clearedCode != errCodeFTRead {
+		return
+	}
+	if !x.ftEnabled.Load() {
+		// Sampling was never turned on, so there is nothing to put back.
+		return
+	}
+
+	now := time.Now().UnixNano()
+	last := x.ftRestoreNano.Load()
+	if now-last < ftRestoreCooldown.Nanoseconds() || !x.ftRestoreNano.CompareAndSwap(last, now) {
+		x.logger.Debugf("cleared F/T fault 0x%02x; skipping re-enable, within cooldown", clearedCode)
+		return
+	}
+
+	if err := x.setFTSensorEnable(ctx, true); err != nil {
+		x.logger.Warnf("cleared F/T fault 0x%02x but could not restart sampling; "+
+			"the tool may still be loaded past the sensor limit: %v", clearedCode, err)
+		return
+	}
+	x.logger.Infof("cleared F/T fault 0x%02x and restarted F/T sampling", clearedCode)
+}
+
+// encodeTCPPayload packs SetLoadParam's arguments as four little-endian float32
+// values: mass in kg, then the center of gravity in mm in the tool frame.
+func encodeTCPPayload(p tcpPayload) []byte {
+	vals := []float64{p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z}
+	out := make([]byte, 0, 4*len(vals))
+	for _, v := range vals {
+		out = binary.LittleEndian.AppendUint32(out, math.Float32bits(float32(v)))
+	}
+	return out
+}
+
+// setTCPPayload sets the end-effector payload the controller uses for gravity
+// compensation and collision detection. The controller queues it like a motion
+// command, so it only runs while the arm is in motion state 0. It is not saved
+// to the controller's config and is lost on controller reboot.
+func (x *xArm) setTCPPayload(ctx context.Context, p tcpPayload) error {
+	c := x.newCmd(regMap["SetLoadParam"])
+	c.params = encodeTCPPayload(p)
+	if _, err := x.send(ctx, c, true); err != nil {
+		return fmt.Errorf("failed to set TCP payload: %w", err)
+	}
+	// A mode change can discard queued commands, so let it drain before the
+	// caller switches modes.
+	if err := x.waitForMotionStop(ctx); err != nil {
+		return err
+	}
+	x.logger.Infof("TCP payload set: mass=%.3fkg center_of_gravity=(%.1f, %.1f, %.1f)mm",
+		p.MassKg, p.CenterOfGravityMM.X, p.CenterOfGravityMM.Y, p.CenterOfGravityMM.Z)
+	return nil
 }
 
 func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity int) error {
 	c := x.newCmd(regMap["Sensitivity"])
-	c.params = append(c.params, byte(sensitivity))
+	c.params = append(c.params, byte(sensitivity)) //nolint:gosec // bounded to valid sensitivity range
 	_, err := x.send(ctx, c, true)
+	// Like any parameter change, this drops the controller out of state 0.
+	x.markStateWrite()
 	return err
 }

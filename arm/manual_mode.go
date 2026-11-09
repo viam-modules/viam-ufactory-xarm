@@ -32,7 +32,11 @@ func (e *exitTimer) cancel() {
 }
 
 func (x *xArm) ManualMode(ctx context.Context, extra map[string]any) (bool, error) {
-	return x.started.Load() == int32(manualMode), nil
+	r, err := x.reportAfterStateWrite(ctx)
+	if err != nil {
+		return false, err
+	}
+	return r.Mode == manualMode, nil
 }
 
 func (x *xArm) SetManualMode(ctx context.Context, on bool, enabledFor time.Duration, extra map[string]any) error {
@@ -61,11 +65,16 @@ const autoExitTimeout = 10 * time.Second
 
 // autoExitManualMode runs from the exitTimer when an enabledFor deadline expires.
 func (x *xArm) autoExitManualMode() {
-	if x.closed.Load() || x.started.Load() != int32(manualMode) {
+	if x.closed.Load() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), autoExitTimeout)
 	defer cancel()
+	// Exit unless the report shows the arm already left manual mode; when the
+	// report is unavailable, exiting is the safe choice over leaving it compliant.
+	if r, err := x.reportAfterStateWrite(ctx); err == nil && r.Mode != manualMode {
+		return
+	}
 	if err := x.exitManualMode(ctx); err != nil {
 		x.logger.Errorf("failed to automatically exit manual mode: %v", err)
 	}

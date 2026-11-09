@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/components/arm"
@@ -12,6 +13,7 @@ import (
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/utils"
 )
 
 // ModelNameVacuumGripper is the ufactory vacuum gripper commonly attached to xArm6/xArm7/xArm850.
@@ -112,6 +114,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	g.detected = probeGripper(ctx, g.arm, gripperKindVacuum, logger)
 
 	g.connType = resolveGripperConnectionType(newConf.ConnectionType, g.detected.submodel, config.Model, logger)
+	g.releasePayload = registerGripperPreset(g.arm, config.Model.Name, g.detected, logger)
 
 	return g, nil
 }
@@ -129,8 +132,9 @@ type myVacuumGripper struct {
 
 	isMoving atomic.Bool
 
-	detected detectedGripper
-	connType connectionType
+	detected       detectedGripper
+	connType       connectionType
+	releasePayload func()
 
 	logger logging.Logger
 }
@@ -149,8 +153,27 @@ func (g *myVacuumGripper) Grab(ctx context.Context, extra map[string]any) (bool,
 		}
 	}
 
-	return true, nil
+	// Vacuum takes time to build, so wait for the seal.
+	timeout := defaultVacuumSealTimeout
+	if g.conf.VacuumSealTimeoutMS > 0 {
+		timeout = time.Duration(g.conf.VacuumSealTimeoutMS) * time.Millisecond
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		status, err := g.IsHoldingSomething(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		if status.IsHoldingSomething || time.Now().After(deadline) {
+			return status.IsHoldingSomething, nil
+		}
+		if !utils.SelectContextOrWait(ctx, 20*time.Millisecond) {
+			return false, ctx.Err()
+		}
+	}
 }
+
+const defaultVacuumSealTimeout = 100 * time.Millisecond
 
 func (g *myVacuumGripper) Open(ctx context.Context, extra map[string]any) error {
 	g.isMoving.Store(true)
@@ -187,6 +210,9 @@ func (g *myVacuumGripper) Name() resource.Name {
 }
 
 func (g *myVacuumGripper) Close(ctx context.Context) error {
+	if g.releasePayload != nil {
+		g.releasePayload()
+	}
 	return g.Stop(ctx, nil)
 }
 
@@ -249,13 +275,13 @@ func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]sp
 	}
 
 	caseBox, err := spatialmath.NewBox(
-		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM + caseSize.Z/2)}),
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseSize.Z / 2}),
 		caseSize, "vacuum-gripper-box")
 	if err != nil {
 		return nil, err
 	}
 	tube, err := spatialmath.NewBox(
-		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -1 * (vacuumLengthMM / 2)}),
+		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: caseSize.Z + vacuumLengthMM/2}),
 		r3.Vector{X: 5, Y: 5, Z: max(5, vacuumLengthMM)},
 		"vacuum-gripper-tube")
 	if err != nil {
