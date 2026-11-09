@@ -1,0 +1,4 @@
+# The module reads these meshes byte for byte, so a checkout must not rewrite the line endings
+# of the text based formats.
+*.ply -text
+*.glb -text

@@ -1,0 +1,49 @@
+{
+  "name": "uflite_gripper",
+  "links": [
+    {
+      "id": "world_joint",
+      "parent": "world",
+      "pose": {
+        "translation": {},
+        "euler_angles": {}
+      }
+    },
+    {
+      "id": "uflite_gripper_link",
+      "parent": "world_joint",
+      "pose": {
+        "translation": {}
+      },
+      "collision": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/uflite_gripper/collision/gripper_lite.ply"
+          },
+          "label": "uflite_gripper_link"
+        }
+      ]
+    },
+    {
+      "id": "joint_tcp",
+      "parent": "uflite_gripper_link",
+      "pose": {
+        "translation": {
+          "z": 83.6
+        },
+        "euler_angles": {}
+      }
+    },
+    {
+      "id": "link_tcp",
+      "parent": "joint_tcp",
+      "pose": {
+        "translation": {}
+      }
+    }
+  ]
+}

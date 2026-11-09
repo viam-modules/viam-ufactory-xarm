@@ -1,0 +1,347 @@
+{
+  "name": "lite6",
+  "links": [
+    {
+      "id": "base",
+      "parent": "world",
+      "pose": {
+        "translation": {}
+      },
+      "collision": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/base.ply"
+          },
+          "label": "base"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/base.glb"
+          },
+          "label": "base"
+        }
+      ]
+    },
+    {
+      "id": "base_top",
+      "parent": "waist",
+      "pose": {
+        "translation": {
+          "z": 243.3
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "z": 243.5,
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/base_top.ply"
+          },
+          "label": "base_top"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/base_top.glb"
+          },
+          "label": "base_top"
+        }
+      ]
+    },
+    {
+      "id": "upper_arm",
+      "parent": "shoulder",
+      "pose": {
+        "translation": {
+          "z": 200
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": 7.403799795469013e-15,
+            "y": -3.885780586188048e-16,
+            "z": 0.19999999999998666,
+            "o_x": -0.000011019615309471043,
+            "o_y": 0.9999999999392839,
+            "o_z": 1.3492373884815834e-11,
+            "theta": -179.9997895417656
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/upper_arm.ply"
+          },
+          "label": "upper_arm"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/upper_arm.glb"
+          },
+          "label": "upper_arm"
+        }
+      ]
+    },
+    {
+      "id": "upper_forearm",
+      "parent": "elbow",
+      "pose": {
+        "translation": {
+          "x": 87
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": 0.0007353756616357998,
+            "y": 5.402314183969003e-9,
+            "z": 0.39999999864937263,
+            "o_x": 0.000011019669279037865,
+            "o_y": -0.9999999999122987,
+            "o_z": 0.000007346396714014158,
+            "theta": 89.9995790817006
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/upper_forearm.ply"
+          },
+          "label": "upper_forearm"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/upper_forearm.glb"
+          },
+          "label": "upper_forearm"
+        }
+      ]
+    },
+    {
+      "id": "lower_forearm_filler",
+      "parent": "forearm_rot",
+      "pose": {
+        "translation": {}
+      }
+    },
+    {
+      "id": "lower_forearm",
+      "parent": "lower_forearm_filler",
+      "pose": {
+        "translation": {
+          "z": -227.6
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": -0.0009367299691685905,
+            "y": -0.0007134198478405075,
+            "z": -227.21063912675444,
+            "o_x": -0.000007346369728465873,
+            "o_y": -0.0000036732725653778537,
+            "o_z": -0.9999999999662688,
+            "theta": 179.99936862177782
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/lower_forearm.ply"
+          },
+          "label": "lower_forearm"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/lower_forearm.glb"
+          },
+          "label": "lower_forearm"
+        }
+      ]
+    },
+    {
+      "id": "wrist_link",
+      "parent": "wrist",
+      "pose": {
+        "translation": {
+          "z": -61.5
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": -0.0009367299691808191,
+            "y": -0.0007134198478473922,
+            "z": 0.3893608732454935,
+            "o_x": -0.000011019615309479328,
+            "o_y": 0.9999999999392839,
+            "o_z": 1.3491929795605984e-11,
+            "theta": -89.99957908170062
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/wrist_link.ply"
+          },
+          "label": "wrist_link"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/wrist_link.glb"
+          },
+          "label": "wrist_link"
+        }
+      ]
+    },
+    {
+      "id": "gripper_mount",
+      "parent": "gripper_rot",
+      "pose": {
+        "translation": {},
+        "orientation_vector": {
+          "o_z": -1
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": -0.001395880607047884,
+            "y": -0.0007134240642140358,
+            "z": -0.6106391250679315,
+            "o_x": -0.0000073464506832829164,
+            "o_y": 0.000003673137640436029,
+            "o_z": -0.999999999966269,
+            "theta": -0.0006313766642175985
+          },
+          "mesh": {
+            "content_type": "ply",
+            "original_file_source_path_diagnostic": "meshes/lite6/collision/gripper_mount.ply"
+          },
+          "label": "gripper_mount"
+        }
+      ],
+      "visual": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "glb",
+            "original_file_source_path_diagnostic": "meshes/lite6/visual/gripper_mount.glb"
+          },
+          "label": "gripper_mount"
+        }
+      ]
+    }
+  ],
+  "joints": [
+    {
+      "id": "waist",
+      "parent": "base",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": 1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    },
+    {
+      "id": "shoulder",
+      "parent": "base_top",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": 1
+      },
+      "limits": {
+        "min": -149,
+        "max": 149
+      }
+    },
+    {
+      "id": "elbow",
+      "parent": "upper_arm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": -1
+      },
+      "limits": {
+        "min": -3,
+        "max": 298.99999999999994
+      }
+    },
+    {
+      "id": "forearm_rot",
+      "parent": "upper_forearm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": -1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    },
+    {
+      "id": "wrist",
+      "parent": "lower_forearm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": 1
+      },
+      "limits": {
+        "min": -124,
+        "max": 124
+      }
+    },
+    {
+      "id": "gripper_rot",
+      "parent": "wrist_link",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": -1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    }
+  ]
+}

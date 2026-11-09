@@ -10,7 +10,7 @@ build:
 
 module: build
 	rm -f $(BIN_OUTPUT_PATH)/module.tar.gz
-	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(BIN_OUTPUT_PATH)/viam-xarm meta.json arm/3d_models arm/meshes arm/*.urdf
+	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(BIN_OUTPUT_PATH)/viam-xarm meta.json arm/kinematics
 
 clean:
 	rm -rf $(BIN_OUTPUT_PATH)/viam-xarm $(BIN_OUTPUT_PATH)/module.tar.gz
@@ -27,6 +27,11 @@ gofmt:
 lint: gofmt tool-install
 	go mod tidy
 	PATH=$(PATH_WITH_TOOLS) golangci-lint run -c etc/.golangci.yaml --fix
+
+# The shipped kinematic model files are built from the SVA documents, URDFs and GLB files under
+# arm/. Run this after changing any of them and commit what it writes.
+kinematics:
+	go run ./tools/kinematics
 
 update-rdk:
 	go get go.viam.com/rdk@latest
