@@ -147,6 +147,9 @@ func writeArm(src armSource, outDir string, w io.Writer) error {
 		}
 		if len(meshes) == 0 {
 			// nothing to put in its place, so the segment keeps whatever the SVA gave it
+			if len(collisions(links[index[target]])) == 0 {
+				sayf(w, "  %s has no collision geometry in either source\n", target)
+			}
 			continue
 		}
 		for _, id := range segment {

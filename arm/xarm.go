@@ -312,7 +312,7 @@ func (cfg *Config) streamLimitToleranceRatio() float64 {
 // where it is now, so IK does not fail outright on a reported position that drifts a little.
 // The window is clamped to the joint's own range, since a limit past the stop would widen the
 // hardware range and the model refuses that. A joint reporting a position outside its range is
-// locked at the nearest bound, which is not where it is, so outside is set for the caller to say so.
+// locked at the nearest bound, and outside tells the caller, since that is not where the joint is.
 func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64, outside bool) {
 	now := utils.RadToDeg(current)
 	lo, hi = max(now-1, joint.Min), min(now+1, joint.Max)
@@ -333,8 +333,9 @@ func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.Joi
 //
 // speedDegsPerSec and accelDegsPerSec2 become every joint's velocity and acceleration limits, so
 // the motion service plans against the speeds the arm moves at. Pass 0 for either to leave the
-// file's limits alone. A joint in badJoints is locked to a degree either side of where it is
-// now. moveHz is published as the rate the arm expects joint positions at.
+// file's limits alone. A value above a limit the file holds is an error naming the joint, since
+// a limit can only narrow. A joint in badJoints is locked to a degree either side of where it
+// is now. moveHz is published as the rate the arm expects joint positions at.
 func MakeModelFrame(
 	resourceName string,
 	modelName string,
@@ -680,7 +681,7 @@ func (x *xArm) Geometries(ctx context.Context, extra map[string]any) ([]spatialm
 	return gif.Geometries(), nil
 }
 
-// Get3DModels serves the visual meshes the model carries, keyed by the link each one shows.
+// Get3DModels serves the GLB visuals the model carries, keyed by the link each one shows.
 func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[string]*commonpb.Mesh, error) {
 	models := make(map[string]*commonpb.Mesh)
 	sm, ok := x.model.(*referenceframe.SimpleModel)
@@ -689,19 +690,20 @@ func (x *xArm) Get3DModels(ctx context.Context, extra map[string]any) (map[strin
 	}
 	for _, link := range sm.ModelConfig().Links {
 		for _, visual := range sm.VisualGeometries(link.ID) {
-			if visual.Type != spatialmath.MeshType || len(visual.MeshData) == 0 {
+			if visual.Type != spatialmath.MeshType || visual.MeshContentType != "glb" || len(visual.MeshData) == 0 {
 				continue
 			}
+			// the viewer still asks for the MIME spelling rather than the extension
 			models[link.ID] = &commonpb.Mesh{Mesh: visual.MeshData, ContentType: "model/gltf-binary"}
 		}
 	}
 	return models, nil
 }
 
-// Kinematics returns the model built at configure time, with the speed limits from the config
-// on it. set_speed and set_acceleration change how the arm moves without rebuilding this, so
+// Kinematics returns the model built at configure time, including the speed limits from the
+// config. set_speed and set_acceleration change how the arm moves without rebuilding this, so
 // after one of those the published limits are the configured ones rather than the current ones.
-// That is deliberate, since kinematics describe how the arm is set up and a DoCommand is not a
+// That is deliberate: kinematics describe how the arm is set up, and a DoCommand is not a
 // reconfigure.
 func (x *xArm) Kinematics(ctx context.Context) (referenceframe.Model, error) {
 	return x.model, nil
