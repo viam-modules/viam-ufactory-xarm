@@ -106,7 +106,6 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 // With collision_geometry set to mesh each gripper reports the collision mesh the module ships,
 // and the mesh crosses the wire in the typed model.
 func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
-	moduleRoot(t)
 
 	for _, name := range []string{ModelNameGripper, ModelNameGripperLite, ModelNameVacuumGripper, ModelNameVacuumGripperLite} {
 		t.Run(name, func(t *testing.T) {

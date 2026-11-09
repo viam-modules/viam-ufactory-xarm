@@ -1,11 +1,15 @@
 package arm
 
 import (
+	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"hash/fnv"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
@@ -68,14 +72,81 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
 }
 
-// kinematicsPath locates a shipped model file under the module root the server hands us. Tests
-// point VIAM_MODULE_ROOT at the repository.
-func kinematicsPath(file string) (string, error) {
-	root := os.Getenv("VIAM_MODULE_ROOT")
-	if root == "" {
-		return "", errors.New("VIAM_MODULE_ROOT is not set, so the kinematic model files cannot be found")
+// kinematicsFiles is the model files and their meshes, built into the binary so a module started
+// straight from the build directory finds them without a module root.
+//
+//go:embed kinematics
+var kinematicsFiles embed.FS
+
+// kinematicsDir unpacks the embedded files once per process, since RDK reads a model file and the
+// meshes beside it from disk. The directory is named for the content, so a restart reuses it and
+// a new build gets its own.
+var kinematicsDir = sync.OnceValues(unpackKinematics)
+
+func unpackKinematics() (string, error) {
+	const root = "kinematics"
+	digest := fnv.New64a()
+	var paths []string
+	err := fs.WalkDir(kinematicsFiles, root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := kinematicsFiles.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, p)
+		// a hash never fails to take bytes
+		_, _ = digest.Write([]byte(p))
+		_, _ = digest.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
-	return filepath.Join(root, "arm", "kinematics", file+".json"), nil
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("viam-xarm-kinematics-%016x", digest.Sum64()))
+	done := filepath.Join(dir, ".complete")
+	if _, err := os.Stat(done); err == nil {
+		return dir, nil
+	}
+	// written beside the final name and renamed into place, so a half written directory is never
+	// taken for a complete one by another process starting at the same time
+	tmp, err := os.MkdirTemp(os.TempDir(), "viam-xarm-kinematics-")
+	if err != nil {
+		return "", err
+	}
+	for _, p := range paths {
+		data, err := kinematicsFiles.ReadFile(p)
+		if err != nil {
+			return "", err
+		}
+		target := filepath.Join(tmp, filepath.FromSlash(strings.TrimPrefix(p, root+"/")))
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(target, data, 0o600); err != nil {
+			return "", err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".complete"), nil, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dir); err != nil {
+		if _, statErr := os.Stat(done); statErr == nil {
+			return dir, os.RemoveAll(tmp)
+		}
+		return "", err
+	}
+	return dir, nil
+}
+
+// kinematicsPath locates a model file in the unpacked directory.
+func kinematicsPath(file string) (string, error) {
+	dir, err := kinematicsDir()
+	if err != nil {
+		return "", fmt.Errorf("unpacking the kinematic model files: %w", err)
+	}
+	return filepath.Join(dir, file+".json"), nil
 }
 
 // loadKinematics reads a shipped kinematic model file as a model named for the resource, with
@@ -146,15 +217,17 @@ func warnStaleKeys(conf resource.Config, logger logging.Logger, keys ...string) 
 }
 
 // gripperWantsMesh reads the gripper's collision geometry choice. use_urdfs used to make the
-// same choice, so a config that still sets it gets the mesh and a warning rather than a silent
-// fall back to the boxes.
+// same choice, so a config that still sets it and nothing else gets the mesh rather than a
+// silent fall back to the boxes, and a warning either way.
 func gripperWantsMesh(conf resource.Config, newConf *GripperConfig, logger logging.Logger) bool {
 	if conf.Attributes.Has("mesh_decimation_ratio") {
 		logger.Warn("mesh_decimation_ratio no longer does anything, the mesh ships decimated")
 	}
-	if newConf.CollisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
+	if conf.Attributes.Has("use_urdfs") {
 		logger.Warnf("use_urdfs is now %s, set that instead", `"collision_geometry": "mesh"`)
-		return true
+		if newConf.CollisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
+			return true
+		}
 	}
 	return newConf.CollisionGeometry == collisionGeometryMesh
 }

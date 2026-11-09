@@ -56,6 +56,7 @@
       "visual": [
         {
           "center": {
+            "z": 267,
             "o_z": 1
           },
           "mesh": {
@@ -92,6 +93,8 @@
       "visual": [
         {
           "center": {
+            "x": 53.5,
+            "z": 284.5,
             "o_z": 1
           },
           "mesh": {
@@ -130,6 +133,8 @@
       "visual": [
         {
           "center": {
+            "x": 77.5,
+            "z": -172.5,
             "o_z": 1
           },
           "mesh": {
@@ -168,6 +173,7 @@
       "visual": [
         {
           "center": {
+            "z": -170,
             "o_z": 1
           },
           "mesh": {
@@ -206,6 +212,8 @@
       "visual": [
         {
           "center": {
+            "x": 76,
+            "z": -97,
             "o_z": 1
           },
           "mesh": {
@@ -246,7 +254,7 @@
       "visual": [
         {
           "center": {
-            "o_z": 1
+            "o_z": -1
           },
           "mesh": {
             "content_type": "glb",

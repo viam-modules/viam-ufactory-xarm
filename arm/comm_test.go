@@ -96,7 +96,6 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 
 func TestStreamLimits(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	const speedDegs, accelDegs, tol = 45.0, 300.0, 1.01
 	mo := moveOptions{speed: 0.5, acceleration: 2}
@@ -154,7 +153,6 @@ func TestCheckJointConstraints(t *testing.T) {
 func TestCreateRawJointSteps1(t *testing.T) {
 	var err error
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	x := &xArm{
 		speed:        utils.DegToRad(defaultSpeed),
@@ -179,7 +177,6 @@ func TestCreateRawJointSteps1(t *testing.T) {
 func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	var err error
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	x := &xArm{
 		speed:        utils.DegToRad(3),

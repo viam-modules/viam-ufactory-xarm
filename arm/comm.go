@@ -794,8 +794,8 @@ func (x *xArm) MoveThroughJointPositionsStreamed(
 func streamLimits(model referenceframe.Model, mo moveOptions, tol float64) (velLimits, accLimits []float64) {
 	velLimits, accLimits, ok := referenceframe.TrajectoryLimits(model.DoF())
 	if !ok {
-		// The model carries no rate limits when use_urdfs is set, so fall back to the speed and
-		// acceleration this move would run at.
+		// The model carries no rate limits unless the config set a speed and acceleration, so
+		// fall back to the ones this move would run at.
 		dof := len(model.DoF())
 		velLimits = slices.Repeat([]float64{mo.speed}, dof)
 		accLimits = slices.Repeat([]float64{mo.acceleration}, dof)

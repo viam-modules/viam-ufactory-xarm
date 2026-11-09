@@ -149,13 +149,13 @@ For an attached gripper, set its parent to the arm's name:
 
 ### Kinematics
 
-Each arm ships a kinematic model file under `arm/kinematics`, one per hardware variant, that `GetKinematics` and the frame system read. The file carries the arm's frames, its joint limits, a collision mesh for every link decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
+Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, the collision mesh of every link the URDF has one for, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
 
-The configured `speed_degs_per_sec` and `acceleration_degs_per_sec_per_sec` become every joint's velocity and acceleration limits on the model, and a joint in `bad-joints` is locked to a degree either side of where it sits at startup, clamped to the joint's range. A limit can only narrow what the file holds, so the motion service and any client plan within what the arm will accept. `move_hz` is published as the rate the arm expects joint positions at.
+The configured `speed_degs_per_sec` and `acceleration_degs_per_sec_per_sec` become every joint's velocity and acceleration limits on the model, and a joint in `bad-joints` is locked to a degree either side of where it sits at startup, within the joint's range. A limit can only narrow what the file holds, so the motion service and any client plan within what the arm will accept, and a joint that reports a position outside its range fails the resource rather than being locked somewhere it is not. `move_hz` is published as the rate the arm expects joint positions at.
 
 The `use_urdfs` and `mesh_decimation_ratios` attributes are gone, since the model always carries the meshes. A config that still sets them gets a warning.
 
-The files are generated, not edited. `make kinematics` rebuilds them from the SVA documents, URDFs and GLB files under `arm/`, and a test fails when the shipped files are stale.
+The files are generated, not edited. `make kinematics` rebuilds them from the SVA documents, URDFs and GLB files under `arm/`, and CI fails when the committed files are stale.
 
 ### Error Handling
 

@@ -309,20 +309,17 @@ func (cfg *Config) streamLimitToleranceRatio() float64 {
 }
 
 // lockedJointRangeDegs is the window a locked joint is narrowed to, a degree either side of
-// where it is now, so IK does not fail outright on a reported position that drifts a little.
-// The window is clamped to the joint's own range, since a limit past the stop would widen the
-// hardware range and the model refuses that. A joint reporting a position outside its range is
-// locked at the nearest bound, and outside tells the caller, since that is not where the joint is.
-func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64, outside bool) {
+// where it is now, so IK does not fail outright on a reported position that drifts a little,
+// clamped to the joint's own range since a bound past the stop would widen the hardware range
+// and the model refuses that. A joint reporting a position outside its range cannot be locked
+// where it is, and ok is false, since a window pulled inside the range would have the planner
+// place everything downstream of the joint somewhere the arm is not.
+func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64, ok bool) {
 	now := utils.RadToDeg(current)
-	lo, hi = max(now-1, joint.Min), min(now+1, joint.Max)
-	if lo <= hi {
-		return lo, hi, false
+	if now < joint.Min || now > joint.Max {
+		return 0, 0, false
 	}
-	if now < joint.Min {
-		return joint.Min, joint.Min, true
-	}
-	return joint.Max, joint.Max, true
+	return max(now-1, joint.Min), min(now+1, joint.Max), true
 }
 
 // MakeModelFrame returns the kinematics model of the arm, named for the resource, with the
@@ -335,7 +332,8 @@ func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.Joi
 // the motion service plans against the speeds the arm moves at. Pass 0 for either to leave the
 // file's limits alone. A value above a limit the file holds is an error naming the joint, since
 // a limit can only narrow. A joint in badJoints is locked to a degree either side of where it
-// is now. moveHz is published as the rate the arm expects joint positions at.
+// is now, and one reporting a position outside its range is an error, since the lock could not
+// be put where the joint is. moveHz is published as the rate the arm expects joint positions at.
 func MakeModelFrame(
 	resourceName string,
 	modelName string,
@@ -374,9 +372,9 @@ func MakeModelFrame(
 			entry.MaxVelocity, entry.MaxAcceleration = &speedDegsPerSec, &accelDegsPerSec2
 		}
 		if slices.Contains(badJoints, i) {
-			lo, hi, outside := lockedJointRangeDegs(current[i], joint)
-			if outside {
-				logger.Warnf("joint %d (%s) reports %v degrees, outside its range [%v, %v], so it is locked at the nearest bound",
+			lo, hi, ok := lockedJointRangeDegs(current[i], joint)
+			if !ok {
+				return nil, fmt.Errorf("joint %d (%s) reports %v degrees, outside its range [%v, %v], so it cannot be locked where it is",
 					i, joint.ID, utils.RadToDeg(current[i]), joint.Min, joint.Max)
 			}
 			entry.Min, entry.Max = &lo, &hi

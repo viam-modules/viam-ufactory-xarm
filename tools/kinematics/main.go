@@ -148,7 +148,7 @@ func writeArm(src armSource, outDir string, w io.Writer) error {
 		if len(meshes) == 0 {
 			// nothing to put in its place, so the segment keeps whatever the SVA gave it
 			if len(collisions(links[index[target]])) == 0 {
-				sayf(w, "  %s has no collision geometry in either source\n", target)
+				sayf(w, "  %s: %s has no collision geometry in either source\n", src.name, target)
 			}
 			continue
 		}
@@ -172,7 +172,7 @@ func writeArm(src armSource, outDir string, w io.Writer) error {
 		return fmt.Errorf("the meshes did not land where %s has them: %w", src.urdf, err)
 	}
 	if src.visuals != "" {
-		if err := attachVisuals(merged, src.visuals); err != nil {
+		if err := attachVisuals(merged, links, src.visuals); err != nil {
 			return err
 		}
 	}
@@ -324,9 +324,11 @@ func collisions(link referenceframe.LinkConfig) []spatialmath.GeometryConfig {
 	return append([]spatialmath.GeometryConfig{*link.Geometry}, link.Geometries...)
 }
 
-// attachVisuals puts each GLB in dir on the link it is named for. A GLB named for a link the
+// attachVisuals puts each GLB in dir on the link it is named for. The viewer attaches a GLB to
+// the frame named for its link, and RDK places a link's geometry at the link's parent, so the
+// visual carries the link's own transform to land in the same place. A GLB named for a link the
 // model does not have is an error, since the viewer would lose a part it shows today.
-func attachVisuals(model *referenceframe.SimpleModel, dir string) error {
+func attachVisuals(model *referenceframe.SimpleModel, links []referenceframe.LinkConfig, dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -340,6 +342,10 @@ func attachVisuals(model *referenceframe.SimpleModel, dir string) error {
 			continue
 		}
 		link := strings.TrimSuffix(e.Name(), ".glb")
+		i := slices.IndexFunc(links, func(l referenceframe.LinkConfig) bool { return l.ID == link })
+		if i < 0 {
+			return fmt.Errorf("visual %s names a link the model does not have", filepath.Join(dir, e.Name()))
+		}
 		//nolint:gosec
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
@@ -350,8 +356,12 @@ func attachVisuals(model *referenceframe.SimpleModel, dir string) error {
 			MeshData:          data,
 			MeshContentType:   "glb",
 			MeshFilePath:      e.Name(),
+			TranslationOffset: links[i].Translation,
 			OrientationOffset: *zero,
 			Label:             link,
+		}
+		if links[i].Orientation != nil {
+			visual.OrientationOffset = *links[i].Orientation
 		}
 		if err := model.SetVisualGeometries(link, []spatialmath.GeometryConfig{visual}); err != nil {
 			return fmt.Errorf("visual %s: %w", filepath.Join(dir, e.Name()), err)

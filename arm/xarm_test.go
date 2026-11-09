@@ -4,8 +4,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"go.viam.com/rdk/logging"
@@ -45,19 +43,6 @@ func TestStreamLimitToleranceRatio(t *testing.T) {
 }
 
 // armDir returns the absolute path to the arm/ directory containing test data.
-func armDir() string {
-	//nolint:dogsled
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Dir(file)
-}
-
-// moduleRoot points VIAM_MODULE_ROOT at the repository, where the shipped kinematic model files
-// are, the way the server points it at the unpacked module.
-func moduleRoot(t *testing.T) {
-	t.Helper()
-	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
-}
-
 func simpleModel(t *testing.T, m referenceframe.Model) *referenceframe.SimpleModel {
 	t.Helper()
 	sm, ok := m.(*referenceframe.SimpleModel)
@@ -69,7 +54,6 @@ func simpleModel(t *testing.T, m referenceframe.Model) *referenceframe.SimpleMod
 // viewer has GLB files for carry them as visuals.
 func TestMakeModelFrame(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	for _, tc := range []struct {
 		model      string
@@ -105,7 +89,6 @@ func TestMakeModelFrame(t *testing.T) {
 // the box its SVA document gives it.
 func TestMakeModelFrameVariant(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	mountGeometry := func(armTypeCode int) spatialmath.Geometry {
 		m, err := MakeModelFrame("", ModelName6DOF, nil, nil, logger, armTypeCode, 0, 0, 0)
@@ -124,22 +107,8 @@ func TestMakeModelFrameVariant(t *testing.T) {
 	test.That(t, isMesh, test.ShouldBeFalse)
 }
 
-func TestMakeModelFrameMissingRoot(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
-	t.Setenv("VIAM_MODULE_ROOT", "")
-	_, err := MakeModelFrame("", ModelName6DOF, nil, nil, logger, 0, 0, 0, 0)
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "VIAM_MODULE_ROOT")
-
-	t.Setenv("VIAM_MODULE_ROOT", "/nonexistent/path")
-	_, err = MakeModelFrame("", ModelName6DOF, nil, nil, logger, 0, 0, 0, 0)
-	test.That(t, err, test.ShouldNotBeNil)
-}
-
 func TestMakeModelFrameUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	_, err := MakeModelFrame("", "unknownModel", nil, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
@@ -148,7 +117,6 @@ func TestMakeModelFrameUnknownModel(t *testing.T) {
 
 func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	current := make([]referenceframe.Input, 6)
 
@@ -163,8 +131,8 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 // The one degree of slack has to stay inside the joint, because a joint fails against its stop
 // as often as anywhere else and the published bound would otherwise sit past it, where the
 // motion service plans and the controller refuses. A joint that reports a position its own
-// file calls impossible is locked at the nearest bound, since a bound past the stop would widen
-// the hardware range and the model refuses that.
+// file calls impossible cannot be locked at all, since a window pulled inside the range would
+// put everything downstream of the joint somewhere the arm is not.
 func TestLockedJointRangeDegs(t *testing.T) {
 	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
 
@@ -172,20 +140,22 @@ func TestLockedJointRangeDegs(t *testing.T) {
 		name           string
 		atDegs         float64
 		wantLo, wantHi float64
-		wantOutside    bool
+		wantOK         bool
 	}{
-		{"on the upper stop", 10, 9, 10, false},
-		{"on the lower stop", -225, -225, -224, false},
-		{"well inside", -30, -31, -29, false},
-		{"just past the upper stop", 10.5, 9.5, 10, false},
-		{"past the upper stop", 30, 10, 10, true},
-		{"past the lower stop", -300, -225, -225, true},
+		{"on the upper stop", 10, 9, 10, true},
+		{"on the lower stop", -225, -225, -224, true},
+		{"well inside", -30, -31, -29, true},
+		{"just past the upper stop", 10.5, 0, 0, false},
+		{"past the upper stop", 30, 0, 0, false},
+		{"past the lower stop", -300, 0, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			lo, hi, outside := lockedJointRangeDegs(utils.DegToRad(tc.atDegs), elbow)
-			test.That(t, lo, test.ShouldAlmostEqual, tc.wantLo, 1e-8)
-			test.That(t, hi, test.ShouldAlmostEqual, tc.wantHi, 1e-8)
-			test.That(t, outside, test.ShouldEqual, tc.wantOutside)
+			lo, hi, ok := lockedJointRangeDegs(utils.DegToRad(tc.atDegs), elbow)
+			test.That(t, ok, test.ShouldEqual, tc.wantOK)
+			if ok {
+				test.That(t, lo, test.ShouldAlmostEqual, tc.wantLo, 1e-8)
+				test.That(t, hi, test.ShouldAlmostEqual, tc.wantHi, 1e-8)
+			}
 		})
 	}
 }
@@ -195,7 +165,6 @@ func TestLockedJointRangeDegs(t *testing.T) {
 // the failure this is about.
 func TestMakeModelFrameServedLimits(t *testing.T) {
 	const speed, accel, hz = 45.0, 300.0, 120.0
-	moduleRoot(t)
 
 	// the xArm6 elbow lives in [-225, 10], so a lock there lands at [-31, -29]
 	elbowAt30Below := make([]referenceframe.Input, 6)
@@ -272,20 +241,17 @@ func TestMakeModelFrameServedLimits(t *testing.T) {
 	}
 }
 
-// A joint reporting a position outside its range is locked at the nearest bound rather than
-// refused, since the arm still has to come up for the other joints to be driven.
-func TestMakeModelFrameLocksAnOutOfRangeJoint(t *testing.T) {
+// A joint reporting a position outside its range fails the resource rather than being locked
+// somewhere it is not.
+func TestMakeModelFrameRefusesAnOutOfRangeLock(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	current := make([]referenceframe.Input, 6)
 	current[2] = utils.DegToRad(30) // past the elbow's upper stop at 10
 
-	m, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, logger, 0, 0, 0, 0)
-	test.That(t, err, test.ShouldBeNil)
-	elbow := m.DoF()[2]
-	test.That(t, utils.RadToDeg(elbow.Min), test.ShouldAlmostEqual, 10, 1e-8)
-	test.That(t, utils.RadToDeg(elbow.Max), test.ShouldAlmostEqual, 10, 1e-8)
+	_, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "outside its range")
 }
 
 func TestResolveArmKinematicsArtifact(t *testing.T) {
@@ -343,9 +309,8 @@ func TestResolveArmKinematicsArtifact(t *testing.T) {
 	}
 }
 
-// Every artifact the tables name ships as a file.
+// Every artifact the tables name is built into the binary.
 func TestKinematicsArtifactsOnDisk(t *testing.T) {
-	moduleRoot(t)
 	var artifacts []kinematicsArtifact
 	for _, a := range armKinematicsBase {
 		artifacts = append(artifacts, a)
@@ -367,7 +332,6 @@ func TestKinematicsArtifactsOnDisk(t *testing.T) {
 // Get3DModels serves the GLB each link carries, keyed by link, the way the viewer expects.
 func TestGet3DModels(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	moduleRoot(t)
 
 	for _, tc := range []struct {
 		model string

@@ -1,9 +1,6 @@
 package mptests
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -16,12 +13,6 @@ import (
 )
 
 func makeTestFrameSystem(logger logging.Logger) (*referenceframe.FrameSystem, error) {
-	// the arm's model file is read from the module root, which is the repository here
-	//nolint:dogsled
-	_, file, _, _ := runtime.Caller(0)
-	if err := os.Setenv("VIAM_MODULE_ROOT", filepath.Join(filepath.Dir(file), "..")); err != nil {
-		return nil, err
-	}
 	armModel, err := xarm.MakeModelFrame("", xarm.ModelName6DOF, nil, nil, logger, 0, 0, 0, 0)
 	if err != nil {
 		return nil, err

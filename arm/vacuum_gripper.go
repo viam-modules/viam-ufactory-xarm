@@ -264,7 +264,7 @@ var (
 )
 
 // vacuumGripperGeometries returns hand-authored housing + suction-tube
-// boxes for the vacuum gripper family. Used when use_urdfs is false.
+// boxes for the vacuum gripper family. Used when collision_geometry is boxes.
 func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]spatialmath.Geometry, error) {
 	var caseSize r3.Vector
 	switch model {
