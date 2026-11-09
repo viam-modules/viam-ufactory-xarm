@@ -203,19 +203,15 @@ type TrajGenConfig struct {
 
 // Config is used for converting config attributes.
 type Config struct {
-	Host         string  `json:"host"`
-	Port         int     `json:"port,omitempty"`
-	Speed        float64 `json:"speed_degs_per_sec,omitempty"`
-	Acceleration float64 `json:"acceleration_degs_per_sec_per_sec,omitempty"`
-	MoveHZ       float64 `json:"move_hz,omitempty"`
-	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
-	BadJoints    []int   `json:"bad-joints"`
-	Motion       string  `json:"motion"`
-	// UseURDFs and MeshDecimationRatios are accepted and ignored. The model always carries its
-	// collision meshes, decimated when the module was built.
-	UseURDFs                  bool           `json:"use_urdfs,omitempty"`
+	Host                      string         `json:"host"`
+	Port                      int            `json:"port,omitempty"`
+	Speed                     float64        `json:"speed_degs_per_sec,omitempty"`
+	Acceleration              float64        `json:"acceleration_degs_per_sec_per_sec,omitempty"`
+	MoveHZ                    float64        `json:"move_hz,omitempty"`
+	Sensitivity               *int           `json:"collision_sensitivity,omitempty"`
+	BadJoints                 []int          `json:"bad-joints"`
+	Motion                    string         `json:"motion"`
 	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
-	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
 	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
 
 	StudioProxy     bool `json:"ufactory-studio-proxy,omitempty"`
@@ -408,6 +404,7 @@ func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, m
 	if err != nil {
 		return nil, err
 	}
+	warnStaleKeys(conf, logger, "use_urdfs", "mesh_decimation_ratios")
 
 	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName, deps)
 }
@@ -522,10 +519,6 @@ func NewXArm(ctx context.Context, name resource.Name,
 		if err != nil {
 			return nil, multierr.Combine(err, x.Close(ctx))
 		}
-	}
-
-	if newConf.UseURDFs || len(newConf.MeshDecimationRatios) > 0 {
-		logger.Warn("use_urdfs and mesh_decimation_ratios no longer do anything, the model always carries its collision meshes")
 	}
 
 	// The effective speeds, not the raw config ones, because an arm with no speed configured

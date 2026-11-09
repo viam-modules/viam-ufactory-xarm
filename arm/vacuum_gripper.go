@@ -90,7 +90,8 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	mf, err := newGripperKinematics(config.Model.Name, newConf, logger, func() ([]spatialmath.Geometry, error) {
+	mesh := gripperWantsMesh(config, newConf, logger)
+	mf, err := newGripperKinematics(config.Model.Name, mesh, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
 	})
 	if err != nil {
@@ -98,12 +99,12 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	}
 
 	g := &myVacuumGripper{
-		name:     config.ResourceName(),
-		conf:     newConf,
-		logger:   logger,
-		model:    config.Model,
-		mf:       mf,
-		useURDFs: newConf.UseURDFs,
+		name:   config.ResourceName(),
+		conf:   newConf,
+		logger: logger,
+		model:  config.Model,
+		mf:     mf,
+		mesh:   mesh,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -122,11 +123,12 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
-	name     resource.Name
-	conf     *GripperConfig
-	model    resource.Model
-	mf       referenceframe.Model
-	useURDFs bool
+	name  resource.Name
+	conf  *GripperConfig
+	model resource.Model
+	mf    referenceframe.Model
+	// mesh is set when the model carries the shipped collision mesh rather than the boxes
+	mesh bool
 
 	arm arm.Arm
 
@@ -230,7 +232,7 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	if g.useURDFs {
+	if g.mesh {
 		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err

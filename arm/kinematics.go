@@ -9,6 +9,7 @@ import (
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
+	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 )
 
@@ -134,19 +135,39 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 	return cfg.ParseConfig(name)
 }
 
-// newGripperKinematics builds the model a gripper reports to the frame system:
-// the shipped collision mesh when use_urdfs is set, otherwise a model carrying the
-// hand-authored bounding boxes that boxGeoms produces.
+// warnStaleKeys logs once for each attribute the config still sets that the module no longer
+// reads, since the server drops a key the config struct does not have without a word.
+func warnStaleKeys(conf resource.Config, logger logging.Logger, keys ...string) {
+	for _, key := range keys {
+		if conf.Attributes.Has(key) {
+			logger.Warnf("%s no longer does anything, the model always carries its collision meshes", key)
+		}
+	}
+}
+
+// gripperWantsMesh reads the gripper's collision geometry choice. use_urdfs used to make the
+// same choice, so a config that still sets it gets the mesh and a warning rather than a silent
+// fall back to the boxes.
+func gripperWantsMesh(conf resource.Config, newConf *GripperConfig, logger logging.Logger) bool {
+	if conf.Attributes.Has("mesh_decimation_ratio") {
+		logger.Warn("mesh_decimation_ratio no longer does anything, the mesh ships decimated")
+	}
+	if newConf.CollisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
+		logger.Warnf("use_urdfs is now %s, set that instead", `"collision_geometry": "mesh"`)
+		return true
+	}
+	return newConf.CollisionGeometry == collisionGeometryMesh
+}
+
+// newGripperKinematics builds the model a gripper reports to the frame system, the shipped
+// collision mesh when mesh is set and otherwise a model carrying the hand authored bounding boxes
+// that boxGeoms produces.
 func newGripperKinematics(
 	modelName string,
-	conf *GripperConfig,
-	logger logging.Logger,
+	mesh bool,
 	boxGeoms func() ([]spatialmath.Geometry, error),
 ) (referenceframe.Model, error) {
-	if conf.MeshDecimationRatio != nil {
-		logger.Warnf("%s: mesh_decimation_ratio no longer does anything, the mesh ships decimated", modelName)
-	}
-	if conf.UseURDFs {
+	if mesh {
 		return loadGripperModel(modelName)
 	}
 	geoms, err := boxGeoms()

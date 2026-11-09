@@ -6,7 +6,9 @@ import (
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
+	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
 
@@ -40,11 +42,9 @@ func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	test.That(t, spatialmath.GeometriesAlmostEqual(rebuiltGeoms[0], box), test.ShouldBeTrue)
 }
 
-// Each gripper's default (non-URDF) model must reach a planner with the same
-// bounding boxes its Geometries method reports.
+// Each gripper's default model must reach a planner with the same bounding boxes its
+// Geometries method reports.
 func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
 	for _, tc := range []struct {
 		name  string
 		geoms func() ([]spatialmath.Geometry, error)
@@ -68,7 +68,7 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, want, test.ShouldNotBeEmpty)
 
-			mf, err := newGripperKinematics(tc.name, &GripperConfig{}, logger, tc.geoms)
+			mf, err := newGripperKinematics(tc.name, false, tc.geoms)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, mf.DoF(), test.ShouldBeEmpty)
 
@@ -103,15 +103,14 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 	return gif.Geometries()
 }
 
-// With use_urdfs each gripper reports the collision mesh the module ships, and the mesh crosses
-// the wire in the typed model.
+// With collision_geometry set to mesh each gripper reports the collision mesh the module ships,
+// and the mesh crosses the wire in the typed model.
 func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
-	logger := logging.NewTestLogger(t)
 	moduleRoot(t)
 
 	for _, name := range []string{ModelNameGripper, ModelNameGripperLite, ModelNameVacuumGripper, ModelNameVacuumGripperLite} {
 		t.Run(name, func(t *testing.T) {
-			mf, err := newGripperKinematics(name, &GripperConfig{UseURDFs: true}, logger, nil)
+			mf, err := newGripperKinematics(name, true, nil)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, mf.DoF(), test.ShouldBeEmpty)
 			test.That(t, mf.Name(), test.ShouldEqual, name)
@@ -132,4 +131,37 @@ func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 			test.That(t, spatialmath.PoseAlmostEqual(gotMesh.Pose(), mesh.Pose()), test.ShouldBeTrue)
 		})
 	}
+}
+
+// use_urdfs made the same choice collision_geometry makes now, so a config that still sets it
+// gets the mesh rather than a silent fall back to the boxes.
+func TestGripperWantsMesh(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	for _, tc := range []struct {
+		name  string
+		attrs utils.AttributeMap
+		conf  GripperConfig
+		want  bool
+	}{
+		{"default is boxes", nil, GripperConfig{}, false},
+		{"boxes", nil, GripperConfig{CollisionGeometry: collisionGeometryBoxes}, false},
+		{"mesh", nil, GripperConfig{CollisionGeometry: collisionGeometryMesh}, true},
+		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, GripperConfig{}, true},
+		{"collision_geometry wins over use_urdfs", utils.AttributeMap{"use_urdfs": true}, GripperConfig{CollisionGeometry: collisionGeometryBoxes}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := resource.Config{Attributes: tc.attrs}
+			test.That(t, gripperWantsMesh(conf, &tc.conf, logger), test.ShouldEqual, tc.want)
+		})
+	}
+}
+
+func TestGripperConfigCollisionGeometry(t *testing.T) {
+	for _, value := range []string{"", collisionGeometryBoxes, collisionGeometryMesh} {
+		_, _, err := (&GripperConfig{Arm: "arm", CollisionGeometry: value}).Validate("")
+		test.That(t, err, test.ShouldBeNil)
+	}
+	_, _, err := (&GripperConfig{Arm: "arm", CollisionGeometry: "urdf"}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "collision_geometry")
 }

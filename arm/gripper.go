@@ -77,13 +77,15 @@ type GripperConfig struct {
 	// VacuumSealTimeoutMS is how long Grab waits for the vacuum seal sensor
 	// before reporting a miss. 0 means defaultVacuumSealTimeout.
 	VacuumSealTimeoutMS int `json:"vacuum_seal_timeout_ms,omitempty"`
-	// UseURDFs opts into the collision mesh the module ships for the gripper. When false (the
-	// default) the gripper reports the hand-authored bounding boxes that shipped before mesh
-	// support landed.
-	UseURDFs bool `json:"use_urdfs,omitempty"`
-	// MeshDecimationRatio is accepted and ignored. The mesh ships decimated.
-	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
+	// CollisionGeometry picks what the gripper reports to the frame system, "boxes" for the hand
+	// authored bounding boxes, the default, or "mesh" for the collision mesh the module ships.
+	CollisionGeometry string `json:"collision_geometry,omitempty"`
 }
+
+const (
+	collisionGeometryBoxes = "boxes"
+	collisionGeometryMesh  = "mesh"
+)
 
 // Validate validates the config.
 func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
@@ -109,6 +111,11 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.VacuumSealTimeoutMS < 0 {
 		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
 	}
+	switch cfg.CollisionGeometry {
+	case "", collisionGeometryBoxes, collisionGeometryMesh:
+	default:
+		return nil, nil, fmt.Errorf("collision_geometry must be %q or %q, got %q", collisionGeometryBoxes, collisionGeometryMesh, cfg.CollisionGeometry)
+	}
 	return []string{cfg.Arm}, nil, nil
 }
 
@@ -130,9 +137,10 @@ func init() {
 type myGripperLite struct {
 	resource.AlwaysRebuild
 
-	name     resource.Name
-	mf       referenceframe.Model
-	useURDFs bool
+	name resource.Name
+	mf   referenceframe.Model
+	// mesh is set when the model carries the shipped collision mesh rather than the boxes
+	mesh bool
 
 	arm      arm.Arm
 	isMoving atomic.Bool
@@ -149,7 +157,8 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	mf, err := newGripperKinematics(ModelNameGripperLite, newConf, logger, liteGripperGeometries)
+	mesh := gripperWantsMesh(config, newConf, logger)
+	mf, err := newGripperKinematics(ModelNameGripperLite, mesh, liteGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
 	}
@@ -157,7 +166,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 	g := &myGripperLite{
 		name:     config.ResourceName(),
 		mf:       mf,
-		useURDFs: newConf.UseURDFs,
+		mesh:     mesh,
 		logger:   logger,
 		isMoving: atomic.Bool{},
 	}
@@ -252,7 +261,7 @@ func (g *myGripperLite) Stop(ctx context.Context, extra map[string]any) error {
 }
 
 func (g *myGripperLite) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	if g.useURDFs {
+	if g.mesh {
 		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err
@@ -281,9 +290,10 @@ func (g *myGripperLite) Status(_ context.Context) (map[string]any, error) {
 type myGripper struct {
 	resource.AlwaysRebuild
 
-	name     resource.Name
-	mf       referenceframe.Model
-	useURDFs bool
+	name resource.Name
+	mf   referenceframe.Model
+	// mesh is set when the model carries the shipped collision mesh rather than the boxes
+	mesh bool
 
 	arm arm.Arm
 
@@ -325,11 +335,12 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	}
 	submodel := detected.submodel
 
-	if newConf.UseURDFs && submodel == submodelG2 {
-		logger.Warn("gripper: use_urdfs is set but only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
-			"unset use_urdfs to get the G2 bounding boxes")
+	mesh := gripperWantsMesh(config, newConf, logger)
+	if mesh && submodel == submodelG2 {
+		logger.Warn("gripper: only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
+			"set collision_geometry to boxes to get the G2 bounding boxes")
 	}
-	mf, err := newGripperKinematics(ModelNameGripper, newConf, logger, func() ([]spatialmath.Geometry, error) {
+	mf, err := newGripperKinematics(ModelNameGripper, mesh, func() ([]spatialmath.Geometry, error) {
 		return standardGripperGeometries(submodel)
 	})
 	if err != nil {
@@ -339,7 +350,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	g := &myGripper{
 		name:     config.ResourceName(),
 		mf:       mf,
-		useURDFs: newConf.UseURDFs,
+		mesh:     mesh,
 		arm:      a,
 		detected: detected,
 		force:    defaultGripperForceG2,
@@ -700,7 +711,7 @@ func (g *myGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	if g.useURDFs {
+	if g.mesh {
 		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err
