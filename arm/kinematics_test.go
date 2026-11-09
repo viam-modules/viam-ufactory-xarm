@@ -15,8 +15,9 @@ func TestMakeGeometryModelRequiresGeometries(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
-// The model must carry an OriginalFile, otherwise KinematicModelToProtobuf drops
-// it and the gripper reaches the frame system with no collision geometry.
+// The model must carry an OriginalFile so that a client older than the typed
+// model still receives the gripper's collision geometry, and the typed model
+// has to carry it as well.
 func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	box, err := spatialmath.NewBox(
 		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -50}),
@@ -29,7 +30,8 @@ func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	test.That(t, mf.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "json")
 
 	resp := referenceframe.KinematicModelToProtobuf(mf)
-	test.That(t, resp.GetKinematicsData(), test.ShouldNotBeEmpty)
+	test.That(t, resp.GetModel(), test.ShouldNotBeNil)
+	test.That(t, resp.GetModel().GetLinks(), test.ShouldNotBeEmpty)
 
 	rebuilt, err := referenceframe.KinematicModelFromProtobuf(ModelNameGripper, resp)
 	test.That(t, err, test.ShouldBeNil)
