@@ -77,15 +77,11 @@ type GripperConfig struct {
 	// VacuumSealTimeoutMS is how long Grab waits for the vacuum seal sensor
 	// before reporting a miss. 0 means defaultVacuumSealTimeout.
 	VacuumSealTimeoutMS int `json:"vacuum_seal_timeout_ms,omitempty"`
-	// UseURDFs opts into URDF-derived mesh geometries. When false (the
-	// default) the gripper reports the hand-authored bounding boxes that
-	// shipped before mesh support landed.
+	// UseURDFs opts into the collision mesh the module ships for the gripper. When false (the
+	// default) the gripper reports the hand-authored bounding boxes that shipped before mesh
+	// support landed.
 	UseURDFs bool `json:"use_urdfs,omitempty"`
-	// MeshDecimationRatio only applies when UseURDFs is true. Each gripper
-	// URDF has exactly one mesh, so a scalar is enough. Pointer so a
-	// missing field (nil) is distinguishable from an explicit value; the
-	// call site substitutes an internal default when nil. Must be in (0, 1]
-	// when set — 0 is a validation error (not a "use the default" sentinel).
+	// MeshDecimationRatio is accepted and ignored. The mesh ships decimated.
 	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
 }
 
@@ -112,12 +108,6 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.VacuumSealTimeoutMS < 0 {
 		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
-	}
-	if cfg.MeshDecimationRatio != nil {
-		r := *cfg.MeshDecimationRatio
-		if r <= 0 || r > 1 {
-			return nil, nil, fmt.Errorf("mesh_decimation_ratio must be in (0, 1] when set, got %f", r)
-		}
 	}
 	return []string{cfg.Arm}, nil, nil
 }

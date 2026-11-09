@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -97,22 +96,22 @@ func TestTrajectoryStreamValidator(t *testing.T) {
 
 func TestStreamLimits(t *testing.T) {
 	logger := logging.NewTestLogger(t)
-	t.Setenv("VIAM_MODULE_ROOT", filepath.Dir(armDir()))
+	moduleRoot(t)
 
 	const speedDegs, accelDegs, tol = 45.0, 300.0, 1.01
 	mo := moveOptions{speed: 0.5, acceleration: 2}
 
 	for _, tc := range []struct {
 		name               string
-		useURDFs           bool
+		speed, accel       float64
 		wantVel, wantAccel float64
 	}{
-		{"json model uses its served limits", false, utils.DegToRad(speedDegs), utils.DegToRad(accelDegs)},
-		// URDF models carry no rate limits, so the move's own speed and acceleration apply.
-		{"urdf model falls back to the move options", true, mo.speed, mo.acceleration},
+		{"a model with served limits uses them", speedDegs, accelDegs, utils.DegToRad(speedDegs), utils.DegToRad(accelDegs)},
+		// the file carries no rate limits of its own, so without configured ones the move's apply
+		{"a model without limits falls back to the move options", 0, 0, mo.speed, mo.acceleration},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, tc.useURDFs, nil, logger, 0, speedDegs, accelDegs)
+			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, logger, 0, tc.speed, tc.accel, 0)
 			test.That(t, err, test.ShouldBeNil)
 
 			vel, acc := streamLimits(m, mo, tol)
@@ -155,6 +154,7 @@ func TestCheckJointConstraints(t *testing.T) {
 func TestCreateRawJointSteps1(t *testing.T) {
 	var err error
 	logger := logging.NewTestLogger(t)
+	moduleRoot(t)
 
 	x := &xArm{
 		speed:        utils.DegToRad(defaultSpeed),
@@ -163,7 +163,7 @@ func TestCreateRawJointSteps1(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0, 0, 0)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	positions := [][]float64{{1, 0, 0, 0, 0, 1}}
@@ -179,6 +179,7 @@ func TestCreateRawJointSteps1(t *testing.T) {
 func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	var err error
 	logger := logging.NewTestLogger(t)
+	moduleRoot(t)
 
 	x := &xArm{
 		speed:        utils.DegToRad(3),
@@ -187,7 +188,7 @@ func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0, 0, 0)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	displacement := 1.0

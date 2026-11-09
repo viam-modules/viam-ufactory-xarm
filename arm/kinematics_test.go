@@ -102,3 +102,34 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 	test.That(t, err, test.ShouldBeNil)
 	return gif.Geometries()
 }
+
+// With use_urdfs each gripper reports the collision mesh the module ships, and the mesh crosses
+// the wire in the typed model.
+func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	moduleRoot(t)
+
+	for _, name := range []string{ModelNameGripper, ModelNameGripperLite, ModelNameVacuumGripper, ModelNameVacuumGripperLite} {
+		t.Run(name, func(t *testing.T) {
+			mf, err := newGripperKinematics(name, &GripperConfig{UseURDFs: true}, logger, nil)
+			test.That(t, err, test.ShouldBeNil)
+			test.That(t, mf.DoF(), test.ShouldBeEmpty)
+			test.That(t, mf.Name(), test.ShouldEqual, name)
+
+			geoms := modelGeometries(t, mf)
+			test.That(t, geoms, test.ShouldHaveLength, 1)
+			mesh, isMesh := geoms[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+
+			resp := referenceframe.KinematicModelToProtobuf(mf)
+			rebuilt, err := referenceframe.KinematicModelFromProtobuf(name, resp)
+			test.That(t, err, test.ShouldBeNil)
+			got := modelGeometries(t, rebuilt)
+			test.That(t, got, test.ShouldHaveLength, 1)
+			gotMesh, isMesh := got[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+			test.That(t, gotMesh.Triangles(), test.ShouldHaveLength, len(mesh.Triangles()))
+			test.That(t, spatialmath.PoseAlmostEqual(gotMesh.Pose(), mesh.Pose()), test.ShouldBeTrue)
+		})
+	}
+}

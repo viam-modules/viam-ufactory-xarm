@@ -2,22 +2,23 @@ package arm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/spatialmath"
 )
 
-// kinematicsArtifact identifies the kinematics files to use for an
-// (arm model, hardware variant) combination.
+// kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
+// The files live under arm/kinematics and are written by tools/kinematics from the SVA documents,
+// URDFs and GLB files beside them.
 type kinematicsArtifact struct {
-	json         []byte
-	urdfBasename string
-	// numMeshes is the count of <mesh> refs in the URDF; 0 for grippers
-	// (which use a scalar ratio). Kept in sync with the URDF by hand.
-	numMeshes int
-	// variant is a short label used only in logs.
+	// file is the base name of the model file
+	file string
+	// variant is a short label used only in logs
 	variant string
 }
 
@@ -27,22 +28,19 @@ type armVariantKey struct {
 }
 
 var armKinematicsBase = map[string]kinematicsArtifact{
-	ModelName6DOF: {json: xArm6modeljson, urdfBasename: "xarm6", numMeshes: 6},
-	ModelName7DOF: {json: xArm7modeljson, urdfBasename: "xarm7", numMeshes: 7},
-	ModelNameLite: {json: lite6modeljson, urdfBasename: "lite6", numMeshes: 7},
-	ModelName850:  {json: xArm850modeljson, urdfBasename: "uf850", numMeshes: 7},
+	ModelName6DOF: {file: "xarm6"},
+	ModelName7DOF: {file: "xarm7"},
+	ModelNameLite: {file: "lite6"},
+	ModelName850:  {file: "uf850"},
 }
 
 // armTypeCode1305 identifies the xArm6 1305 wrist variant (SN "XI1305…").
 const armTypeCode1305 = 1305
 
-// armKinematicsVariants overrides the base entry when the detected
-// armTypeCode matches. xarm6 and xarm6_1305 share the JSON kinematics;
-// only collision meshes differ.
+// armKinematicsVariants overrides the base entry when the detected armTypeCode matches. The
+// xArm6 and its 1305 wrist share frames, limits and visuals and differ in collision meshes.
 var armKinematicsVariants = map[armVariantKey]kinematicsArtifact{
-	{ModelName6DOF, armTypeCode1305}: {
-		json: xArm6modeljson, urdfBasename: "xarm6_1305", numMeshes: 7, variant: "1305",
-	},
+	{ModelName6DOF, armTypeCode1305}: {file: "xarm6_1305", variant: "1305"},
 }
 
 func resolveArmKinematicsArtifact(modelName string, detected detectedArm) (kinematicsArtifact, error) {
@@ -56,10 +54,10 @@ func resolveArmKinematicsArtifact(modelName string, detected detectedArm) (kinem
 }
 
 var gripperKinematicsBase = map[string]kinematicsArtifact{
-	ModelNameGripper:           {urdfBasename: "xarm_gripper"},
-	ModelNameGripperLite:       {urdfBasename: "uflite_gripper"},
-	ModelNameVacuumGripper:     {urdfBasename: "vacuum_gripper"},
-	ModelNameVacuumGripperLite: {urdfBasename: "lite_vacuum_gripper"},
+	ModelNameGripper:           {file: "xarm_gripper"},
+	ModelNameGripperLite:       {file: "uflite_gripper"},
+	ModelNameVacuumGripper:     {file: "vacuum_gripper"},
+	ModelNameVacuumGripperLite: {file: "lite_vacuum_gripper"},
 }
 
 func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, error) {
@@ -67,6 +65,34 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 		return base, nil
 	}
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
+}
+
+// kinematicsPath locates a shipped model file under the module root the server hands us. Tests
+// point VIAM_MODULE_ROOT at the repository.
+func kinematicsPath(file string) (string, error) {
+	root := os.Getenv("VIAM_MODULE_ROOT")
+	if root == "" {
+		return "", errors.New("VIAM_MODULE_ROOT is not set, so the kinematic model files cannot be found")
+	}
+	return filepath.Join(root, "arm", "kinematics", file+".json"), nil
+}
+
+// loadKinematics reads a shipped kinematic model file as a model named for the resource, with
+// its meshes read from beside it.
+func loadKinematics(file, resourceName string) (*referenceframe.SimpleModel, error) {
+	path, err := kinematicsPath(file)
+	if err != nil {
+		return nil, err
+	}
+	model, err := referenceframe.ParseModelJSONFile(path, resourceName)
+	if err != nil {
+		return nil, err
+	}
+	sm, ok := model.(*referenceframe.SimpleModel)
+	if !ok {
+		return nil, fmt.Errorf("%s loaded as a %T, which cannot carry limits", path, model)
+	}
+	return sm, nil
 }
 
 // makeGeometryModel builds a zero-DoF kinematics model whose links carry geoms.
@@ -109,7 +135,7 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 }
 
 // newGripperKinematics builds the model a gripper reports to the frame system:
-// URDF-derived meshes when use_urdfs is set, otherwise a model carrying the
+// the shipped collision mesh when use_urdfs is set, otherwise a model carrying the
 // hand-authored bounding boxes that boxGeoms produces.
 func newGripperKinematics(
 	modelName string,
@@ -117,8 +143,11 @@ func newGripperKinematics(
 	logger logging.Logger,
 	boxGeoms func() ([]spatialmath.Geometry, error),
 ) (referenceframe.Model, error) {
+	if conf.MeshDecimationRatio != nil {
+		logger.Warnf("%s: mesh_decimation_ratio no longer does anything, the mesh ships decimated", modelName)
+	}
 	if conf.UseURDFs {
-		return loadGripperModel(modelName, conf.MeshDecimationRatio, logger)
+		return loadGripperModel(modelName)
 	}
 	geoms, err := boxGeoms()
 	if err != nil {
@@ -127,17 +156,11 @@ func newGripperKinematics(
 	return makeGeometryModel(modelName, geoms)
 }
 
-const gripperDefaultMeshDecimationRatio = 0.1
-
-// loadGripperModel parses the gripper URDF. Nil ratio → default.
-func loadGripperModel(modelName string, meshDecimationRatio *float64, logger logging.Logger) (referenceframe.Model, error) {
+// loadGripperModel reads the gripper's shipped model file, named for the gripper model.
+func loadGripperModel(modelName string) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
 		return nil, err
 	}
-	ratio := gripperDefaultMeshDecimationRatio
-	if meshDecimationRatio != nil {
-		ratio = *meshDecimationRatio
-	}
-	return makeModelFrameFromURDF(artifact.urdfBasename, modelName, []float64{ratio}, logger)
+	return loadKinematics(artifact.file, modelName)
 }
