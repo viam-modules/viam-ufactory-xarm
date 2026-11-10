@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/golang/geo/r3"
@@ -17,6 +18,7 @@ import (
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
+	"google.golang.org/protobuf/proto"
 )
 
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
@@ -86,12 +88,13 @@ var (
 )
 
 // kinematicsDir unpacks the embedded files once per process, since RDK reads a model file and the
-// meshes beside it from disk. Only success is kept, so a reconfigure after the disk fills tries
-// again rather than failing for the life of the process.
+// meshes beside it from disk. Only success is kept, and it is checked again on every call, so a
+// reconfigure after the disk fills or a cleaner takes the directory unpacks again rather than
+// failing for the life of the process.
 func kinematicsDir() (string, error) {
 	kinematicsDirMu.Lock()
 	defer kinematicsDirMu.Unlock()
-	if kinematicsDirPath == "" {
+	if kinematicsDirPath == "" || !unpacked(kinematicsDirPath) {
 		dir, err := unpackKinematics()
 		if err != nil {
 			return "", err
@@ -101,7 +104,16 @@ func kinematicsDir() (string, error) {
 	return kinematicsDirPath, nil
 }
 
-// unpackKinematics writes the embedded files under the temp directory, named for their content
+// unpackRoot is where the files go, the module's own data directory when the server gives one,
+// which no temp cleaner touches, and the temp directory otherwise.
+func unpackRoot() string {
+	if root := os.Getenv("VIAM_MODULE_DATA"); root != "" {
+		return root
+	}
+	return os.TempDir()
+}
+
+// unpackKinematics writes the embedded files under the unpack root, named for their content
 // and the user, so a restart reuses them, a new build gets its own and another user never finds
 // a directory it cannot read. The files are written beside the final name and renamed into
 // place, so a half written directory is never taken for a complete one by another process
@@ -126,11 +138,15 @@ func unpackKinematics() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("viam-xarm-kinematics-%d-%016x", os.Getuid(), digest.Sum64()))
+	root := unpackRoot()
+	dir := filepath.Join(root, fmt.Sprintf("viam-xarm-kinematics-%d-%016x", os.Getuid(), digest.Sum64()))
 	if unpacked(dir) {
 		return dir, nil
 	}
-	tmp, err := os.MkdirTemp(os.TempDir(), "viam-xarm-kinematics-")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp(root, "viam-xarm-kinematics-")
 	if err != nil {
 		return "", err
 	}
@@ -222,62 +238,76 @@ const defaultMeshDecimationRatio = 0.1
 const minTriangles = 12
 
 // decimateCollisions replaces each collision mesh with a conservative hull of at most the given
-// share of its triangles, the i-th ratio for the i-th mesh in file order and the default past
-// the end of the list. A ratio of 1 keeps the mesh as shipped. The hull contains the mesh, so
-// planning against it is never less safe, and far cheaper.
+// share of its triangles, the i-th ratio for the i-th link in file order, whether or not that
+// link has a mesh, and the default past the end of the list or where the list says 0. A ratio
+// of 1 keeps every triangle. The hull contains the mesh, so planning against it is never less
+// safe, and far cheaper.
 func decimateCollisions(ratios []float64) func(*commonpb.KinematicModel) error {
 	return func(pb *commonpb.KinematicModel) error {
-		i := 0
-		for _, link := range pb.GetLinks() {
-			for j, g := range link.GetCollision() {
-				if g.GetMesh() == nil {
-					continue
-				}
-				ratio := defaultMeshDecimationRatio
-				if i < len(ratios) {
-					ratio = ratios[i]
-				}
-				i++
-				if err := decimateMesh(g.GetMesh(), ratio); err != nil {
-					return fmt.Errorf("link %q collision %d: %w", link.GetId(), j, err)
-				}
+		if len(ratios) > len(pb.GetLinks()) {
+			return fmt.Errorf("%d mesh decimation ratios for a model with %d links", len(ratios), len(pb.GetLinks()))
+		}
+		return decimateLinks(pb, func(i int) float64 {
+			if i < len(ratios) && ratios[i] > 0 {
+				return ratios[i]
 			}
-		}
-		if i < len(ratios) {
-			return fmt.Errorf("%d mesh decimation ratios for a model with %d meshes", len(ratios), i)
-		}
-		return nil
+			return defaultMeshDecimationRatio
+		})
 	}
 }
 
-func decimateMesh(mesh *commonpb.Mesh, ratio float64) error {
-	if ratio >= 1 {
-		return nil
+// decimateAllCollisions is decimateCollisions with one ratio for every link, the default at 0.
+func decimateAllCollisions(ratio float64) func(*commonpb.KinematicModel) error {
+	if ratio <= 0 {
+		ratio = defaultMeshDecimationRatio
 	}
+	return func(pb *commonpb.KinematicModel) error {
+		return decimateLinks(pb, func(int) float64 { return ratio })
+	}
+}
+
+func decimateLinks(pb *commonpb.KinematicModel, ratioFor func(link int) float64) error {
+	for i, link := range pb.GetLinks() {
+		for j, g := range link.GetCollision() {
+			if g.GetMesh() == nil {
+				continue
+			}
+			if err := decimateMesh(g.GetMesh(), ratioFor(i)); err != nil {
+				return fmt.Errorf("link %q collision %d: %w", link.GetId(), j, err)
+			}
+		}
+	}
+	return nil
+}
+
+// decimateMesh leaves the mesh as PLY whatever happens, since rdk labels every mesh it serves
+// through GetGeometries as PLY whatever bytes it holds, and the shipped files are STL.
+func decimateMesh(mesh *commonpb.Mesh, ratio float64) error {
 	m, err := spatialmath.NewMeshFromProto(spatialmath.NewZeroPose(), mesh, "")
 	if err != nil {
 		return err
 	}
 	before := len(m.Triangles())
-	target := max(int(math.Ceil(ratio*float64(before))), minTriangles)
-	if target >= before {
-		return nil
+	if target := max(int(math.Ceil(ratio*float64(before))), minTriangles); ratio < 1 && target < before {
+		if m, err = m.ConservativeDecimate(target); err != nil {
+			return err
+		}
 	}
-	decimated, err := m.ConservativeDecimate(target)
-	if err != nil {
-		return err
-	}
-	// the decimator hands back triangles, and PLY is the form rdk writes them in
-	mesh.Mesh = decimated.TrianglesToPLYBytes(false)
+	mesh.Mesh = m.TrianglesToPLYBytes(false)
 	mesh.ContentType = "ply"
+	// the bytes no longer match the file the path names, so the path says what they are
+	if source := mesh.GetOriginalFileSourcePathDiagnostic(); source != "" {
+		mesh.OriginalFileSourcePathDiagnostic = proto.String(strings.TrimSuffix(source, filepath.Ext(source)) + ".ply")
+	}
 	return nil
 }
 
-// validateMeshDecimationRatios checks each ratio is in (0, 1], with 1 meaning no decimation.
+// validateMeshDecimationRatios checks each ratio is in [0, 1], with 0 standing for the default
+// and 1 keeping every triangle.
 func validateMeshDecimationRatios(ratios []float64) error {
 	for i, r := range ratios {
-		if r <= 0 || r > 1 || math.IsNaN(r) {
-			return fmt.Errorf("mesh decimation ratio %d must be in (0, 1], got %v", i, r)
+		if r < 0 || r > 1 || math.IsNaN(r) {
+			return fmt.Errorf("mesh decimation ratio %d must be in [0, 1], got %v", i, r)
 		}
 	}
 	return nil
@@ -397,11 +427,11 @@ func newGripperKinematics(
 	edits ...func(*commonpb.KinematicModel) error,
 ) (referenceframe.Model, error) {
 	if mesh {
-		var ratios []float64
+		r := defaultMeshDecimationRatio
 		if ratio != nil {
-			ratios = []float64{*ratio}
+			r = *ratio
 		}
-		return loadGripperModel(modelName, append([]func(*commonpb.KinematicModel) error{decimateCollisions(ratios)}, edits...)...)
+		return loadGripperModel(modelName, append([]func(*commonpb.KinematicModel) error{decimateAllCollisions(r)}, edits...)...)
 	}
 	geoms, err := boxGeoms()
 	if err != nil {

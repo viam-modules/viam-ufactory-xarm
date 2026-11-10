@@ -18,6 +18,7 @@ require (
 	go.viam.com/rdk v1.16.0-rc0.0.20261109210936-e02062043408
 	go.viam.com/test v1.2.5
 	go.viam.com/utils v0.16.2
+	google.golang.org/protobuf v1.36.12
 	gorgonia.org/tensor v0.9.24
 	gotest.tools/gotestsum v1.12.2
 )
@@ -241,7 +242,6 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc // indirect
 	google.golang.org/grpc v1.85.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorgonia.org/vecf32 v0.9.0 // indirect

@@ -103,15 +103,22 @@ func TestMakeModelFrame(t *testing.T) {
 	}
 }
 
-// A ratio applies to the meshes in link order, the default past the end of the list, and 1 keeps a
-// mesh as shipped.
+// A ratio applies per link in file order, the default past the end of the list or at 0, and 1
+// keeps every triangle. Every mesh comes out as PLY, since rdk serves whatever bytes a mesh holds
+// labelled as PLY.
 func TestMakeModelFrameDecimation(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	shipped, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
+	shipped, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
-	mixed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 0.5}, logger, 0, 0, 0, 0)
+	mixed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 0.5, 0}, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
+	for _, link := range simpleModel(t, shipped).ModelConfig().Links {
+		if link.Geometry != nil && link.Geometry.Type == spatialmath.MeshType {
+			test.That(t, link.Geometry.MeshContentType, test.ShouldEqual, "ply")
+			test.That(t, link.Geometry.MeshFilePath, test.ShouldEndWith, ".ply")
+		}
+	}
 
 	triangles := func(m referenceframe.Model) map[string]int {
 		out := map[string]int{}
@@ -133,17 +140,17 @@ func TestMakeModelFrameDecimation(t *testing.T) {
 		test.That(t, got[label(link)], test.ShouldBeLessThanOrEqualTo, raw[label(link)]/10+1)
 	}
 
-	_, err = MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
+	_, err = MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "7 mesh decimation ratios")
+	test.That(t, err.Error(), test.ShouldContainSubstring, "8 mesh decimation ratios")
 }
 
 func TestConfigMeshDecimationRatios(t *testing.T) {
-	for _, ratios := range [][]float64{nil, {0.1}, {1, 0.5}} {
+	for _, ratios := range [][]float64{nil, {0.1}, {1, 0.5}, {0}} {
 		_, _, err := (&Config{Host: "10.0.0.1", MeshDecimationRatios: ratios}).Validate("")
 		test.That(t, err, test.ShouldBeNil)
 	}
-	for _, ratios := range [][]float64{{0}, {1.5}, {0.1, -1}} {
+	for _, ratios := range [][]float64{{-0.1}, {1.5}, {0.1, -1}} {
 		_, _, err := (&Config{Host: "10.0.0.1", MeshDecimationRatios: ratios}).Validate("")
 		test.That(t, err, test.ShouldNotBeNil)
 	}
@@ -191,9 +198,10 @@ func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
 				for _, pt := range tri.Points() {
 					world := spatialmath.Compose(mesh.Pose(), spatialmath.NewPoseFromPoint(pt)).Point()
 					local := spatialmath.Compose(toBox, spatialmath.NewPoseFromPoint(world)).Point()
-					test.That(t, math.Abs(local.X), test.ShouldBeLessThanOrEqualTo, half.X+1e-6)
-					test.That(t, math.Abs(local.Y), test.ShouldBeLessThanOrEqualTo, half.Y+1e-6)
-					test.That(t, math.Abs(local.Z), test.ShouldBeLessThanOrEqualTo, half.Z+1e-6)
+					// the box comes from the STL and the mesh from a PLY round trip written to a micron
+					test.That(t, math.Abs(local.X), test.ShouldBeLessThanOrEqualTo, half.X+1e-3)
+					test.That(t, math.Abs(local.Y), test.ShouldBeLessThanOrEqualTo, half.Y+1e-3)
+					test.That(t, math.Abs(local.Z), test.ShouldBeLessThanOrEqualTo, half.Z+1e-3)
 				}
 			}
 		}

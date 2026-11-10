@@ -60,7 +60,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
 | `collision_meshes` | bool | Optional | `false` | When `true`, every link carries its collision mesh rather than the box bounding it. Plans slower and makes `GetKinematics` answers larger. `use_urdfs` still works as this with a warning. See [Kinematics](#kinematics). |
-| `mesh_decimation_ratios` | []float64 | Optional | `0.1` each | With `collision_meshes`, the share of each link's mesh triangles kept, in link order, `0.1` for any link the list does not reach. Each value is in `(0, 1]`, and `1` keeps a mesh at full resolution. |
+| `mesh_decimation_ratios` | []float64 | Optional | `0.1` each | With `collision_meshes`, the share of each link's mesh triangles kept, one entry per link in the model file's order, `0.1` for any link the list does not reach or says `0` for. Each value is in `[0, 1]`, `1` keeps every triangle, and a list longer than the links is an error. |
 | `trajectory_generator` | object | Optional | — | Configuration for an external [trajectory generator](#trajectory-generator) ML model service. |
 | `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
 | `ufactory-studio-proxy-port` | int | Optional | `18333` | Local port for the Studio proxy. |
@@ -371,7 +371,7 @@ On a G2 the module uses the force block-write for `Grab`/`Open` and reads the gr
 | `gripper_speed` | int | Optional | Default speed on startup (1–5000). G2 defaults to 2000; G1 is left on its firmware default (1500) when omitted. |
 | `gripper_force` | int | Optional | G2 only. Grasp force as a percentage (1–100). Defaults to 50. Ignored on a G1, which has no force register. |
 | `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding boxes. `use_urdfs` still works as this with a warning. |
-| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default. In `(0, 1]`, and `1` keeps it at full resolution. |
+| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default or at `0`. In `[0, 1]`, and `1` keeps every triangle. |
 
 ### DoCommand
 
@@ -416,7 +416,7 @@ Two-finger gripper for the Lite 6.
 |------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
 | `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding boxes. `use_urdfs` still works as this with a warning. |
-| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default. In `(0, 1]`, and `1` keeps it at full resolution. |
+| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default or at `0`. In `[0, 1]`, and `1` keeps every triangle. |
 
 ### DoCommand
 
@@ -454,7 +454,7 @@ For use with the standard xArm vacuum gripper. Both wiring interfaces are suppor
 | `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
 | `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding box. `vacuum_length_mm` adds the suction tube either way. `use_urdfs` still works as this with a warning. |
-| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default. In `(0, 1]`, and `1` keeps it at full resolution. |
+| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default or at `0`. In `[0, 1]`, and `1` keeps every triangle. |
 
 ## Vacuum Gripper Lite
 
@@ -473,7 +473,7 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
 | `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding box. `vacuum_length_mm` adds the suction tube either way. `use_urdfs` still works as this with a warning. |
-| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default. In `(0, 1]`, and `1` keeps it at full resolution. |
+| `mesh_decimation_ratio` | float64 | Optional | With `collision_meshes`, the share of the mesh's triangles kept, `0.1` by default or at `0`. In `[0, 1]`, and `1` keeps every triangle. |
 
 ## Force Torque Sensor
 

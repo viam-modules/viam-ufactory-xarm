@@ -199,6 +199,8 @@ func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
 // A leftover directory that lost its marker to a temp cleaner is replaced rather than left to
 // fail every start, and a second process finds the complete one.
 func TestUnpackKinematicsRecovers(t *testing.T) {
+	// the test's own root, so it never touches the directory a running server reads from
+	t.Setenv("VIAM_MODULE_DATA", t.TempDir())
 	dir, err := unpackKinematics()
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, unpacked(dir), test.ShouldBeTrue)
@@ -217,11 +219,11 @@ func TestUnpackKinematicsRecovers(t *testing.T) {
 }
 
 func TestGripperConfigMeshDecimationRatio(t *testing.T) {
-	for _, r := range []float64{0.1, 1} {
+	for _, r := range []float64{0, 0.1, 1} {
 		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
 		test.That(t, err, test.ShouldBeNil)
 	}
-	for _, r := range []float64{0, 1.5} {
+	for _, r := range []float64{-0.1, 1.5} {
 		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
 		test.That(t, err, test.ShouldNotBeNil)
 	}

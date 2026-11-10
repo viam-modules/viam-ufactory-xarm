@@ -214,8 +214,9 @@ type Config struct {
 	// CollisionMeshes gives the links their collision meshes, which plan slower and travel
 	// larger, in place of the boxes bounding them.
 	CollisionMeshes bool `json:"collision_meshes,omitempty"`
-	// MeshDecimationRatios is the share of each collision mesh's triangles kept, in the order the
-	// links have them, 0.1 for any the list does not reach. 1 keeps a mesh as shipped.
+	// MeshDecimationRatios is the share of each link's collision mesh triangles kept, one entry
+	// per link in file order, 0.1 for any link the list does not reach or says 0 for. 1 keeps
+	// every triangle.
 	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
 	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
 	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`

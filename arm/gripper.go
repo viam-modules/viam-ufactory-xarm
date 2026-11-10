@@ -80,8 +80,8 @@ type GripperConfig struct {
 	// CollisionMeshes reports the collision mesh the module ships in place of the hand authored
 	// bounding boxes.
 	CollisionMeshes bool `json:"collision_meshes,omitempty"`
-	// MeshDecimationRatio is the share of the mesh's triangles kept, 0.1 when unset. 1 keeps the
-	// mesh as shipped.
+	// MeshDecimationRatio is the share of the mesh's triangles kept, 0.1 when unset or 0. 1 keeps
+	// every triangle.
 	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
 }
 
