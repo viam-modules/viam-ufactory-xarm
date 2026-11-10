@@ -103,7 +103,7 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 	return gif.Geometries()
 }
 
-// With collision_geometry set to mesh each gripper reports the collision mesh the module ships,
+// With collision_meshes set each gripper reports the collision mesh the module ships,
 // and the mesh crosses the wire in the typed model.
 func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 
@@ -132,35 +132,25 @@ func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 	}
 }
 
-// use_urdfs made the same choice collision_geometry makes now, so a config that still sets it
-// gets the mesh rather than a silent fall back to the boxes.
+// use_urdfs made the same choice collision_meshes makes now, so a config that still sets it
+// gets what it asked for rather than a silent fall back to the boxes.
 func TestWantsMesh(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 	for _, tc := range []struct {
-		name   string
-		attrs  utils.AttributeMap
-		choice string
-		want   bool
+		name  string
+		attrs utils.AttributeMap
+		want  bool
 	}{
-		{"default is boxes", nil, "", false},
-		{"boxes", nil, collisionGeometryBoxes, false},
-		{"mesh", nil, collisionGeometryMesh, true},
-		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, "", true},
-		{"collision_geometry wins over use_urdfs", utils.AttributeMap{"use_urdfs": true}, collisionGeometryBoxes, false},
+		{"default is boxes", nil, false},
+		{"boxes", utils.AttributeMap{"collision_meshes": false}, false},
+		{"mesh", utils.AttributeMap{"collision_meshes": true}, true},
+		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, true},
+		{"legacy use_urdfs off", utils.AttributeMap{"use_urdfs": false}, false},
+		{"collision_meshes wins over use_urdfs", utils.AttributeMap{"use_urdfs": true, "collision_meshes": false}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			conf := resource.Config{Attributes: tc.attrs}
-			test.That(t, wantsMesh(conf, tc.choice, logger), test.ShouldEqual, tc.want)
+			test.That(t, wantsMesh(conf, tc.attrs.Bool("collision_meshes", false), logger), test.ShouldEqual, tc.want)
 		})
 	}
-}
-
-func TestGripperConfigCollisionGeometry(t *testing.T) {
-	for _, value := range []string{"", collisionGeometryBoxes, collisionGeometryMesh} {
-		_, _, err := (&GripperConfig{Arm: "arm", CollisionGeometry: value}).Validate("")
-		test.That(t, err, test.ShouldBeNil)
-	}
-	_, _, err := (&GripperConfig{Arm: "arm", CollisionGeometry: "urdf"}).Validate("")
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "collision_geometry")
 }

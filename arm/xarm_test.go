@@ -482,13 +482,3 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
 }
-
-func TestConfigCollisionGeometry(t *testing.T) {
-	for _, value := range []string{"", collisionGeometryBoxes, collisionGeometryMesh} {
-		_, _, err := (&Config{Host: "10.0.0.1", CollisionGeometry: value}).Validate("")
-		test.That(t, err, test.ShouldBeNil)
-	}
-	_, _, err := (&Config{Host: "10.0.0.1", CollisionGeometry: "urdf"}).Validate("")
-	test.That(t, err, test.ShouldNotBeNil)
-	test.That(t, err.Error(), test.ShouldContainSubstring, "collision_geometry")
-}

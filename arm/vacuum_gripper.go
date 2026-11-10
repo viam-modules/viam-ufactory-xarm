@@ -90,7 +90,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
+	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
 	mf, err := newGripperKinematics(config.Model.Name, mesh, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
 	})
@@ -264,7 +264,7 @@ var (
 )
 
 // vacuumGripperGeometries returns hand-authored housing + suction-tube
-// boxes for the vacuum gripper family. Used when collision_geometry is boxes.
+// boxes for the vacuum gripper family. Used unless collision_meshes is set.
 func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]spatialmath.Geometry, error) {
 	var caseSize r3.Vector
 	switch model {

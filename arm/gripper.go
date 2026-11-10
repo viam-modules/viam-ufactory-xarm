@@ -77,9 +77,9 @@ type GripperConfig struct {
 	// VacuumSealTimeoutMS is how long Grab waits for the vacuum seal sensor
 	// before reporting a miss. 0 means defaultVacuumSealTimeout.
 	VacuumSealTimeoutMS int `json:"vacuum_seal_timeout_ms,omitempty"`
-	// CollisionGeometry picks what the gripper reports to the frame system, "boxes" for the hand
-	// authored bounding boxes, the default, or "mesh" for the collision mesh the module ships.
-	CollisionGeometry string `json:"collision_geometry,omitempty"`
+	// CollisionMeshes reports the collision mesh the module ships in place of the hand authored
+	// bounding boxes.
+	CollisionMeshes bool `json:"collision_meshes,omitempty"`
 }
 
 // Validate validates the config.
@@ -105,9 +105,6 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.VacuumSealTimeoutMS < 0 {
 		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
-	}
-	if err := validateCollisionGeometry(cfg.CollisionGeometry); err != nil {
-		return nil, nil, err
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -150,7 +147,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
+	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
 	mf, err := newGripperKinematics(ModelNameGripperLite, mesh, liteGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
@@ -328,10 +325,10 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	}
 	submodel := detected.submodel
 
-	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
+	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
 	if mesh && submodel == submodelG2 {
 		logger.Warn("gripper: only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
-			"set collision_geometry to boxes to get the G2 bounding boxes")
+			"unset collision_meshes to get the G2 bounding boxes")
 	}
 	mf, err := newGripperKinematics(ModelNameGripper, mesh, func() ([]spatialmath.Geometry, error) {
 		return standardGripperGeometries(submodel)

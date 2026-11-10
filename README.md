@@ -59,7 +59,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
-| `collision_geometry` | string | Optional | `"boxes"` | `"boxes"` gives every link the box bounding its collision mesh. `"mesh"` gives the meshes themselves, which plan slower and make `GetKinematics` answers larger. `use_urdfs: true` still selects the meshes with a warning. See [Kinematics](#kinematics). |
+| `collision_meshes` | bool | Optional | `false` | When `true`, every link carries its collision mesh rather than the box bounding it. Plans slower and makes `GetKinematics` answers larger. `use_urdfs` still works as this with a warning. See [Kinematics](#kinematics). |
 | `trajectory_generator` | object | Optional | — | Configuration for an external [trajectory generator](#trajectory-generator) ML model service. |
 | `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
 | `ufactory-studio-proxy-port` | int | Optional | `18333` | Local port for the Studio proxy. |
@@ -152,7 +152,7 @@ For an attached gripper, set its parent to the arm's name:
 
 Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, a collision mesh for every link but the xArm7's flange, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
 
-By default each link carries the box bounding its mesh rather than the mesh, which plans about as fast as the hand authored boxes did and keeps a `GetKinematics` answer small. `"collision_geometry": "mesh"` serves the meshes themselves, for tighter collision checking at about half again the planning time.
+By default each link carries the box bounding its mesh rather than the mesh, which plans about as fast as the hand authored boxes did and keeps a `GetKinematics` answer small. `"collision_meshes": true` serves the meshes themselves, for tighter collision checking at about half again the planning time.
 
 The configured `speed_degs_per_sec` and `acceleration_degs_per_sec_per_sec` become every joint's velocity and acceleration limits on the model, and a joint in `bad-joints` is locked to a degree either side of where it sits at startup, within the joint's range. A limit can only narrow what the file holds, so the motion service and any client plan within what the arm will accept, and a joint that reports a position outside its range fails the resource rather than being locked somewhere it is not. `move_hz` is published as the rate the arm expects joint positions at.
 
@@ -369,7 +369,7 @@ On a G2 the module uses the force block-write for `Grab`/`Open` and reads the gr
 | `gripper_version` | string | Optional | `"g1"` or `"g2"`. Bypasses detection entirely. Omit to detect from firmware version. |
 | `gripper_speed` | int | Optional | Default speed on startup (1–5000). G2 defaults to 2000; G1 is left on its firmware default (1500) when omitted. |
 | `gripper_force` | int | Optional | G2 only. Grasp force as a percentage (1–100). Defaults to 50. Ignored on a G1, which has no force register. |
-| `collision_geometry` | string | Optional | `"boxes"`, the default, reports the hand-authored bounding boxes. `"mesh"` reports the collision mesh the module ships. `use_urdfs: true` still selects the mesh with a warning. |
+| `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding boxes. `use_urdfs` still works as this with a warning. |
 
 ### DoCommand
 
@@ -413,7 +413,7 @@ Two-finger gripper for the Lite 6.
 | Name | Type | Inclusion | Description |
 |------|------|-----------|-------------|
 | `arm` | string | **Required** | Name of the arm component this gripper is attached to. |
-| `collision_geometry` | string | Optional | `"boxes"`, the default, reports the hand-authored bounding boxes. `"mesh"` reports the collision mesh the module ships. `use_urdfs: true` still selects the mesh with a warning. |
+| `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding boxes. `use_urdfs` still works as this with a warning. |
 
 ### DoCommand
 
@@ -450,7 +450,7 @@ For use with the standard xArm vacuum gripper. Both wiring interfaces are suppor
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `connection_type` | string | Optional | Vacuum wiring interface: `"plugin"` or `"contact"`. Empty (default) auto-detects from the arm model. Set this explicitly if you're running an older plug-in gripper on an xArm850 or xArm ≥1305, since those arms auto-detect as `contact`. |
 | `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
-| `collision_geometry` | string | Optional | `"boxes"`, the default, reports the hand-authored bounding box. `"mesh"` reports the collision mesh the module ships. `vacuum_length_mm` adds the suction tube either way. `use_urdfs: true` still selects the mesh with a warning. |
+| `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding box. `vacuum_length_mm` adds the suction tube either way. `use_urdfs` still works as this with a warning. |
 
 ## Vacuum Gripper Lite
 
@@ -468,7 +468,7 @@ Vacuum gripper for the Lite 6. This model always uses the plug-in connection and
 | `arm` | string | **Required** | Name of the arm component this vacuum gripper is attached to. |
 | `vacuum_length_mm` | number | Optional | Length of the vacuum gripper attachment, in millimeters. |
 | `vacuum_seal_timeout_ms` | int | Optional | How long `Grab` waits for the vacuum seal sensor before returning `false`. Default `100`. |
-| `collision_geometry` | string | Optional | `"boxes"`, the default, reports the hand-authored bounding box. `"mesh"` reports the collision mesh the module ships. `vacuum_length_mm` adds the suction tube either way. `use_urdfs: true` still selects the mesh with a warning. |
+| `collision_meshes` | bool | Optional | When `true`, reports the collision mesh the module ships instead of the default hand-authored bounding box. `vacuum_length_mm` adds the suction tube either way. `use_urdfs` still works as this with a warning. |
 
 ## Force Torque Sensor
 

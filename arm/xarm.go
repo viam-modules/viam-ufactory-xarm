@@ -211,9 +211,9 @@ type Config struct {
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
-	// CollisionGeometry picks what the arm's links carry, "boxes" bounding each link's mesh, the
-	// default, or "mesh" for the collision meshes themselves, which plan slower and travel larger.
-	CollisionGeometry         string         `json:"collision_geometry,omitempty"`
+	// CollisionMeshes gives the links their collision meshes, which plan slower and travel
+	// larger, in place of the boxes bounding them.
+	CollisionMeshes           bool           `json:"collision_meshes,omitempty"`
 	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
 	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
 
@@ -248,10 +248,6 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.StreamLimitToleranceRatio != 0 && cfg.StreamLimitToleranceRatio < 1 {
 		return nil, nil, fmt.Errorf("stream_limit_tolerance_ratio must be >= 1, got %f", cfg.StreamLimitToleranceRatio)
-	}
-
-	if err := validateCollisionGeometry(cfg.CollisionGeometry); err != nil {
-		return nil, nil, err
 	}
 
 	deps := []string{}
@@ -306,10 +302,6 @@ func (cfg *Config) maxBadJoint() int {
 		}
 	}
 	return maxJoint
-}
-
-func (cfg *Config) meshGeometry() bool {
-	return cfg.CollisionGeometry == collisionGeometryMesh
 }
 
 func (cfg *Config) streamLimitToleranceRatio() float64 {
@@ -406,11 +398,7 @@ func MakeModelFrame(
 	if variant == "" {
 		variant = kinematicsBase
 	}
-	geometry := collisionGeometryBoxes
-	if mesh {
-		geometry = collisionGeometryMesh
-	}
-	logger.Infof("kinematics: model=%s variant=%s file=%s collision_geometry=%s", modelName, variant, artifact.file, geometry)
+	logger.Infof("kinematics: model=%s variant=%s file=%s collision_meshes=%v", modelName, variant, artifact.file, mesh)
 	return model, nil
 }
 
@@ -420,9 +408,7 @@ func newxArm(ctx context.Context, conf resource.Config, logger logging.Logger, m
 	if err != nil {
 		return nil, err
 	}
-	if wantsMesh(conf, newConf.CollisionGeometry, logger) {
-		newConf.CollisionGeometry = collisionGeometryMesh
-	}
+	newConf.CollisionMeshes = wantsMesh(conf, newConf.CollisionMeshes, logger)
 
 	return NewXArm(ctx, conf.ResourceName(), newConf, logger, modelName, deps)
 }
@@ -542,7 +528,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	// The effective speeds, not the raw config ones, because an arm with no speed configured
 	// still moves at the module default and the model should say so.
 	x.model, err = MakeModelFrame(
-		name.Name, modelName, newConf.BadJoints, current, newConf.meshGeometry(), logger, x.detectedArm.armTypeCode,
+		name.Name, modelName, newConf.BadJoints, current, newConf.CollisionMeshes, logger, x.detectedArm.armTypeCode,
 		float64(newConf.speed()), float64(newConf.acceleration()), x.moveHZ,
 	)
 	if err != nil {

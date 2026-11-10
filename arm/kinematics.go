@@ -20,20 +20,6 @@ import (
 	"go.viam.com/rdk/spatialmath"
 )
 
-// collision_geometry values, shared by the arm and gripper configs.
-const (
-	collisionGeometryBoxes = "boxes"
-	collisionGeometryMesh  = "mesh"
-)
-
-func validateCollisionGeometry(value string) error {
-	switch value {
-	case "", collisionGeometryBoxes, collisionGeometryMesh:
-		return nil
-	}
-	return fmt.Errorf("collision_geometry must be %q or %q, got %q", collisionGeometryBoxes, collisionGeometryMesh, value)
-}
-
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
 // The files live under arm/kinematics with their meshes beside them and are edited in place.
 type kinematicsArtifact struct {
@@ -282,23 +268,23 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 	return cfg.ParseConfig(name)
 }
 
-// wantsMesh reads a collision_geometry choice. use_urdfs used to make the same choice, so a
-// config that still sets it and nothing else gets the mesh rather than a silent fall back to the
-// boxes, and a warning either way. The decimation ratios are gone with the meshes shipped
-// decimated, so those keys only warn.
-func wantsMesh(conf resource.Config, collisionGeometry string, logger logging.Logger) bool {
+// wantsMesh reads the collision_meshes choice. use_urdfs used to make the same choice, so a
+// config that still sets it and not collision_meshes gets what it asked for rather than a silent
+// fall back to the boxes, and a warning either way. The decimation ratios are gone with the
+// meshes shipped decimated, so those keys only warn.
+func wantsMesh(conf resource.Config, collisionMeshes bool, logger logging.Logger) bool {
 	for _, key := range []string{"mesh_decimation_ratio", "mesh_decimation_ratios"} {
 		if conf.Attributes.Has(key) {
 			logger.Warnf("%s no longer does anything, the meshes ship decimated", key)
 		}
 	}
 	if conf.Attributes.Has("use_urdfs") {
-		logger.Warnf("use_urdfs is now %s, set that instead", `"collision_geometry": "mesh"`)
-		if collisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
-			return true
+		logger.Warn("use_urdfs is now collision_meshes, set that instead")
+		if !conf.Attributes.Has("collision_meshes") {
+			return conf.Attributes.Bool("use_urdfs", false)
 		}
 	}
-	return collisionGeometry == collisionGeometryMesh
+	return collisionMeshes
 }
 
 // newGripperKinematics builds the model a gripper reports to the frame system, the shipped
