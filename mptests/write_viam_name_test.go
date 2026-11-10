@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/golang/geo/r3"
+	xarm "github.com/viam-modules/viam-ufactory-xarm/arm"
 	pb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/motionplan/armplanning"
@@ -23,7 +24,7 @@ func TestWriteViam(t *testing.T) {
 
 	ctx := t.Context()
 	logger := logging.NewTestLogger(t)
-	m, err := frame.ParseModelJSONFile("../arm/xarm7_kinematics.json", "")
+	m, err := xarm.MakeModelFrame("xArm7", xarm.ModelName7DOF, nil, nil, false, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	err = fs.AddFrame(m, fs.World())
