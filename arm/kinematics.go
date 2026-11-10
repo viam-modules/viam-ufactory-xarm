@@ -6,16 +6,33 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	"github.com/golang/geo/r3"
+	commonpb "go.viam.com/api/common/v1"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 )
+
+// collision_geometry values, shared by the arm and gripper configs.
+const (
+	collisionGeometryBoxes = "boxes"
+	collisionGeometryMesh  = "mesh"
+)
+
+func validateCollisionGeometry(value string) error {
+	switch value {
+	case "", collisionGeometryBoxes, collisionGeometryMesh:
+		return nil
+	}
+	return fmt.Errorf("collision_geometry must be %q or %q, got %q", collisionGeometryBoxes, collisionGeometryMesh, value)
+}
 
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
 // The files live under arm/kinematics with their meshes beside them and are edited in place.
@@ -149,21 +166,81 @@ func kinematicsPath(file string) (string, error) {
 }
 
 // loadKinematics reads a shipped kinematic model file as a model named for the resource, with
-// its meshes read from beside it.
-func loadKinematics(file, resourceName string) (*referenceframe.SimpleModel, error) {
+// its meshes read from beside it. Unless mesh is set, each collision mesh is replaced by the box
+// that bounds it in the link's frame, which keeps planning as cheap as it was with the hand
+// authored boxes and the served model small, while the mesh is there for a config that asks.
+func loadKinematics(file, resourceName string, mesh bool) (*referenceframe.SimpleModel, error) {
 	path, err := kinematicsPath(file)
 	if err != nil {
 		return nil, err
 	}
-	model, err := referenceframe.ParseModelJSONFile(path, resourceName)
+	pb, err := referenceframe.ReadKinematicModelFile(path)
 	if err != nil {
 		return nil, err
+	}
+	if !mesh {
+		if err := boxCollisions(pb); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	model, err := referenceframe.ModelFromProto(pb, resourceName)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	sm, ok := model.(*referenceframe.SimpleModel)
 	if !ok {
 		return nil, fmt.Errorf("%s loaded as a %T, which cannot carry limits", path, model)
 	}
 	return sm, nil
+}
+
+// boxCollisions replaces every collision mesh in the model with the box that bounds its
+// vertices, placed where the mesh was and labelled as it was. A geometry that is not a mesh is
+// left alone.
+func boxCollisions(pb *commonpb.KinematicModel) error {
+	box := func(g *commonpb.Geometry) (*commonpb.Geometry, error) {
+		if g.GetMesh() == nil {
+			return g, nil
+		}
+		mesh, err := spatialmath.NewMeshFromProto(spatialmath.NewPoseFromProtobuf(g.GetCenter()), g.GetMesh(), g.GetLabel())
+		if err != nil {
+			return nil, err
+		}
+		lo := r3.Vector{X: math.Inf(1), Y: math.Inf(1), Z: math.Inf(1)}
+		hi := lo.Mul(-1)
+		for _, tri := range mesh.Triangles() {
+			for _, pt := range tri.Points() {
+				lo = r3.Vector{X: math.Min(lo.X, pt.X), Y: math.Min(lo.Y, pt.Y), Z: math.Min(lo.Z, pt.Z)}
+				hi = r3.Vector{X: math.Max(hi.X, pt.X), Y: math.Max(hi.Y, pt.Y), Z: math.Max(hi.Z, pt.Z)}
+			}
+		}
+		center := spatialmath.NewPoseFromPoint(lo.Add(hi).Mul(0.5))
+		bounds, err := spatialmath.NewBox(spatialmath.Compose(mesh.Pose(), center), hi.Sub(lo), g.GetLabel())
+		if err != nil {
+			return nil, err
+		}
+		return bounds.ToProtobuf(), nil
+	}
+	for _, link := range pb.GetLinks() {
+		for i, g := range link.GetCollision() {
+			boxed, err := box(g)
+			if err != nil {
+				return fmt.Errorf("link %q collision %d: %w", link.GetId(), i, err)
+			}
+			link.Collision[i] = boxed
+		}
+	}
+	for _, joint := range pb.GetJoints() {
+		if joint.GetGeometry() == nil {
+			continue
+		}
+		boxed, err := box(joint.GetGeometry())
+		if err != nil {
+			return fmt.Errorf("joint %q geometry: %w", joint.GetId(), err)
+		}
+		joint.Geometry = boxed
+	}
+	return nil
 }
 
 // makeGeometryModel builds a zero-DoF kinematics model whose links carry geoms.
@@ -205,30 +282,23 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 	return cfg.ParseConfig(name)
 }
 
-// warnStaleKeys logs once for each attribute the config still sets that the module no longer
-// reads, since the server drops a key the config struct does not have without a word.
-func warnStaleKeys(conf resource.Config, logger logging.Logger, keys ...string) {
-	for _, key := range keys {
+// wantsMesh reads a collision_geometry choice. use_urdfs used to make the same choice, so a
+// config that still sets it and nothing else gets the mesh rather than a silent fall back to the
+// boxes, and a warning either way. The decimation ratios are gone with the meshes shipped
+// decimated, so those keys only warn.
+func wantsMesh(conf resource.Config, collisionGeometry string, logger logging.Logger) bool {
+	for _, key := range []string{"mesh_decimation_ratio", "mesh_decimation_ratios"} {
 		if conf.Attributes.Has(key) {
-			logger.Warnf("%s no longer does anything, the model always carries its collision meshes", key)
+			logger.Warnf("%s no longer does anything, the meshes ship decimated", key)
 		}
-	}
-}
-
-// gripperWantsMesh reads the gripper's collision geometry choice. use_urdfs used to make the
-// same choice, so a config that still sets it and nothing else gets the mesh rather than a
-// silent fall back to the boxes, and a warning either way.
-func gripperWantsMesh(conf resource.Config, newConf *GripperConfig, logger logging.Logger) bool {
-	if conf.Attributes.Has("mesh_decimation_ratio") {
-		logger.Warn("mesh_decimation_ratio no longer does anything, the mesh ships decimated")
 	}
 	if conf.Attributes.Has("use_urdfs") {
 		logger.Warnf("use_urdfs is now %s, set that instead", `"collision_geometry": "mesh"`)
-		if newConf.CollisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
+		if collisionGeometry == "" && conf.Attributes.Bool("use_urdfs", false) {
 			return true
 		}
 	}
-	return newConf.CollisionGeometry == collisionGeometryMesh
+	return collisionGeometry == collisionGeometryMesh
 }
 
 // newGripperKinematics builds the model a gripper reports to the frame system, the shipped
@@ -249,11 +319,12 @@ func newGripperKinematics(
 	return makeGeometryModel(modelName, geoms)
 }
 
-// loadGripperModel reads the gripper's shipped model file, named for the gripper model.
+// loadGripperModel reads the gripper's shipped model file, named for the gripper model, with
+// its mesh.
 func loadGripperModel(modelName string) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
 		return nil, err
 	}
-	return loadKinematics(artifact.file, modelName)
+	return loadKinematics(artifact.file, modelName, true)
 }

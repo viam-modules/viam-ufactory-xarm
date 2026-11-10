@@ -90,7 +90,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	mesh := gripperWantsMesh(config, newConf, logger)
+	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
 	mf, err := newGripperKinematics(config.Model.Name, mesh, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
 	})

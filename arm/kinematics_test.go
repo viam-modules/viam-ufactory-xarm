@@ -134,23 +134,23 @@ func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 
 // use_urdfs made the same choice collision_geometry makes now, so a config that still sets it
 // gets the mesh rather than a silent fall back to the boxes.
-func TestGripperWantsMesh(t *testing.T) {
+func TestWantsMesh(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 	for _, tc := range []struct {
-		name  string
-		attrs utils.AttributeMap
-		conf  GripperConfig
-		want  bool
+		name   string
+		attrs  utils.AttributeMap
+		choice string
+		want   bool
 	}{
-		{"default is boxes", nil, GripperConfig{}, false},
-		{"boxes", nil, GripperConfig{CollisionGeometry: collisionGeometryBoxes}, false},
-		{"mesh", nil, GripperConfig{CollisionGeometry: collisionGeometryMesh}, true},
-		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, GripperConfig{}, true},
-		{"collision_geometry wins over use_urdfs", utils.AttributeMap{"use_urdfs": true}, GripperConfig{CollisionGeometry: collisionGeometryBoxes}, false},
+		{"default is boxes", nil, "", false},
+		{"boxes", nil, collisionGeometryBoxes, false},
+		{"mesh", nil, collisionGeometryMesh, true},
+		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, "", true},
+		{"collision_geometry wins over use_urdfs", utils.AttributeMap{"use_urdfs": true}, collisionGeometryBoxes, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			conf := resource.Config{Attributes: tc.attrs}
-			test.That(t, gripperWantsMesh(conf, &tc.conf, logger), test.ShouldEqual, tc.want)
+			test.That(t, wantsMesh(conf, tc.choice, logger), test.ShouldEqual, tc.want)
 		})
 	}
 }

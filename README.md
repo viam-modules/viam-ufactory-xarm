@@ -59,6 +59,7 @@ Copy and paste the following attributes into your JSON configuration:
 | `collision_sensitivity` | int | Optional | `3` | Collision detection sensitivity from `0` (off) to `5`. Higher values trigger the emergency stop with less force. |
 | `bad-joints` | []int | Optional | — | List of joint indices that cannot move. The arm will be configured to lock those joints at their current position on startup. |
 | `motion` | string | Optional | `builtin` | Name of the motion service to use for `MoveToPosition` API calls. |
+| `collision_geometry` | string | Optional | `"boxes"` | `"boxes"` gives every link the box bounding its collision mesh. `"mesh"` gives the meshes themselves, which plan slower and make `GetKinematics` answers larger. `use_urdfs: true` still selects the meshes with a warning. See [Kinematics](#kinematics). |
 | `trajectory_generator` | object | Optional | — | Configuration for an external [trajectory generator](#trajectory-generator) ML model service. |
 | `ufactory-studio-proxy` | bool | Optional | `false` | When `true`, starts a local reverse proxy to the arm's UFactory Studio web UI. See [UFactory Studio Proxy](#ufactory-studio-proxy). |
 | `ufactory-studio-proxy-port` | int | Optional | `18333` | Local port for the Studio proxy. |
@@ -151,9 +152,11 @@ For an attached gripper, set its parent to the arm's name:
 
 Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, a collision mesh for every link but the xArm7's flange, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
 
+By default each link carries the box bounding its mesh rather than the mesh, which plans about as fast as the hand authored boxes did and keeps a `GetKinematics` answer small. `"collision_geometry": "mesh"` serves the meshes themselves, for tighter collision checking at about half again the planning time.
+
 The configured `speed_degs_per_sec` and `acceleration_degs_per_sec_per_sec` become every joint's velocity and acceleration limits on the model, and a joint in `bad-joints` is locked to a degree either side of where it sits at startup, within the joint's range. A limit can only narrow what the file holds, so the motion service and any client plan within what the arm will accept, and a joint that reports a position outside its range fails the resource rather than being locked somewhere it is not. `move_hz` is published as the rate the arm expects joint positions at.
 
-The `use_urdfs` and `mesh_decimation_ratios` attributes are gone, since the model always carries the meshes. A config that still sets them gets a warning.
+The `use_urdfs` and `mesh_decimation_ratios` attributes are gone. A config that still sets `use_urdfs` gets the meshes and a warning, and `mesh_decimation_ratios` only warns, since the meshes ship decimated.
 
 The files are the source and are edited in place, a limit in the JSON, a mesh beside it. They were produced once from the module's SVA documents, UFACTORY's URDFs and the viewer's GLB files by a generator that lives in the history at commit 882406c, which also holds those inputs, should new geometry ever have to be merged in the same way.
 

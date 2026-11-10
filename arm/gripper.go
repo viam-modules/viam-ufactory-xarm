@@ -82,11 +82,6 @@ type GripperConfig struct {
 	CollisionGeometry string `json:"collision_geometry,omitempty"`
 }
 
-const (
-	collisionGeometryBoxes = "boxes"
-	collisionGeometryMesh  = "mesh"
-)
-
 // Validate validates the config.
 func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
@@ -111,10 +106,8 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	if cfg.VacuumSealTimeoutMS < 0 {
 		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
 	}
-	switch cfg.CollisionGeometry {
-	case "", collisionGeometryBoxes, collisionGeometryMesh:
-	default:
-		return nil, nil, fmt.Errorf("collision_geometry must be %q or %q, got %q", collisionGeometryBoxes, collisionGeometryMesh, cfg.CollisionGeometry)
+	if err := validateCollisionGeometry(cfg.CollisionGeometry); err != nil {
+		return nil, nil, err
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -157,7 +150,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 		return nil, err
 	}
 
-	mesh := gripperWantsMesh(config, newConf, logger)
+	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
 	mf, err := newGripperKinematics(ModelNameGripperLite, mesh, liteGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
@@ -335,7 +328,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 	}
 	submodel := detected.submodel
 
-	mesh := gripperWantsMesh(config, newConf, logger)
+	mesh := wantsMesh(config, newConf.CollisionGeometry, logger)
 	if mesh && submodel == submodelG2 {
 		logger.Warn("gripper: only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
 			"set collision_geometry to boxes to get the G2 bounding boxes")

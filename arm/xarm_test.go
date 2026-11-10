@@ -2,10 +2,13 @@ package arm
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"testing"
 
+	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/spatialmath"
@@ -50,8 +53,9 @@ func simpleModel(t *testing.T, m referenceframe.Model) *referenceframe.SimpleMod
 	return sm
 }
 
-// Every arm loads from its shipped file with collision geometry on every link, and the arms the
-// viewer has GLB files for carry them as visuals.
+// Every arm loads from its shipped file with collision geometry on its links, boxes bounding
+// the meshes by default and the meshes on request, and the arms the viewer has GLB files for
+// carry them as visuals either way.
 func TestMakeModelFrame(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
@@ -67,22 +71,93 @@ func TestMakeModelFrame(t *testing.T) {
 		{ModelNameLite, 6, 7, 7},
 		{ModelName850, 6, 7, 0},
 	} {
-		t.Run(tc.model, func(t *testing.T) {
-			m, err := MakeModelFrame("my-arm", tc.model, nil, nil, logger, 0, 0, 0, 0)
-			test.That(t, err, test.ShouldBeNil)
-			test.That(t, m.Name(), test.ShouldEqual, "my-arm")
-			test.That(t, len(m.DoF()), test.ShouldEqual, tc.dof)
+		for _, mesh := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s mesh=%v", tc.model, mesh), func(t *testing.T) {
+				m, err := MakeModelFrame("my-arm", tc.model, nil, nil, mesh, logger, 0, 0, 0, 0)
+				test.That(t, err, test.ShouldBeNil)
+				test.That(t, m.Name(), test.ShouldEqual, "my-arm")
+				test.That(t, len(m.DoF()), test.ShouldEqual, tc.dof)
 
-			test.That(t, modelGeometries(t, m), test.ShouldHaveLength, tc.collisions)
+				geometries := modelGeometries(t, m)
+				test.That(t, geometries, test.ShouldHaveLength, tc.collisions)
+				meshes := 0
+				for _, g := range geometries {
+					if _, ok := g.(*spatialmath.Mesh); ok {
+						meshes++
+					}
+				}
+				if mesh {
+					test.That(t, meshes, test.ShouldBeGreaterThan, 0)
+				} else {
+					test.That(t, meshes, test.ShouldEqual, 0)
+				}
 
-			sm := simpleModel(t, m)
-			visuals := 0
-			for _, link := range sm.ModelConfig().Links {
-				visuals += len(sm.VisualGeometries(link.ID))
-			}
-			test.That(t, visuals, test.ShouldEqual, tc.visuals)
-		})
+				sm := simpleModel(t, m)
+				visuals := 0
+				for _, link := range sm.ModelConfig().Links {
+					visuals += len(sm.VisualGeometries(link.ID))
+				}
+				test.That(t, visuals, test.ShouldEqual, tc.visuals)
+			})
+		}
 	}
+}
+
+// The default boxes bound the meshes they stand in for, at any joint position, so a plan that
+// clears the boxes clears the arm.
+func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	boxed, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+	meshed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+
+	rng := rand.New(rand.NewSource(3))
+	positions := [][]referenceframe.Input{make([]referenceframe.Input, 6)}
+	for range 3 {
+		positions = append(positions, referenceframe.RandomFrameInputs(meshed, rng))
+	}
+	for _, q := range positions {
+		// a link the file gives no mesh keeps its own geometry, a sphere on the gripper mount
+		boxes := map[string]spatialmath.Geometry{}
+		for _, g := range geometriesAt(t, boxed, q) {
+			cfg, err := spatialmath.NewGeometryConfig(g)
+			test.That(t, err, test.ShouldBeNil)
+			if cfg.Type == spatialmath.BoxType {
+				boxes[g.Label()] = g
+			}
+		}
+		for _, g := range geometriesAt(t, meshed, q) {
+			mesh, ok := g.(*spatialmath.Mesh)
+			if !ok {
+				continue
+			}
+			box := boxes[g.Label()]
+			test.That(t, box, test.ShouldNotBeNil)
+			dims, err := spatialmath.NewGeometryConfig(box)
+			test.That(t, err, test.ShouldBeNil)
+			// every vertex, taken into the box's own frame, sits within its half extents
+			toBox := spatialmath.PoseInverse(box.Pose())
+			half := r3.Vector{X: dims.X / 2, Y: dims.Y / 2, Z: dims.Z / 2}
+			for _, tri := range mesh.Triangles() {
+				for _, pt := range tri.Points() {
+					world := spatialmath.Compose(mesh.Pose(), spatialmath.NewPoseFromPoint(pt)).Point()
+					local := spatialmath.Compose(toBox, spatialmath.NewPoseFromPoint(world)).Point()
+					test.That(t, math.Abs(local.X), test.ShouldBeLessThanOrEqualTo, half.X+1e-6)
+					test.That(t, math.Abs(local.Y), test.ShouldBeLessThanOrEqualTo, half.Y+1e-6)
+					test.That(t, math.Abs(local.Z), test.ShouldBeLessThanOrEqualTo, half.Z+1e-6)
+				}
+			}
+		}
+	}
+}
+
+func geometriesAt(t *testing.T, m referenceframe.Model, q []referenceframe.Input) []spatialmath.Geometry {
+	t.Helper()
+	gif, err := m.Geometries(q)
+	test.That(t, err, test.ShouldBeNil)
+	return gif.Geometries()
 }
 
 // The 1305 wrist has its own collision mesh for the gripper mount, where the base xArm6 keeps
@@ -91,7 +166,7 @@ func TestMakeModelFrameVariant(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
 	mountGeometry := func(armTypeCode int) spatialmath.Geometry {
-		m, err := MakeModelFrame("", ModelName6DOF, nil, nil, logger, armTypeCode, 0, 0, 0)
+		m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, logger, armTypeCode, 0, 0, 0)
 		test.That(t, err, test.ShouldBeNil)
 		for _, g := range modelGeometries(t, m) {
 			if g.Label() == m.Name()+":gripper_mount" {
@@ -110,7 +185,7 @@ func TestMakeModelFrameVariant(t *testing.T) {
 func TestMakeModelFrameUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("", "unknownModel", nil, nil, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", "unknownModel", nil, nil, false, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
@@ -120,11 +195,11 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 
 	current := make([]referenceframe.Input, 6)
 
-	_, err := MakeModelFrame("", ModelName6DOF, []int{99}, current, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, []int{99}, current, false, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "out of range")
 
-	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, logger, 0, 0, 0, 0)
+	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, false, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
@@ -199,7 +274,7 @@ func TestMakeModelFrameServedLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := logging.NewTestLogger(t)
-			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, logger, 0, tc.speed, tc.accel, hz)
+			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, false, logger, 0, tc.speed, tc.accel, hz)
 			test.That(t, err, test.ShouldBeNil)
 
 			resp := referenceframe.KinematicModelToProtobuf(m)
@@ -249,7 +324,7 @@ func TestMakeModelFrameRefusesAnOutOfRangeLock(t *testing.T) {
 	current := make([]referenceframe.Input, 6)
 	current[2] = utils.DegToRad(30) // past the elbow's upper stop at 10
 
-	_, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "outside its range")
 }
@@ -341,7 +416,7 @@ func TestGet3DModels(t *testing.T) {
 		{ModelName7DOF, nil},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
-			m, err := MakeModelFrame("", tc.model, nil, nil, logger, 0, 0, 0, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, false, logger, 0, 0, 0, 0)
 			test.That(t, err, test.ShouldBeNil)
 			x := &xArm{model: m}
 			models, err := x.Get3DModels(context.Background(), nil)
@@ -406,4 +481,14 @@ func TestFTReadingsMap(t *testing.T) {
 	test.That(t, m["TRy_Nm"], test.ShouldEqual, -0.0914)
 	test.That(t, m["TRz_Nm"], test.ShouldEqual, 0.00698)
 	test.That(t, len(m), test.ShouldEqual, 6)
+}
+
+func TestConfigCollisionGeometry(t *testing.T) {
+	for _, value := range []string{"", collisionGeometryBoxes, collisionGeometryMesh} {
+		_, _, err := (&Config{Host: "10.0.0.1", CollisionGeometry: value}).Validate("")
+		test.That(t, err, test.ShouldBeNil)
+	}
+	_, _, err := (&Config{Host: "10.0.0.1", CollisionGeometry: "urdf"}).Validate("")
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "collision_geometry")
 }
