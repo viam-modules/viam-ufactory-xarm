@@ -24,7 +24,7 @@ func TestWriteViam(t *testing.T) {
 
 	ctx := t.Context()
 	logger := logging.NewTestLogger(t)
-	m, err := xarm.MakeModelFrame("xArm7", xarm.ModelName7DOF, nil, nil, false, logger, 0, 0, 0, 0)
+	m, err := xarm.MakeModelFrame("xArm7", xarm.ModelName7DOF, nil, nil, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	err = fs.AddFrame(m, fs.World())

@@ -213,7 +213,10 @@ type Config struct {
 	Motion       string  `json:"motion"`
 	// CollisionMeshes gives the links their collision meshes, which plan slower and travel
 	// larger, in place of the boxes bounding them.
-	CollisionMeshes           bool           `json:"collision_meshes,omitempty"`
+	CollisionMeshes bool `json:"collision_meshes,omitempty"`
+	// MeshDecimationRatios is the share of each collision mesh's triangles kept, in the order the
+	// links have them, 0.1 for any the list does not reach. 1 keeps a mesh as shipped.
+	MeshDecimationRatios      []float64      `json:"mesh_decimation_ratios,omitempty"`
 	TrajGen                   *TrajGenConfig `json:"trajectory_generator,omitempty"`
 	StreamLimitToleranceRatio float64        `json:"stream_limit_tolerance_ratio,omitempty"`
 
@@ -248,6 +251,10 @@ func (cfg *Config) Validate(path string) ([]string, []string, error) {
 
 	if cfg.StreamLimitToleranceRatio != 0 && cfg.StreamLimitToleranceRatio < 1 {
 		return nil, nil, fmt.Errorf("stream_limit_tolerance_ratio must be >= 1, got %f", cfg.StreamLimitToleranceRatio)
+	}
+
+	if err := validateMeshDecimationRatios(cfg.MeshDecimationRatios); err != nil {
+		return nil, nil, err
 	}
 
 	deps := []string{}
@@ -330,7 +337,8 @@ func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.Joi
 //
 // When armTypeCode matches a known hardware variant, 1305 on the xArm6, the variant's model
 // file is used. Pass 0 when variant information is not available. The links carry their
-// collision meshes when mesh is set and the boxes bounding them otherwise.
+// collision meshes, decimated by meshDecimationRatios, when mesh is set and the boxes bounding
+// them otherwise.
 //
 // speedDegsPerSec and accelDegsPerSec2 become every joint's velocity and acceleration limits, so
 // the motion service plans against the speeds the arm moves at. Pass 0 for either to leave the
@@ -344,6 +352,7 @@ func MakeModelFrame(
 	badJoints []int,
 	current []referenceframe.Input,
 	mesh bool,
+	meshDecimationRatios []float64,
 	logger logging.Logger,
 	armTypeCode int,
 	speedDegsPerSec float64,
@@ -354,9 +363,9 @@ func MakeModelFrame(
 	if err != nil {
 		return nil, err
 	}
-	var edits []func(*commonpb.KinematicModel) error
-	if !mesh {
-		edits = append(edits, boxCollisions)
+	edits := []func(*commonpb.KinematicModel) error{boxCollisions}
+	if mesh {
+		edits = []func(*commonpb.KinematicModel) error{decimateCollisions(meshDecimationRatios)}
 	}
 	model, err := loadKinematics(artifact.file, resourceName, edits...)
 	if err != nil {
@@ -534,7 +543,7 @@ func NewXArm(ctx context.Context, name resource.Name,
 	// The effective speeds, not the raw config ones, because an arm with no speed configured
 	// still moves at the module default and the model should say so.
 	x.model, err = MakeModelFrame(
-		name.Name, modelName, newConf.BadJoints, current, newConf.CollisionMeshes, logger, x.detectedArm.armTypeCode,
+		name.Name, modelName, newConf.BadJoints, current, newConf.CollisionMeshes, newConf.MeshDecimationRatios, logger, x.detectedArm.armTypeCode,
 		float64(newConf.speed()), float64(newConf.acceleration()), x.moveHZ,
 	)
 	if err != nil {

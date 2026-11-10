@@ -21,8 +21,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/xarm_gripper/collision/base_link.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm_grippermeshes/base_link.stl"
           },
           "label": "xarm_gripper_base_link"
         }

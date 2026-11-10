@@ -91,7 +91,7 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 	}
 
 	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
-	mf, err := newGripperKinematics(config.Model.Name, mesh, func() ([]spatialmath.Geometry, error) {
+	mf, err := newGripperKinematics(config.Model.Name, mesh, newConf.MeshDecimationRatio, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
 	}, vacuumTube(newConf.VacuumLengthMM))
 	if err != nil {

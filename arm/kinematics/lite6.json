@@ -13,8 +13,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/base.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link_base.stl"
           },
           "label": "base"
         }
@@ -26,7 +26,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/base.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/base.glb"
           },
           "label": "base"
         }
@@ -47,8 +47,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/base_top.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link1.stl"
           },
           "label": "base_top"
         }
@@ -61,7 +61,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/base_top.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/base_top.glb"
           },
           "label": "base_top"
         }
@@ -81,14 +81,14 @@
             "x": 7.403799795469013e-15,
             "y": -3.885780586188048e-16,
             "z": 0.19999999999998666,
-            "o_x": -0.000011019615309471043,
+            "o_x": -1.1019615309471043e-05,
             "o_y": 0.9999999999392839,
             "o_z": 1.3492373884815834e-11,
             "theta": -179.9997895417656
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/upper_arm.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link2.stl"
           },
           "label": "upper_arm"
         }
@@ -101,7 +101,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/upper_arm.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/upper_arm.glb"
           },
           "label": "upper_arm"
         }
@@ -119,16 +119,16 @@
         {
           "center": {
             "x": 0.0007353756616357998,
-            "y": 5.402314183969003e-9,
+            "y": 5.402314183969003e-09,
             "z": 0.39999999864937263,
-            "o_x": 0.000011019669279037865,
+            "o_x": 1.1019669279037865e-05,
             "o_y": -0.9999999999122987,
-            "o_z": 0.000007346396714014158,
+            "o_z": 7.346396714014158e-06,
             "theta": 89.9995790817006
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/upper_forearm.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link3.stl"
           },
           "label": "upper_forearm"
         }
@@ -141,7 +141,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/upper_forearm.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/upper_forearm.glb"
           },
           "label": "upper_forearm"
         }
@@ -168,14 +168,14 @@
             "x": -0.0009367299691685905,
             "y": -0.0007134198478405075,
             "z": -227.21063912675444,
-            "o_x": -0.000007346369728465873,
-            "o_y": -0.0000036732725653778537,
+            "o_x": -7.346369728465873e-06,
+            "o_y": -3.6732725653778537e-06,
             "o_z": -0.9999999999662688,
             "theta": 179.99936862177782
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/lower_forearm.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link4.stl"
           },
           "label": "lower_forearm"
         }
@@ -188,7 +188,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/lower_forearm.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/lower_forearm.glb"
           },
           "label": "lower_forearm"
         }
@@ -208,14 +208,14 @@
             "x": -0.0009367299691808191,
             "y": -0.0007134198478473922,
             "z": 0.3893608732454935,
-            "o_x": -0.000011019615309479328,
+            "o_x": -1.1019615309479328e-05,
             "o_y": 0.9999999999392839,
             "o_z": 1.3491929795605984e-11,
             "theta": -89.99957908170062
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/wrist_link.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link5.stl"
           },
           "label": "wrist_link"
         }
@@ -228,7 +228,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/wrist_link.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/wrist_link.glb"
           },
           "label": "wrist_link"
         }
@@ -249,14 +249,14 @@
             "x": -0.001395880607047884,
             "y": -0.0007134240642140358,
             "z": -0.6106391250679315,
-            "o_x": -0.0000073464506832829164,
-            "o_y": 0.000003673137640436029,
+            "o_x": -7.3464506832829164e-06,
+            "o_y": 3.673137640436029e-06,
             "o_z": -0.999999999966269,
             "theta": -0.0006313766642175985
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/lite6/collision/gripper_mount.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/lite6meshes/link6.stl"
           },
           "label": "gripper_mount"
         }
@@ -268,7 +268,7 @@
           },
           "mesh": {
             "content_type": "glb",
-            "original_file_source_path_diagnostic": "meshes/lite6/visual/gripper_mount.glb"
+            "original_file_source_path_diagnostic": "../3d_models/lite6/gripper_mount.glb"
           },
           "label": "gripper_mount"
         }

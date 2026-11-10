@@ -21,8 +21,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/vacuum_gripper/collision/vacuum_gripper.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/vacuum_grippermeshes/vacuum_gripper.stl"
           },
           "label": "xarm_vacuum_gripper_link"
         }

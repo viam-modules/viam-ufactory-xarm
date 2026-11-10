@@ -110,7 +110,7 @@ func TestStreamLimits(t *testing.T) {
 		{"a model without limits falls back to the move options", 0, 0, mo.speed, mo.acceleration},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, logger, 0, tc.speed, tc.accel, 0)
+			m, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, tc.speed, tc.accel, 0)
 			test.That(t, err, test.ShouldBeNil)
 
 			vel, acc := streamLimits(m, mo, tol)
@@ -161,7 +161,7 @@ func TestCreateRawJointSteps1(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, logger, 0, 0, 0, 0)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	positions := [][]float64{{1, 0, 0, 0, 0, 1}}
@@ -185,7 +185,7 @@ func TestCreateRawJointStepsLowSpeed(t *testing.T) {
 	}
 
 	start := []float64{0, 0, 0, 0, 0, 0}
-	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, logger, 0, 0, 0, 0)
+	x.model, err = MakeModelFrame("", ModelName6DOF, nil, start, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	displacement := 1.0

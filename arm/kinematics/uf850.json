@@ -15,8 +15,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_base.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link_base.stl"
           },
           "label": "link_base"
         }
@@ -38,8 +38,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_1.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link1.stl"
           },
           "label": "link_1"
         }
@@ -64,8 +64,8 @@
             "o_z": 1.0000000000000004
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_2.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link2.stl"
           },
           "label": "link_2"
         }
@@ -90,8 +90,8 @@
             "o_z": 1.0000000000000004
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_3.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link3.stl"
           },
           "label": "link_3"
         }
@@ -116,8 +116,8 @@
             "theta": -3.5340319509685705e-21
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_4.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link4.stl"
           },
           "label": "link_4"
         }
@@ -141,8 +141,8 @@
             "o_z": 1
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_5.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link5.stl"
           },
           "label": "link_5"
         }
@@ -164,8 +164,8 @@
             "theta": -3.5340319509685705e-21
           },
           "mesh": {
-            "content_type": "ply",
-            "original_file_source_path_diagnostic": "meshes/uf850/collision/link_6.ply"
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/uf850meshes/link6.stl"
           },
           "label": "link_6"
         }

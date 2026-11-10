@@ -73,7 +73,7 @@ func TestMakeModelFrame(t *testing.T) {
 	} {
 		for _, mesh := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s mesh=%v", tc.model, mesh), func(t *testing.T) {
-				m, err := MakeModelFrame("my-arm", tc.model, nil, nil, mesh, logger, 0, 0, 0, 0)
+				m, err := MakeModelFrame("my-arm", tc.model, nil, nil, mesh, nil, logger, 0, 0, 0, 0)
 				test.That(t, err, test.ShouldBeNil)
 				test.That(t, m.Name(), test.ShouldEqual, "my-arm")
 				test.That(t, len(m.DoF()), test.ShouldEqual, tc.dof)
@@ -103,14 +103,61 @@ func TestMakeModelFrame(t *testing.T) {
 	}
 }
 
+// A ratio applies to the meshes in link order, the default past the end of the list, and 1 keeps a
+// mesh as shipped.
+func TestMakeModelFrameDecimation(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+
+	shipped, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+	mixed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 0.5}, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldBeNil)
+
+	triangles := func(m referenceframe.Model) map[string]int {
+		out := map[string]int{}
+		for _, g := range modelGeometries(t, m) {
+			if mesh, ok := g.(*spatialmath.Mesh); ok {
+				out[g.Label()] = len(mesh.Triangles())
+			}
+		}
+		return out
+	}
+	raw, got := triangles(shipped), triangles(mixed)
+	test.That(t, raw, test.ShouldHaveLength, 6)
+	label := func(link string) string { return shipped.Name() + ":" + link }
+	test.That(t, raw[label("base")], test.ShouldBeGreaterThan, 0)
+	test.That(t, got[label("base")], test.ShouldEqual, raw[label("base")])
+	test.That(t, got[label("base_top")], test.ShouldBeLessThanOrEqualTo, raw[label("base_top")]/2+1)
+	test.That(t, got[label("base_top")], test.ShouldBeGreaterThan, raw[label("base_top")]/10)
+	for _, link := range []string{"upper_arm", "upper_forearm", "lower_forearm", "wrist_link"} {
+		test.That(t, got[label(link)], test.ShouldBeLessThanOrEqualTo, raw[label(link)]/10+1)
+	}
+
+	_, err = MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
+	test.That(t, err, test.ShouldNotBeNil)
+	test.That(t, err.Error(), test.ShouldContainSubstring, "7 mesh decimation ratios")
+}
+
+func TestConfigMeshDecimationRatios(t *testing.T) {
+	for _, ratios := range [][]float64{nil, {0.1}, {1, 0.5}} {
+		_, _, err := (&Config{Host: "10.0.0.1", MeshDecimationRatios: ratios}).Validate("")
+		test.That(t, err, test.ShouldBeNil)
+	}
+	for _, ratios := range [][]float64{{0}, {1.5}, {0.1, -1}} {
+		_, _, err := (&Config{Host: "10.0.0.1", MeshDecimationRatios: ratios}).Validate("")
+		test.That(t, err, test.ShouldNotBeNil)
+	}
+}
+
 // The default boxes bound the meshes they stand in for, at any joint position, so a plan that
-// clears the boxes clears the arm.
+// clears the boxes clears the arm. The meshes as shipped, that is, since a decimated hull is
+// conservative and pokes a little past the mesh it encloses.
 func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	boxed, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, logger, 0, 0, 0, 0)
+	boxed, err := MakeModelFrame("", ModelName6DOF, nil, nil, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
-	meshed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, logger, 0, 0, 0, 0)
+	meshed, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, []float64{1, 1, 1, 1, 1, 1}, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldBeNil)
 
 	rng := rand.New(rand.NewSource(3))
@@ -166,7 +213,7 @@ func TestMakeModelFrameVariant(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
 	mountGeometry := func(armTypeCode int) spatialmath.Geometry {
-		m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, logger, armTypeCode, 0, 0, 0)
+		m, err := MakeModelFrame("", ModelName6DOF, nil, nil, true, nil, logger, armTypeCode, 0, 0, 0)
 		test.That(t, err, test.ShouldBeNil)
 		for _, g := range modelGeometries(t, m) {
 			if g.Label() == m.Name()+":gripper_mount" {
@@ -185,7 +232,7 @@ func TestMakeModelFrameVariant(t *testing.T) {
 func TestMakeModelFrameUnknownModel(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
-	_, err := MakeModelFrame("", "unknownModel", nil, nil, false, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", "unknownModel", nil, nil, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "no kinematics artifact for xarm model")
 }
@@ -195,11 +242,11 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 
 	current := make([]referenceframe.Input, 6)
 
-	_, err := MakeModelFrame("", ModelName6DOF, []int{99}, current, false, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, []int{99}, current, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "out of range")
 
-	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, false, logger, 0, 0, 0, 0)
+	_, err = MakeModelFrame("", ModelName6DOF, []int{-1}, current, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
@@ -274,7 +321,7 @@ func TestMakeModelFrameServedLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := logging.NewTestLogger(t)
-			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, false, logger, 0, tc.speed, tc.accel, hz)
+			m, err := MakeModelFrame("", ModelName6DOF, tc.badJoints, tc.current, false, nil, logger, 0, tc.speed, tc.accel, hz)
 			test.That(t, err, test.ShouldBeNil)
 
 			resp := referenceframe.KinematicModelToProtobuf(m)
@@ -324,7 +371,7 @@ func TestMakeModelFrameRefusesAnOutOfRangeLock(t *testing.T) {
 	current := make([]referenceframe.Input, 6)
 	current[2] = utils.DegToRad(30) // past the elbow's upper stop at 10
 
-	_, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, logger, 0, 0, 0, 0)
+	_, err := MakeModelFrame("", ModelName6DOF, []int{2}, current, false, nil, logger, 0, 0, 0, 0)
 	test.That(t, err, test.ShouldNotBeNil)
 	test.That(t, err.Error(), test.ShouldContainSubstring, "outside its range")
 }
@@ -416,7 +463,7 @@ func TestGet3DModels(t *testing.T) {
 		{ModelName7DOF, nil},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
-			m, err := MakeModelFrame("", tc.model, nil, nil, false, logger, 0, 0, 0, 0)
+			m, err := MakeModelFrame("", tc.model, nil, nil, false, nil, logger, 0, 0, 0, 0)
 			test.That(t, err, test.ShouldBeNil)
 			x := &xArm{model: m}
 			models, err := x.Get3DModels(context.Background(), nil)

@@ -70,7 +70,7 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, want, test.ShouldNotBeEmpty)
 
-			mf, err := newGripperKinematics(tc.name, false, tc.geoms)
+			mf, err := newGripperKinematics(tc.name, false, nil, tc.geoms)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, mf.DoF(), test.ShouldBeEmpty)
 
@@ -105,13 +105,13 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 	return gif.Geometries()
 }
 
-// With collision_meshes set each gripper reports the collision mesh the module ships,
+// With collision_meshes set each gripper reports the collision mesh the module ships, decimated,
 // and the mesh crosses the wire in the typed model.
 func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 
 	for _, name := range []string{ModelNameGripper, ModelNameGripperLite, ModelNameVacuumGripper, ModelNameVacuumGripperLite} {
 		t.Run(name, func(t *testing.T) {
-			mf, err := newGripperKinematics(name, true, nil)
+			mf, err := newGripperKinematics(name, true, nil, nil)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, mf.DoF(), test.ShouldBeEmpty)
 			test.That(t, mf.Name(), test.ShouldEqual, name)
@@ -120,6 +120,14 @@ func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
 			test.That(t, geoms, test.ShouldHaveLength, 1)
 			mesh, isMesh := geoms[0].(*spatialmath.Mesh)
 			test.That(t, isMesh, test.ShouldBeTrue)
+
+			// the shipped STL is full resolution, the model gets a tenth of it
+			one := 1.0
+			full, err := newGripperKinematics(name, true, &one, nil)
+			test.That(t, err, test.ShouldBeNil)
+			fullMesh, isMesh := modelGeometries(t, full)[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+			test.That(t, len(mesh.Triangles()), test.ShouldBeLessThanOrEqualTo, len(fullMesh.Triangles())/10+1)
 
 			resp := referenceframe.KinematicModelToProtobuf(mf)
 			rebuilt, err := referenceframe.KinematicModelFromProtobuf(name, resp)
@@ -161,7 +169,7 @@ func TestWantsMesh(t *testing.T) {
 // gripper reports, and the two agree.
 func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
 	const length = 150.0
-	mf, err := newGripperKinematics(ModelNameVacuumGripper, true, nil, vacuumTube(length))
+	mf, err := newGripperKinematics(ModelNameVacuumGripper, true, nil, nil, vacuumTube(length))
 	test.That(t, err, test.ShouldBeNil)
 
 	geoms := modelGeometries(t, mf)
@@ -183,7 +191,7 @@ func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
 	test.That(t, modelGeometries(t, rebuilt), test.ShouldHaveLength, 2)
 
 	// no tube configured, no tube in the model
-	mf, err = newGripperKinematics(ModelNameVacuumGripper, true, nil, vacuumTube(0))
+	mf, err = newGripperKinematics(ModelNameVacuumGripper, true, nil, nil, vacuumTube(0))
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, modelGeometries(t, mf), test.ShouldHaveLength, 1)
 }
@@ -204,6 +212,17 @@ func TestUnpackKinematicsRecovers(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, again, test.ShouldEqual, dir)
 	test.That(t, unpacked(dir), test.ShouldBeTrue)
-	_, err = os.Stat(filepath.Join(dir, "xarm6.json"))
+	_, err = os.Stat(filepath.Join(dir, "kinematics", "xarm6.json"))
 	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestGripperConfigMeshDecimationRatio(t *testing.T) {
+	for _, r := range []float64{0.1, 1} {
+		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
+		test.That(t, err, test.ShouldBeNil)
+	}
+	for _, r := range []float64{0, 1.5} {
+		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
+		test.That(t, err, test.ShouldNotBeNil)
+	}
 }

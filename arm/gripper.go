@@ -80,6 +80,9 @@ type GripperConfig struct {
 	// CollisionMeshes reports the collision mesh the module ships in place of the hand authored
 	// bounding boxes.
 	CollisionMeshes bool `json:"collision_meshes,omitempty"`
+	// MeshDecimationRatio is the share of the mesh's triangles kept, 0.1 when unset. 1 keeps the
+	// mesh as shipped.
+	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
 }
 
 // Validate validates the config.
@@ -105,6 +108,11 @@ func (cfg *GripperConfig) Validate(path string) ([]string, []string, error) {
 	}
 	if cfg.VacuumSealTimeoutMS < 0 {
 		return nil, nil, fmt.Errorf("vacuum_seal_timeout_ms must be non-negative, got %d", cfg.VacuumSealTimeoutMS)
+	}
+	if cfg.MeshDecimationRatio != nil {
+		if err := validateMeshDecimationRatios([]float64{*cfg.MeshDecimationRatio}); err != nil {
+			return nil, nil, err
+		}
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -148,7 +156,7 @@ func newGripperLite(ctx context.Context, deps resource.Dependencies, config reso
 	}
 
 	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
-	mf, err := newGripperKinematics(ModelNameGripperLite, mesh, liteGripperGeometries)
+	mf, err := newGripperKinematics(ModelNameGripperLite, mesh, newConf.MeshDecimationRatio, liteGripperGeometries)
 	if err != nil {
 		return nil, fmt.Errorf("gripper_lite kinematics: %w", err)
 	}
@@ -330,7 +338,7 @@ func newGripper(ctx context.Context, deps resource.Dependencies, config resource
 		logger.Warn("gripper: only the G1 mesh ships, so this G2 will report G1 collision geometry; " +
 			"unset collision_meshes to get the G2 bounding boxes")
 	}
-	mf, err := newGripperKinematics(ModelNameGripper, mesh, func() ([]spatialmath.Geometry, error) {
+	mf, err := newGripperKinematics(ModelNameGripper, mesh, newConf.MeshDecimationRatio, func() ([]spatialmath.Geometry, error) {
 		return standardGripperGeometries(submodel)
 	})
 	if err != nil {

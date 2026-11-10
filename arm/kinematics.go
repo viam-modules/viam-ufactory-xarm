@@ -9,7 +9,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/golang/geo/r3"
@@ -21,7 +20,8 @@ import (
 )
 
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
-// The files live under arm/kinematics with their meshes beside them and are edited in place.
+// The files live under arm/kinematics, point at the manufacturer's STL meshes under arm/meshes
+// and the viewer's GLB files under arm/3d_models, and are edited in place.
 type kinematicsArtifact struct {
 	// file is the base name of the model file
 	file string
@@ -74,10 +74,10 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 	return kinematicsArtifact{}, fmt.Errorf("no kinematics artifact for gripper model %s", modelName)
 }
 
-// kinematicsFiles is the model files and their meshes, built into the binary so a module started
-// straight from the build directory finds them without a module root.
+// kinematicsFiles is the model files and the meshes they point at, built into the binary so a
+// module started straight from the build directory finds them without a module root.
 //
-//go:embed kinematics
+//go:embed kinematics meshes 3d_models
 var kinematicsFiles embed.FS
 
 var (
@@ -107,10 +107,9 @@ func kinematicsDir() (string, error) {
 // place, so a half written directory is never taken for a complete one by another process
 // starting at the same time, and a leftover that lost its marker to a temp cleaner is replaced.
 func unpackKinematics() (string, error) {
-	const root = "kinematics"
 	files := map[string][]byte{}
 	digest := fnv.New64a()
-	err := fs.WalkDir(kinematicsFiles, root, func(p string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(kinematicsFiles, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -118,7 +117,7 @@ func unpackKinematics() (string, error) {
 		if err != nil {
 			return err
 		}
-		files[strings.TrimPrefix(p, root+"/")] = data
+		files[p] = data
 		// a hash never fails to take bytes, and the walk is in name order so the digest is stable
 		_, _ = digest.Write([]byte(p))
 		_, _ = digest.Write(data)
@@ -185,7 +184,7 @@ func kinematicsPath(file string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unpacking the kinematic model files: %w", err)
 	}
-	return filepath.Join(dir, file+".json"), nil
+	return filepath.Join(dir, "kinematics", file+".json"), nil
 }
 
 // loadKinematics reads a shipped kinematic model file as a model named for the resource, with
@@ -213,6 +212,75 @@ func loadKinematics(file, resourceName string, edits ...func(*commonpb.Kinematic
 		return nil, fmt.Errorf("%s loaded as a %T, which cannot carry limits", path, model)
 	}
 	return sm, nil
+}
+
+// defaultMeshDecimationRatio is the share of a collision mesh's triangles kept when the config
+// does not say, the ratio the module has always applied.
+const defaultMeshDecimationRatio = 0.1
+
+// minTriangles is the fewest triangles the decimator will produce, a box.
+const minTriangles = 12
+
+// decimateCollisions replaces each collision mesh with a conservative hull of at most the given
+// share of its triangles, the i-th ratio for the i-th mesh in file order and the default past
+// the end of the list. A ratio of 1 keeps the mesh as shipped. The hull contains the mesh, so
+// planning against it is never less safe, and far cheaper.
+func decimateCollisions(ratios []float64) func(*commonpb.KinematicModel) error {
+	return func(pb *commonpb.KinematicModel) error {
+		i := 0
+		for _, link := range pb.GetLinks() {
+			for j, g := range link.GetCollision() {
+				if g.GetMesh() == nil {
+					continue
+				}
+				ratio := defaultMeshDecimationRatio
+				if i < len(ratios) {
+					ratio = ratios[i]
+				}
+				i++
+				if err := decimateMesh(g.GetMesh(), ratio); err != nil {
+					return fmt.Errorf("link %q collision %d: %w", link.GetId(), j, err)
+				}
+			}
+		}
+		if i < len(ratios) {
+			return fmt.Errorf("%d mesh decimation ratios for a model with %d meshes", len(ratios), i)
+		}
+		return nil
+	}
+}
+
+func decimateMesh(mesh *commonpb.Mesh, ratio float64) error {
+	if ratio >= 1 {
+		return nil
+	}
+	m, err := spatialmath.NewMeshFromProto(spatialmath.NewZeroPose(), mesh, "")
+	if err != nil {
+		return err
+	}
+	before := len(m.Triangles())
+	target := max(int(math.Ceil(ratio*float64(before))), minTriangles)
+	if target >= before {
+		return nil
+	}
+	decimated, err := m.ConservativeDecimate(target)
+	if err != nil {
+		return err
+	}
+	// the decimator hands back triangles, and PLY is the form rdk writes them in
+	mesh.Mesh = decimated.TrianglesToPLYBytes(false)
+	mesh.ContentType = "ply"
+	return nil
+}
+
+// validateMeshDecimationRatios checks each ratio is in (0, 1], with 1 meaning no decimation.
+func validateMeshDecimationRatios(ratios []float64) error {
+	for i, r := range ratios {
+		if r <= 0 || r > 1 || math.IsNaN(r) {
+			return fmt.Errorf("mesh decimation ratio %d must be in (0, 1], got %v", i, r)
+		}
+	}
+	return nil
 }
 
 // boxCollisions replaces every collision mesh in the model with the box that bounds its
@@ -306,14 +374,8 @@ func makeGeometryModel(name string, geoms []spatialmath.Geometry) (referencefram
 
 // wantsMesh reads the collision_meshes choice. use_urdfs used to make the same choice, so a
 // config that still sets it and not collision_meshes gets what it asked for rather than a silent
-// fall back to the boxes, and a warning either way. The decimation ratios are gone with the
-// meshes shipped decimated, so those keys only warn.
+// fall back to the boxes, and a warning either way.
 func wantsMesh(conf resource.Config, collisionMeshes bool, logger logging.Logger) bool {
-	for _, key := range []string{"mesh_decimation_ratio", "mesh_decimation_ratios"} {
-		if conf.Attributes.Has(key) {
-			logger.Warnf("%s no longer does anything, the meshes ship decimated", key)
-		}
-	}
 	if conf.Attributes.Has("use_urdfs") {
 		logger.Warn("use_urdfs is now collision_meshes, set that instead")
 		if !conf.Attributes.Has("collision_meshes") {
@@ -324,16 +386,22 @@ func wantsMesh(conf resource.Config, collisionMeshes bool, logger logging.Logger
 }
 
 // newGripperKinematics builds the model a gripper reports to the frame system, the shipped
-// collision mesh when mesh is set, with each edit applied to it, and otherwise a model carrying
-// the hand authored bounding boxes that boxGeoms produces.
+// collision mesh decimated at ratio when mesh is set, with each edit applied after, and
+// otherwise a model carrying the hand authored bounding boxes that boxGeoms produces. A nil
+// ratio is the default.
 func newGripperKinematics(
 	modelName string,
 	mesh bool,
+	ratio *float64,
 	boxGeoms func() ([]spatialmath.Geometry, error),
 	edits ...func(*commonpb.KinematicModel) error,
 ) (referenceframe.Model, error) {
 	if mesh {
-		return loadGripperModel(modelName, edits...)
+		var ratios []float64
+		if ratio != nil {
+			ratios = []float64{*ratio}
+		}
+		return loadGripperModel(modelName, append([]func(*commonpb.KinematicModel) error{decimateCollisions(ratios)}, edits...)...)
 	}
 	geoms, err := boxGeoms()
 	if err != nil {
@@ -343,7 +411,7 @@ func newGripperKinematics(
 }
 
 // loadGripperModel reads the gripper's shipped model file, named for the gripper model, with
-// its mesh.
+// each edit applied.
 func loadGripperModel(modelName string, edits ...func(*commonpb.KinematicModel) error) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
