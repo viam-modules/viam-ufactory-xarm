@@ -1,6 +1,8 @@
 package arm
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/golang/geo/r3"
@@ -153,4 +155,55 @@ func TestWantsMesh(t *testing.T) {
 			test.That(t, wantsMesh(conf, tc.attrs.Bool("collision_meshes", false), logger), test.ShouldEqual, tc.want)
 		})
 	}
+}
+
+// The suction tube is part of the model the frame system plans with, not only of what the
+// gripper reports, and the two agree.
+func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
+	const length = 150.0
+	mf, err := newGripperKinematics(ModelNameVacuumGripper, true, nil, vacuumTube(length))
+	test.That(t, err, test.ShouldBeNil)
+
+	geoms := modelGeometries(t, mf)
+	test.That(t, geoms, test.ShouldHaveLength, 2)
+	var tube spatialmath.Geometry
+	for _, g := range geoms {
+		if g.Label() == ModelNameVacuumGripper+":"+vacuumTubeLabel {
+			tube = g
+		}
+	}
+	test.That(t, tube, test.ShouldNotBeNil)
+	// the file puts the TCP 126 mm up the gripper, and the tube hangs off it
+	test.That(t, tube.Pose().Point().Z, test.ShouldAlmostEqual, 126+length/2, 1e-9)
+
+	// crossing the wire keeps it
+	resp := referenceframe.KinematicModelToProtobuf(mf)
+	rebuilt, err := referenceframe.KinematicModelFromProtobuf(ModelNameVacuumGripper, resp)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, modelGeometries(t, rebuilt), test.ShouldHaveLength, 2)
+
+	// no tube configured, no tube in the model
+	mf, err = newGripperKinematics(ModelNameVacuumGripper, true, nil, vacuumTube(0))
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, modelGeometries(t, mf), test.ShouldHaveLength, 1)
+}
+
+// A leftover directory that lost its marker to a temp cleaner is replaced rather than left to
+// fail every start, and a second process finds the complete one.
+func TestUnpackKinematicsRecovers(t *testing.T) {
+	dir, err := unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, unpacked(dir), test.ShouldBeTrue)
+
+	again, err := unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, again, test.ShouldEqual, dir)
+
+	test.That(t, os.Remove(filepath.Join(dir, unpackedMarker)), test.ShouldBeNil)
+	again, err = unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, again, test.ShouldEqual, dir)
+	test.That(t, unpacked(dir), test.ShouldBeTrue)
+	_, err = os.Stat(filepath.Join(dir, "xarm6.json"))
+	test.That(t, err, test.ShouldBeNil)
 }

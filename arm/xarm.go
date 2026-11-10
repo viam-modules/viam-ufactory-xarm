@@ -354,7 +354,11 @@ func MakeModelFrame(
 	if err != nil {
 		return nil, err
 	}
-	model, err := loadKinematics(artifact.file, resourceName, mesh)
+	var edits []func(*commonpb.KinematicModel) error
+	if !mesh {
+		edits = append(edits, boxCollisions)
+	}
+	model, err := loadKinematics(artifact.file, resourceName, edits...)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +396,9 @@ func MakeModelFrame(
 	if err := model.NarrowJointLimits(limits); err != nil {
 		return nil, err
 	}
-	model.SetKinematicProperties(referenceframe.KinematicProperties{OperatingFreqHz: moveHz})
+	properties := model.KinematicProperties()
+	properties.OperatingFreqHz = moveHz
+	model.SetKinematicProperties(properties)
 
 	variant := artifact.variant
 	if variant == "" {

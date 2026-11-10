@@ -80,15 +80,36 @@ func resolveGripperKinematicsArtifact(modelName string) (kinematicsArtifact, err
 //go:embed kinematics
 var kinematicsFiles embed.FS
 
-// kinematicsDir unpacks the embedded files once per process, since RDK reads a model file and the
-// meshes beside it from disk. The directory is named for the content, so a restart reuses it and
-// a new build gets its own.
-var kinematicsDir = sync.OnceValues(unpackKinematics)
+var (
+	kinematicsDirMu   sync.Mutex
+	kinematicsDirPath string
+)
 
+// kinematicsDir unpacks the embedded files once per process, since RDK reads a model file and the
+// meshes beside it from disk. Only success is kept, so a reconfigure after the disk fills tries
+// again rather than failing for the life of the process.
+func kinematicsDir() (string, error) {
+	kinematicsDirMu.Lock()
+	defer kinematicsDirMu.Unlock()
+	if kinematicsDirPath == "" {
+		dir, err := unpackKinematics()
+		if err != nil {
+			return "", err
+		}
+		kinematicsDirPath = dir
+	}
+	return kinematicsDirPath, nil
+}
+
+// unpackKinematics writes the embedded files under the temp directory, named for their content
+// and the user, so a restart reuses them, a new build gets its own and another user never finds
+// a directory it cannot read. The files are written beside the final name and renamed into
+// place, so a half written directory is never taken for a complete one by another process
+// starting at the same time, and a leftover that lost its marker to a temp cleaner is replaced.
 func unpackKinematics() (string, error) {
 	const root = "kinematics"
+	files := map[string][]byte{}
 	digest := fnv.New64a()
-	var paths []string
 	err := fs.WalkDir(kinematicsFiles, root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -97,8 +118,8 @@ func unpackKinematics() (string, error) {
 		if err != nil {
 			return err
 		}
-		paths = append(paths, p)
-		// a hash never fails to take bytes
+		files[strings.TrimPrefix(p, root+"/")] = data
+		// a hash never fails to take bytes, and the walk is in name order so the digest is stable
 		_, _ = digest.Write([]byte(p))
 		_, _ = digest.Write(data)
 		return nil
@@ -106,23 +127,23 @@ func unpackKinematics() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("viam-xarm-kinematics-%016x", digest.Sum64()))
-	done := filepath.Join(dir, ".complete")
-	if _, err := os.Stat(done); err == nil {
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("viam-xarm-kinematics-%d-%016x", os.Getuid(), digest.Sum64()))
+	if unpacked(dir) {
 		return dir, nil
 	}
-	// written beside the final name and renamed into place, so a half written directory is never
-	// taken for a complete one by another process starting at the same time
 	tmp, err := os.MkdirTemp(os.TempDir(), "viam-xarm-kinematics-")
 	if err != nil {
 		return "", err
 	}
-	for _, p := range paths {
-		data, err := kinematicsFiles.ReadFile(p)
-		if err != nil {
-			return "", err
+	keep := false
+	defer func() {
+		if !keep {
+			// a copy that is not going to be used, and nothing to do if it stays
+			os.RemoveAll(tmp) //nolint:errcheck,gosec
 		}
-		target := filepath.Join(tmp, filepath.FromSlash(strings.TrimPrefix(p, root+"/")))
+	}()
+	for rel, data := range files {
+		target := filepath.Join(tmp, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return "", err
 		}
@@ -130,16 +151,32 @@ func unpackKinematics() (string, error) {
 			return "", err
 		}
 	}
-	if err := os.WriteFile(filepath.Join(tmp, ".complete"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, unpackedMarker), nil, 0o600); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dir); err == nil || unpacked(dir) {
+		return dir, nil
+	}
+	// a leftover that is not complete, so take its place
+	if err := os.RemoveAll(dir); err != nil {
 		return "", err
 	}
 	if err := os.Rename(tmp, dir); err != nil {
-		if _, statErr := os.Stat(done); statErr == nil {
-			return dir, os.RemoveAll(tmp)
-		}
-		return "", err
+		// something keeps winning the name, so this process uses its own copy
+		keep = true
+		return tmp, nil
 	}
 	return dir, nil
+}
+
+// unpackedMarker is the last file an unpack writes, so its presence says the rest is there.
+const unpackedMarker = ".complete"
+
+// unpacked reports whether dir holds a complete unpack this process can read.
+func unpacked(dir string) bool {
+	//nolint:gosec
+	_, err := os.ReadFile(filepath.Join(dir, unpackedMarker))
+	return err == nil
 }
 
 // kinematicsPath locates a model file in the unpacked directory.
@@ -152,10 +189,8 @@ func kinematicsPath(file string) (string, error) {
 }
 
 // loadKinematics reads a shipped kinematic model file as a model named for the resource, with
-// its meshes read from beside it. Unless mesh is set, each collision mesh is replaced by the box
-// that bounds it in the link's frame, which keeps planning as cheap as it was with the hand
-// authored boxes and the served model small, while the mesh is there for a config that asks.
-func loadKinematics(file, resourceName string, mesh bool) (*referenceframe.SimpleModel, error) {
+// its meshes read from beside it, after applying each edit to the message in turn.
+func loadKinematics(file, resourceName string, edits ...func(*commonpb.KinematicModel) error) (*referenceframe.SimpleModel, error) {
 	path, err := kinematicsPath(file)
 	if err != nil {
 		return nil, err
@@ -164,8 +199,8 @@ func loadKinematics(file, resourceName string, mesh bool) (*referenceframe.Simpl
 	if err != nil {
 		return nil, err
 	}
-	if !mesh {
-		if err := boxCollisions(pb); err != nil {
+	for _, edit := range edits {
+		if err := edit(pb); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
@@ -181,8 +216,9 @@ func loadKinematics(file, resourceName string, mesh bool) (*referenceframe.Simpl
 }
 
 // boxCollisions replaces every collision mesh in the model with the box that bounds its
-// vertices, placed where the mesh was and labelled as it was. A geometry that is not a mesh is
-// left alone.
+// vertices, placed where the mesh was and labelled as it was, which keeps planning as cheap as
+// it was with the hand authored boxes and the served model small. A geometry that is not a mesh
+// is left alone.
 func boxCollisions(pb *commonpb.KinematicModel) error {
 	box := func(g *commonpb.Geometry) (*commonpb.Geometry, error) {
 		if g.GetMesh() == nil {
@@ -288,15 +324,16 @@ func wantsMesh(conf resource.Config, collisionMeshes bool, logger logging.Logger
 }
 
 // newGripperKinematics builds the model a gripper reports to the frame system, the shipped
-// collision mesh when mesh is set and otherwise a model carrying the hand authored bounding boxes
-// that boxGeoms produces.
+// collision mesh when mesh is set, with each edit applied to it, and otherwise a model carrying
+// the hand authored bounding boxes that boxGeoms produces.
 func newGripperKinematics(
 	modelName string,
 	mesh bool,
 	boxGeoms func() ([]spatialmath.Geometry, error),
+	edits ...func(*commonpb.KinematicModel) error,
 ) (referenceframe.Model, error) {
 	if mesh {
-		return loadGripperModel(modelName)
+		return loadGripperModel(modelName, edits...)
 	}
 	geoms, err := boxGeoms()
 	if err != nil {
@@ -307,10 +344,61 @@ func newGripperKinematics(
 
 // loadGripperModel reads the gripper's shipped model file, named for the gripper model, with
 // its mesh.
-func loadGripperModel(modelName string) (referenceframe.Model, error) {
+func loadGripperModel(modelName string, edits ...func(*commonpb.KinematicModel) error) (referenceframe.Model, error) {
 	artifact, err := resolveGripperKinematicsArtifact(modelName)
 	if err != nil {
 		return nil, err
 	}
-	return loadKinematics(artifact.file, modelName, true)
+	return loadKinematics(artifact.file, modelName, edits...)
+}
+
+// vacuumTube appends the suction tube, whose length is set per deployment, to a vacuum
+// gripper's model as a thin box past the TCP, so the model the frame system plans with carries
+// it and not only the geometries the gripper reports.
+func vacuumTube(lengthMM float64) func(*commonpb.KinematicModel) error {
+	return func(pb *commonpb.KinematicModel) error {
+		if lengthMM <= 0 {
+			return nil
+		}
+		tip, err := leafLink(pb)
+		if err != nil {
+			return err
+		}
+		tube, err := spatialmath.NewBox(
+			spatialmath.NewPoseFromPoint(r3.Vector{Z: lengthMM / 2}),
+			r3.Vector{X: 5, Y: 5, Z: lengthMM}, vacuumTubeLabel)
+		if err != nil {
+			return err
+		}
+		pb.Links = append(pb.Links, &commonpb.KinematicLink{
+			Id:        vacuumTubeLabel,
+			Parent:    tip,
+			Pose:      &commonpb.LinkPose{},
+			Collision: []*commonpb.Geometry{tube.ToProtobuf()},
+		})
+		return nil
+	}
+}
+
+const vacuumTubeLabel = "vacuum-gripper-tube"
+
+// leafLink names the one link nothing hangs off, the model's TCP.
+func leafLink(pb *commonpb.KinematicModel) (string, error) {
+	parents := map[string]bool{}
+	for _, l := range pb.GetLinks() {
+		parents[l.GetParent()] = true
+	}
+	for _, j := range pb.GetJoints() {
+		parents[j.GetParent()] = true
+	}
+	var leaves []string
+	for _, l := range pb.GetLinks() {
+		if !parents[l.GetId()] {
+			leaves = append(leaves, l.GetId())
+		}
+	}
+	if len(leaves) != 1 {
+		return "", fmt.Errorf("model %q has %d leaf links, want one", pb.GetName(), len(leaves))
+	}
+	return leaves[0], nil
 }

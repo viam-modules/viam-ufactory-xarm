@@ -150,7 +150,7 @@ For an attached gripper, set its parent to the arm's name:
 
 ### Kinematics
 
-Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, a collision mesh for every link but the xArm7's flange, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
+Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, a collision mesh for every link that UFACTORY's URDF had one for, which leaves the base xArm6's gripper mount on a sphere and the xArm7's flange bare, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
 
 By default each link carries the box bounding its mesh rather than the mesh, which plans about as fast as the hand authored boxes did and keeps a `GetKinematics` answer small. `"collision_meshes": true` serves the meshes themselves, for tighter collision checking at about half again the planning time.
 
