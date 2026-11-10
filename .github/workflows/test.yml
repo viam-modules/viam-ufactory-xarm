@@ -49,14 +49,6 @@ jobs:
             exit 1
         fi
     
-    - name: Verify the kinematic model files are what the generator writes
-      run: |
-        sudo -u testbot bash -lc 'make kinematics'
-        if ! git diff --exit-code --stat -- arm/kinematics; then
-            echo '"make kinematics" resulted in changes not in git' 1>&2
-            exit 1
-        fi
-
     - name: run tests
       run: |
         sudo -u testbot bash -lc 'make test'

@@ -62,7 +62,7 @@ func TestMakeModelFrame(t *testing.T) {
 		visuals    int
 	}{
 		{ModelName6DOF, 6, 7, 7},
-		// the xArm7's URDF has no mesh for the flange and its SVA document no box, so one link is bare
+		// the xArm7's file has no collision geometry for the flange
 		{ModelName7DOF, 7, 7, 0},
 		{ModelNameLite, 6, 7, 7},
 		{ModelName850, 6, 7, 0},

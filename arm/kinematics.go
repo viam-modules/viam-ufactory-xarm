@@ -18,8 +18,7 @@ import (
 )
 
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
-// The files live under arm/kinematics and are written by tools/kinematics from the SVA documents,
-// URDFs and GLB files beside them.
+// The files live under arm/kinematics with their meshes beside them and are edited in place.
 type kinematicsArtifact struct {
 	// file is the base name of the model file
 	file string

@@ -149,13 +149,13 @@ For an attached gripper, set its parent to the arm's name:
 
 ### Kinematics
 
-Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, the collision mesh of every link the URDF has one for, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
+Each arm has a kinematic model file under `arm/kinematics`, one per hardware variant, built into the module binary and read by `GetKinematics` and the frame system. The file carries the arm's frames, its joint limits, a collision mesh for every link but the xArm7's flange, decimated to a tenth of its triangles as a conservative hull, and for the xArm6 and Lite 6 the GLB meshes the viewer shows. An xArm6 that reports arm type code `1305` loads `xarm6_1305.json`, which differs from `xarm6.json` in its collision meshes only.
 
 The configured `speed_degs_per_sec` and `acceleration_degs_per_sec_per_sec` become every joint's velocity and acceleration limits on the model, and a joint in `bad-joints` is locked to a degree either side of where it sits at startup, within the joint's range. A limit can only narrow what the file holds, so the motion service and any client plan within what the arm will accept, and a joint that reports a position outside its range fails the resource rather than being locked somewhere it is not. `move_hz` is published as the rate the arm expects joint positions at.
 
 The `use_urdfs` and `mesh_decimation_ratios` attributes are gone, since the model always carries the meshes. A config that still sets them gets a warning.
 
-The files are generated, not edited. `make kinematics` rebuilds them from the SVA documents, URDFs and GLB files under `arm/`, and CI fails when the committed files are stale.
+The files are the source and are edited in place, a limit in the JSON, a mesh beside it. They were produced once from the module's SVA documents, UFACTORY's URDFs and the viewer's GLB files by a generator that lives in the history at commit 882406c, which also holds those inputs, should new geometry ever have to be merged in the same way.
 
 ### Error Handling
 
@@ -341,8 +341,8 @@ The payload is read from the controller's report port 30002 (see [Arm State](#ar
 | `gripper` (G1) | 0.82 | (0, 0, 48) | UFACTORY Studio preset |
 | `gripper` (G2) | 0.82 | (0, 0, 48) | G1 preset; UFACTORY publishes no G2 preset |
 | `vacuum_gripper` | 0.61 | (0, 0, 53) | UFACTORY Studio preset |
-| `gripper_lite` | 0.25 | (0, 0, 30) | Bundled URDF |
-| `vacuum_gripper_lite` | 0.14 | (0, 0, 30) | Bundled URDF |
+| `gripper_lite` | 0.25 | (0, 0, 30) | UFACTORY URDF |
+| `vacuum_gripper_lite` | 0.14 | (0, 0, 30) | UFACTORY URDF |
 
 ## Gripper
 
