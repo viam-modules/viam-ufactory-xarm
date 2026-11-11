@@ -211,8 +211,8 @@ type Config struct {
 	Sensitivity  *int    `json:"collision_sensitivity,omitempty"`
 	BadJoints    []int   `json:"bad-joints"`
 	Motion       string  `json:"motion"`
-	// CollisionMeshes gives the links their collision meshes, which plan slower and travel
-	// larger, in place of the boxes bounding them.
+	// CollisionMeshes puts the shipped collision meshes on the links in place of the boxes
+	// bounding them. Planning is slower against the meshes and the served model is larger.
 	CollisionMeshes bool `json:"collision_meshes,omitempty"`
 	// MeshDecimationRatios is the share of each link's collision mesh triangles kept, one entry
 	// per link in file order, 0.1 for any link the list does not reach or says 0 for. 1 keeps
@@ -320,11 +320,11 @@ func (cfg *Config) streamLimitToleranceRatio() float64 {
 }
 
 // lockedJointRangeDegs is the window a locked joint is narrowed to, a degree either side of
-// where it is now, so IK does not fail outright on a reported position that drifts a little,
-// clamped to the joint's own range since a bound past the stop would widen the hardware range
-// and the model refuses that. A joint reporting a position outside its range cannot be locked
-// where it is, and ok is false, since a window pulled inside the range would have the planner
-// place everything downstream of the joint somewhere the arm is not.
+// where it is now so IK does not fail outright when the reported position drifts a little, cut
+// off at the joint's range, since a bound past the stop would widen the hardware range and the
+// model refuses that. A joint reporting a position outside its range cannot be locked where it
+// is, and ok is false, since a window pulled inside the range would have the planner place
+// everything downstream of the joint somewhere the arm is not.
 func lockedJointRangeDegs(current referenceframe.Input, joint referenceframe.JointConfig) (lo, hi float64, ok bool) {
 	now := utils.RadToDeg(current)
 	if now < joint.Min || now > joint.Max {

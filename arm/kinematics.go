@@ -22,10 +22,11 @@ import (
 )
 
 // kinematicsArtifact names the kinematic model file an (arm model, hardware variant) pair ships.
-// The files live under arm/kinematics, point at the manufacturer's STL meshes under arm/meshes
-// and the viewer's GLB files under arm/3d_models, and are edited in place.
+// The files live under arm/kinematics and are the source, edited by hand with no generator
+// behind them. They point at the manufacturer's STL meshes under arm/meshes and the viewer's
+// GLB files under arm/3d_models.
 type kinematicsArtifact struct {
-	// file is the base name of the model file
+	// file is the base name of the model file, without the .json
 	file string
 	// variant is a short label used only in logs
 	variant string
@@ -104,8 +105,8 @@ func kinematicsDir() (string, error) {
 	return kinematicsDirPath, nil
 }
 
-// unpackRoot is where the files go, the module's own data directory when the server gives one,
-// which no temp cleaner touches, and the temp directory otherwise.
+// unpackRoot is where the files go, the module's data directory when the server gives one,
+// since no temp cleaner touches that, and the temp directory otherwise.
 func unpackRoot() string {
 	if root := os.Getenv("VIAM_MODULE_DATA"); root != "" {
 		return root
@@ -153,7 +154,7 @@ func unpackKinematics() (string, error) {
 	keep := false
 	defer func() {
 		if !keep {
-			// a copy that is not going to be used, and nothing to do if it stays
+			// we are not going to use this copy, and a leftover is harmless
 			os.RemoveAll(tmp) //nolint:errcheck,gosec
 		}
 	}()
@@ -194,7 +195,6 @@ func unpacked(dir string) bool {
 	return err == nil
 }
 
-// kinematicsPath locates a model file in the unpacked directory.
 func kinematicsPath(file string) (string, error) {
 	dir, err := kinematicsDir()
 	if err != nil {
@@ -280,8 +280,9 @@ func decimateLinks(pb *commonpb.KinematicModel, ratioFor func(link int) float64)
 	return nil
 }
 
-// decimateMesh leaves the mesh as PLY whatever happens, since rdk labels every mesh it serves
-// through GetGeometries as PLY whatever bytes it holds, and the shipped files are STL.
+// decimateMesh rewrites the mesh as PLY even when it keeps every triangle, since rdk labels
+// every mesh it serves through GetGeometries as PLY no matter what bytes it holds, and the
+// shipped files are STL.
 func decimateMesh(mesh *commonpb.Mesh, ratio float64) error {
 	m, err := spatialmath.NewMeshFromProto(spatialmath.NewZeroPose(), mesh, "")
 	if err != nil {
@@ -415,10 +416,10 @@ func wantsMesh(conf resource.Config, collisionMeshes bool, logger logging.Logger
 	return collisionMeshes
 }
 
-// newGripperKinematics builds the model a gripper reports to the frame system, the shipped
-// collision mesh decimated at ratio when mesh is set, with each edit applied after, and
-// otherwise a model carrying the hand authored bounding boxes that boxGeoms produces. A nil
-// ratio is the default.
+// newGripperKinematics builds the model a gripper reports to the frame system. With mesh set
+// it is the shipped model file with its collision mesh decimated at ratio, nil meaning the
+// default, and each edit applied after that. Otherwise it carries the hand authored bounding
+// boxes boxGeoms produces, and the edits do not apply.
 func newGripperKinematics(
 	modelName string,
 	mesh bool,

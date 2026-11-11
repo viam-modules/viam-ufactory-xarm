@@ -77,11 +77,11 @@ type GripperConfig struct {
 	// VacuumSealTimeoutMS is how long Grab waits for the vacuum seal sensor
 	// before reporting a miss. 0 means defaultVacuumSealTimeout.
 	VacuumSealTimeoutMS int `json:"vacuum_seal_timeout_ms,omitempty"`
-	// CollisionMeshes reports the collision mesh the module ships in place of the hand authored
+	// CollisionMeshes puts the shipped collision mesh on the model in place of the hand authored
 	// bounding boxes.
 	CollisionMeshes bool `json:"collision_meshes,omitempty"`
-	// MeshDecimationRatio is the share of the mesh's triangles kept, 0.1 when unset or 0. 1 keeps
-	// every triangle.
+	// MeshDecimationRatio is the share of the mesh's triangles kept, 0.1 when unset or 0, and 1
+	// keeps every triangle.
 	MeshDecimationRatio *float64 `json:"mesh_decimation_ratio,omitempty"`
 }
 

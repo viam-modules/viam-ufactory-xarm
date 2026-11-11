@@ -157,8 +157,8 @@ func TestConfigMeshDecimationRatios(t *testing.T) {
 }
 
 // The default boxes bound the meshes they stand in for, at any joint position, so a plan that
-// clears the boxes clears the arm. The meshes as shipped, that is, since a decimated hull is
-// conservative and pokes a little past the mesh it encloses.
+// clears the boxes clears the arm. The comparison is against the meshes as shipped, since a
+// decimated hull is conservative and pokes a little past the mesh it encloses.
 func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 
@@ -173,7 +173,7 @@ func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
 		positions = append(positions, referenceframe.RandomFrameInputs(meshed, rng))
 	}
 	for _, q := range positions {
-		// a link the file gives no mesh keeps its own geometry, a sphere on the gripper mount
+		// a link with no mesh in the file keeps the geometry it has, a sphere on the gripper mount
 		boxes := map[string]spatialmath.Geometry{}
 		for _, g := range geometriesAt(t, boxed, q) {
 			cfg, err := spatialmath.NewGeometryConfig(g)
@@ -191,7 +191,7 @@ func TestMakeModelFrameBoxesBoundTheMeshes(t *testing.T) {
 			test.That(t, box, test.ShouldNotBeNil)
 			dims, err := spatialmath.NewGeometryConfig(box)
 			test.That(t, err, test.ShouldBeNil)
-			// every vertex, taken into the box's own frame, sits within its half extents
+			// every vertex, taken into the box frame, sits within its half extents
 			toBox := spatialmath.PoseInverse(box.Pose())
 			half := r3.Vector{X: dims.X / 2, Y: dims.Y / 2, Z: dims.Z / 2}
 			for _, tri := range mesh.Triangles() {
@@ -259,10 +259,10 @@ func TestMakeModelFrameBadJointsOutOfRange(t *testing.T) {
 }
 
 // The one degree of slack has to stay inside the joint, because a joint fails against its stop
-// as often as anywhere else and the published bound would otherwise sit past it, where the
-// motion service plans and the controller refuses. A joint that reports a position its own
-// file calls impossible cannot be locked at all, since a window pulled inside the range would
-// put everything downstream of the joint somewhere the arm is not.
+// as often as anywhere else, and a published bound past the stop is one the motion service
+// would plan to and the controller refuse. A joint that reports a position outside the range
+// its file gives it cannot be locked at all, since a window pulled inside the range would put
+// everything downstream of the joint somewhere the arm is not.
 func TestLockedJointRangeDegs(t *testing.T) {
 	elbow := referenceframe.JointConfig{ID: "elbow", Min: -225, Max: 10}
 
@@ -291,8 +291,8 @@ func TestLockedJointRangeDegs(t *testing.T) {
 }
 
 // Everything below reads what RDK actually sends, the typed model and the deprecated bytes,
-// rather than the model we happen to be holding, because a limit that only exists in memory is
-// the failure this is about.
+// rather than the model we happen to be holding, because the bug this guards against is a
+// limit that never leaves memory.
 func TestMakeModelFrameServedLimits(t *testing.T) {
 	const speed, accel, hz = 45.0, 300.0, 120.0
 

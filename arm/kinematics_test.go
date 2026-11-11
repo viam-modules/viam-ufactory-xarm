@@ -199,7 +199,7 @@ func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
 // A leftover directory that lost its marker to a temp cleaner is replaced rather than left to
 // fail every start, and a second process finds the complete one.
 func TestUnpackKinematicsRecovers(t *testing.T) {
-	// the test's own root, so it never touches the directory a running server reads from
+	// unpack under a temp root, so we never touch the directory a running server reads from
 	t.Setenv("VIAM_MODULE_DATA", t.TempDir())
 	dir, err := unpackKinematics()
 	test.That(t, err, test.ShouldBeNil)
