@@ -1,12 +1,16 @@
 package arm
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/golang/geo/r3"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
+	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
+	"go.viam.com/rdk/utils"
 	"go.viam.com/test"
 )
 
@@ -15,8 +19,9 @@ func TestMakeGeometryModelRequiresGeometries(t *testing.T) {
 	test.That(t, err, test.ShouldNotBeNil)
 }
 
-// The model must carry an OriginalFile, otherwise KinematicModelToProtobuf drops
-// it and the gripper reaches the frame system with no collision geometry.
+// The model must carry an OriginalFile so that a client older than the typed
+// model still receives the gripper's collision geometry, and the typed model
+// has to carry it as well.
 func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	box, err := spatialmath.NewBox(
 		spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: -50}),
@@ -29,7 +34,8 @@ func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	test.That(t, mf.ModelConfig().OriginalFile.Extension, test.ShouldEqual, "json")
 
 	resp := referenceframe.KinematicModelToProtobuf(mf)
-	test.That(t, resp.GetKinematicsData(), test.ShouldNotBeEmpty)
+	test.That(t, resp.GetModel(), test.ShouldNotBeNil)
+	test.That(t, resp.GetModel().GetLinks(), test.ShouldNotBeEmpty)
 
 	rebuilt, err := referenceframe.KinematicModelFromProtobuf(ModelNameGripper, resp)
 	test.That(t, err, test.ShouldBeNil)
@@ -38,11 +44,9 @@ func TestMakeGeometryModelSurvivesGetKinematics(t *testing.T) {
 	test.That(t, spatialmath.GeometriesAlmostEqual(rebuiltGeoms[0], box), test.ShouldBeTrue)
 }
 
-// Each gripper's default (non-URDF) model must reach a planner with the same
-// bounding boxes its Geometries method reports.
+// Each gripper's default model must reach a planner with the same bounding boxes its
+// Geometries method reports.
 func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
-	logger := logging.NewTestLogger(t)
-
 	for _, tc := range []struct {
 		name  string
 		geoms func() ([]spatialmath.Geometry, error)
@@ -66,7 +70,7 @@ func TestGripperModelsCarryBoxesThroughGetKinematics(t *testing.T) {
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, want, test.ShouldNotBeEmpty)
 
-			mf, err := newGripperKinematics(tc.name, &GripperConfig{}, logger, tc.geoms)
+			mf, err := newGripperKinematics(tc.name, false, nil, tc.geoms)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, mf.DoF(), test.ShouldBeEmpty)
 
@@ -99,4 +103,128 @@ func modelGeometries(t *testing.T, mf referenceframe.Model) []spatialmath.Geomet
 	gif, err := mf.Geometries(make([]referenceframe.Input, len(mf.DoF())))
 	test.That(t, err, test.ShouldBeNil)
 	return gif.Geometries()
+}
+
+// With collision_meshes set each gripper reports the collision mesh the module ships, decimated,
+// and the mesh crosses the wire in the typed model.
+func TestGripperModelsCarryTheShippedMesh(t *testing.T) {
+
+	for _, name := range []string{ModelNameGripper, ModelNameGripperLite, ModelNameVacuumGripper, ModelNameVacuumGripperLite} {
+		t.Run(name, func(t *testing.T) {
+			mf, err := newGripperKinematics(name, true, nil, nil)
+			test.That(t, err, test.ShouldBeNil)
+			test.That(t, mf.DoF(), test.ShouldBeEmpty)
+			test.That(t, mf.Name(), test.ShouldEqual, name)
+
+			geoms := modelGeometries(t, mf)
+			test.That(t, geoms, test.ShouldHaveLength, 1)
+			mesh, isMesh := geoms[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+
+			// the shipped STL is full resolution, the model gets a tenth of it
+			one := 1.0
+			full, err := newGripperKinematics(name, true, &one, nil)
+			test.That(t, err, test.ShouldBeNil)
+			fullMesh, isMesh := modelGeometries(t, full)[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+			test.That(t, len(mesh.Triangles()), test.ShouldBeLessThanOrEqualTo, len(fullMesh.Triangles())/10+1)
+
+			resp := referenceframe.KinematicModelToProtobuf(mf)
+			rebuilt, err := referenceframe.KinematicModelFromProtobuf(name, resp)
+			test.That(t, err, test.ShouldBeNil)
+			got := modelGeometries(t, rebuilt)
+			test.That(t, got, test.ShouldHaveLength, 1)
+			gotMesh, isMesh := got[0].(*spatialmath.Mesh)
+			test.That(t, isMesh, test.ShouldBeTrue)
+			test.That(t, gotMesh.Triangles(), test.ShouldHaveLength, len(mesh.Triangles()))
+			test.That(t, spatialmath.PoseAlmostEqual(gotMesh.Pose(), mesh.Pose()), test.ShouldBeTrue)
+		})
+	}
+}
+
+// use_urdfs made the same choice collision_meshes makes now, so a config that still sets it
+// gets what it asked for rather than a silent fall back to the boxes.
+func TestWantsMesh(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	for _, tc := range []struct {
+		name  string
+		attrs utils.AttributeMap
+		want  bool
+	}{
+		{"default is boxes", nil, false},
+		{"boxes", utils.AttributeMap{"collision_meshes": false}, false},
+		{"mesh", utils.AttributeMap{"collision_meshes": true}, true},
+		{"legacy use_urdfs", utils.AttributeMap{"use_urdfs": true}, true},
+		{"legacy use_urdfs off", utils.AttributeMap{"use_urdfs": false}, false},
+		{"collision_meshes wins over use_urdfs", utils.AttributeMap{"use_urdfs": true, "collision_meshes": false}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := resource.Config{Attributes: tc.attrs}
+			test.That(t, wantsMesh(conf, tc.attrs.Bool("collision_meshes", false), logger), test.ShouldEqual, tc.want)
+		})
+	}
+}
+
+// The suction tube is part of the model the frame system plans with, not only of what the
+// gripper reports, and the two agree.
+func TestVacuumGripperMeshModelCarriesTheTube(t *testing.T) {
+	const length = 150.0
+	mf, err := newGripperKinematics(ModelNameVacuumGripper, true, nil, nil, vacuumTube(length))
+	test.That(t, err, test.ShouldBeNil)
+
+	geoms := modelGeometries(t, mf)
+	test.That(t, geoms, test.ShouldHaveLength, 2)
+	var tube spatialmath.Geometry
+	for _, g := range geoms {
+		if g.Label() == ModelNameVacuumGripper+":"+vacuumTubeLabel {
+			tube = g
+		}
+	}
+	test.That(t, tube, test.ShouldNotBeNil)
+	// the file puts the TCP 126 mm up the gripper, and the tube hangs off it
+	test.That(t, tube.Pose().Point().Z, test.ShouldAlmostEqual, 126+length/2, 1e-9)
+
+	// crossing the wire keeps it
+	resp := referenceframe.KinematicModelToProtobuf(mf)
+	rebuilt, err := referenceframe.KinematicModelFromProtobuf(ModelNameVacuumGripper, resp)
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, modelGeometries(t, rebuilt), test.ShouldHaveLength, 2)
+
+	// no tube configured, no tube in the model
+	mf, err = newGripperKinematics(ModelNameVacuumGripper, true, nil, nil, vacuumTube(0))
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, modelGeometries(t, mf), test.ShouldHaveLength, 1)
+}
+
+// A leftover directory that lost its marker to a temp cleaner is replaced rather than left to
+// fail every start, and a second process finds the complete one.
+func TestUnpackKinematicsRecovers(t *testing.T) {
+	// unpack under a temp root, so we never touch the directory a running server reads from
+	t.Setenv("VIAM_MODULE_DATA", t.TempDir())
+	dir, err := unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, unpacked(dir), test.ShouldBeTrue)
+
+	again, err := unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, again, test.ShouldEqual, dir)
+
+	test.That(t, os.Remove(filepath.Join(dir, unpackedMarker)), test.ShouldBeNil)
+	again, err = unpackKinematics()
+	test.That(t, err, test.ShouldBeNil)
+	test.That(t, again, test.ShouldEqual, dir)
+	test.That(t, unpacked(dir), test.ShouldBeTrue)
+	_, err = os.Stat(filepath.Join(dir, "kinematics", "xarm6.json"))
+	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestGripperConfigMeshDecimationRatio(t *testing.T) {
+	for _, r := range []float64{0, 0.1, 1} {
+		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
+		test.That(t, err, test.ShouldBeNil)
+	}
+	for _, r := range []float64{-0.1, 1.5} {
+		_, _, err := (&GripperConfig{Arm: "arm", MeshDecimationRatio: &r}).Validate("")
+		test.That(t, err, test.ShouldNotBeNil)
+	}
 }

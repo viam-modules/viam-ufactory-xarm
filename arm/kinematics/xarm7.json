@@ -1,0 +1,269 @@
+{
+  "name": "xarm7",
+  "links": [
+    {
+      "id": "base",
+      "parent": "world",
+      "pose": {
+        "translation": {}
+      },
+      "collision": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link_base.stl"
+          },
+          "label": "base"
+        }
+      ]
+    },
+    {
+      "id": "base_top",
+      "parent": "waist",
+      "pose": {
+        "translation": {
+          "z": 267
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "z": 267,
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link1.stl"
+          },
+          "label": "base_top"
+        }
+      ]
+    },
+    {
+      "id": "base_arm_link",
+      "parent": "shoulder",
+      "pose": {
+        "translation": {
+          "z": 200
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "o_y": 0.9999999999932538,
+            "o_z": -3.6732051031385105e-06,
+            "theta": -90
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link2.stl"
+          },
+          "label": "base_arm_link"
+        }
+      ]
+    },
+    {
+      "id": "upper_arm",
+      "parent": "upper_arm_rot",
+      "pose": {
+        "translation": {
+          "x": 52.5,
+          "z": 93
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "y": 0.001076249095234516,
+            "z": 92.99999999802344,
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link3.stl"
+          },
+          "label": "upper_arm"
+        }
+      ]
+    },
+    {
+      "id": "upper_forearm",
+      "parent": "elbow",
+      "pose": {
+        "translation": {
+          "x": 77.5,
+          "z": -172.5
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": 5.024305095414217e-15,
+            "y": 0.0010762490951856764,
+            "z": -1.9765947376028034e-09,
+            "o_y": -0.9999999999932538,
+            "o_z": -3.6732051031385105e-06,
+            "theta": 90
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link4.stl"
+          },
+          "label": "upper_forearm"
+        }
+      ]
+    },
+    {
+      "id": "lower_forearm",
+      "parent": "forearm_rot",
+      "pose": {
+        "translation": {
+          "z": -170
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": 2.8421738792365805e-14,
+            "y": 0.002334321843059683,
+            "z": -169.99999999966607,
+            "o_y": 7.346410206338483e-06,
+            "o_z": -0.9999999999730153,
+            "theta": -180
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link5.stl"
+          },
+          "label": "lower_forearm"
+        }
+      ]
+    },
+    {
+      "id": "wrist_link",
+      "parent": "wrist",
+      "pose": {
+        "translation": {
+          "x": 76,
+          "z": -97
+        }
+      },
+      "collision": [
+        {
+          "center": {
+            "x": 2.0097294202462595e-14,
+            "y": 0.0023343218430780903,
+            "z": 3.3394436283092077e-10,
+            "o_y": 0.9999999999392841,
+            "o_z": 1.101961530936002e-05,
+            "theta": -90
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm7meshes/link6.stl"
+          },
+          "label": "wrist_link"
+        }
+      ]
+    },
+    {
+      "id": "gripper_mount",
+      "parent": "gripper_rot",
+      "pose": {
+        "translation": {},
+        "orientation_vector": {
+          "o_z": -1
+        }
+      }
+    }
+  ],
+  "joints": [
+    {
+      "id": "waist",
+      "parent": "base",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": 1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    },
+    {
+      "id": "shoulder",
+      "parent": "base_top",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": 1
+      },
+      "limits": {
+        "min": -118,
+        "max": 119.99999999999999
+      }
+    },
+    {
+      "id": "upper_arm_rot",
+      "parent": "base_arm_link",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": 1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    },
+    {
+      "id": "elbow",
+      "parent": "upper_arm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": -1
+      },
+      "limits": {
+        "min": -10.999999999999998,
+        "max": 225
+      }
+    },
+    {
+      "id": "forearm_rot",
+      "parent": "upper_forearm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": -1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    },
+    {
+      "id": "wrist",
+      "parent": "lower_forearm",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "y": 1
+      },
+      "limits": {
+        "min": -97,
+        "max": 179
+      }
+    },
+    {
+      "id": "gripper_rot",
+      "parent": "wrist_link",
+      "type": "JOINT_TYPE_REVOLUTE",
+      "axis": {
+        "z": -1
+      },
+      "limits": {
+        "min": -359,
+        "max": 359
+      }
+    }
+  ]
+}
