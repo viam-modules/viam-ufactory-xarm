@@ -142,6 +142,9 @@ var armTo3DModelParts = map[string][]string{
 type xArm struct {
 	resource.AlwaysRebuild
 
+	// warnTargetJointsOnce logs, once, that old firmware makes JointPositions report target angles.
+	warnTargetJointsOnce sync.Once
+
 	// cmdConn carries arm motion, state queries, and direct TGPIO writes
 	// (port 502). gripperConn carries gripper Modbus passthrough traffic
 	// (port 503 when reachable, otherwise aliased to cmdConn).
