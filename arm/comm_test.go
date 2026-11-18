@@ -406,3 +406,24 @@ func TestConfirmMode(t *testing.T) {
 		test.That(t, x.confirmMode(cctx, manualMode), test.ShouldBeError, context.Canceled)
 	})
 }
+
+func TestSupportsRealJointStates(t *testing.T) {
+	for fw, want := range map[string]bool{
+		"2.8.2":   true,
+		"1.9.110": true,
+		"1.10.0":  true,
+		"1.9.109": false,
+		"1.8.200": false,
+		"":        false,
+		"2.8":     false,
+		"v2.8.2":  false,
+		"2.x.2":   false,
+	} {
+		test.That(t, supportsRealJointStates(fw), test.ShouldEqual, want)
+	}
+}
+
+func TestJointPosParams(t *testing.T) {
+	test.That(t, jointPosParams(true), test.ShouldResemble, []byte{1})
+	test.That(t, jointPosParams(false), test.ShouldBeNil)
+}
