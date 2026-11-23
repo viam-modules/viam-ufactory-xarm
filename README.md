@@ -371,6 +371,11 @@ resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"get": true})
 resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0})
 // resp["position"]
 
+// Move without waiting for the jaws to settle. Returns once the write is
+// acknowledged, and resp["position"] is the goal, not a measured position.
+// Use this from a fixed-rate control loop; a waiting "set" can take up to 10 s.
+resp, _ := gripperComponent.DoCommand(ctx, map[string]interface{}{"set": 500.0, "wait": false})
+
 // Set/get gripper speed (proxied to arm DoCommand)
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"set_gripper_speed": 2000})
 resp, err := gripperComponent.DoCommand(context.Background(), map[string]interface{}{"get_gripper_speed": true})
