@@ -8,6 +8,8 @@ import (
 	"math"
 	"net"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -1228,6 +1230,18 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]any) ([]refe
 	}
 
 	c := x.newCmd(regMap["JointPos"])
+	// With no argument, register 0x2A returns the *target* joint angles: while a stream or a move is
+	// running they jump to each commanded setpoint rather than tracking the joints. Firmware 1.9.110
+	// and later return the measured angles when the request carries a joint-states count of 1 (what
+	// UFactory's SDK does for get_servo_angle(is_real=True)); the reply layout is the same.
+	measured := supportsRealJointStates(x.detectedArm.firmwareVersion)
+	c.params = jointPosParams(measured)
+	if !measured {
+		x.warnTargetJointsOnce.Do(func() {
+			x.logger.Warnf("controller firmware %q predates 1.9.110: JointPositions reports target angles, not measured ones",
+				x.detectedArm.firmwareVersion)
+		})
+	}
 
 	jData, err := x.send(ctx, c, true)
 	if err != nil {
@@ -1238,8 +1252,8 @@ func (x *xArm) JointPositions(ctx context.Context, extra map[string]any) ([]refe
 	if jData.params == nil {
 		return nil, errors.New("couldn't get joint positions")
 	}
-	// didn't return expected bytes
-	if len(jData.params) < x.dof*4 {
+	// didn't return expected bytes: a state byte, then one float32 per joint
+	if len(jData.params) < 1+x.dof*4 {
 		return nil, fmt.Errorf("unexpected return getting joint positions, got %d want %d", len(jData.params), x.dof)
 	}
 	for i := 0; i < x.dof; i++ {
@@ -1876,4 +1890,40 @@ func (x *xArm) setCollisionDetectionSensitivity(ctx context.Context, sensitivity
 	// Like any parameter change, this drops the controller out of state 0.
 	x.markStateWrite()
 	return err
+}
+
+// minRealJointStatesFirmware is the first controller firmware whose JointPos register (0x2A) returns
+// measured joint angles when asked with a joint-states count (UFactory SDK: version_is_ge(1, 9, 110)).
+var minRealJointStatesFirmware = [3]int{1, 9, 110}
+
+// supportsRealJointStates reports whether firmware "major.minor.patch" can return measured joint
+// angles. An unknown or unparsable version keeps the old target-angle read.
+func supportsRealJointStates(firmware string) bool {
+	parts := strings.Split(firmware, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	var v [3]int
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return false
+		}
+		v[i] = n
+	}
+	for i := range v {
+		if v[i] != minRealJointStatesFirmware[i] {
+			return v[i] > minRealJointStatesFirmware[i]
+		}
+	}
+	return true
+}
+
+// jointPosParams is the JointPos request payload: none for target angles, a joint-states count of 1
+// (positions only) for measured ones.
+func jointPosParams(measured bool) []byte {
+	if measured {
+		return []byte{1}
+	}
+	return nil
 }
