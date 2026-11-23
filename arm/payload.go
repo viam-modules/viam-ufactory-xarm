@@ -36,7 +36,7 @@ type gripperPreset struct {
 // presets (Studio user manual V2.6.0). Studio publishes no G2 preset; until one
 // is read off a G2 it uses the G1 values, which match its 0.8 kg spec weight.
 // UFACTORY publishes no preset for the Lite 6 grippers, so theirs come from the
-// inertial blocks of the bundled URDFs.
+// inertial blocks of UFACTORY's URDFs.
 var (
 	presetGripperG1         = gripperPreset{"xArm Gripper G1", tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}
 	presetGripperG2         = gripperPreset{"xArm Gripper G2", tcpPayload{MassKg: 0.82, CenterOfGravityMM: r3.Vector{Z: 48}}}

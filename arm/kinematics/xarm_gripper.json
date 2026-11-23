@@ -1,0 +1,49 @@
+{
+  "name": "xarm_gripper",
+  "links": [
+    {
+      "id": "world_joint",
+      "parent": "world",
+      "pose": {
+        "translation": {},
+        "euler_angles": {}
+      }
+    },
+    {
+      "id": "xarm_gripper_base_link",
+      "parent": "world_joint",
+      "pose": {
+        "translation": {}
+      },
+      "collision": [
+        {
+          "center": {
+            "o_z": 1
+          },
+          "mesh": {
+            "content_type": "stl",
+            "original_file_source_path_diagnostic": "../meshes/xarm_grippermeshes/base_link.stl"
+          },
+          "label": "xarm_gripper_base_link"
+        }
+      ]
+    },
+    {
+      "id": "joint_tcp",
+      "parent": "xarm_gripper_base_link",
+      "pose": {
+        "translation": {
+          "z": 172
+        },
+        "euler_angles": {}
+      }
+    },
+    {
+      "id": "link_tcp",
+      "parent": "joint_tcp",
+      "pose": {
+        "translation": {}
+      }
+    }
+  ]
+}

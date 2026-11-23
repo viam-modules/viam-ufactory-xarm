@@ -90,20 +90,21 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 		return nil, err
 	}
 
-	mf, err := newGripperKinematics(config.Model.Name, newConf, logger, func() ([]spatialmath.Geometry, error) {
+	mesh := wantsMesh(config, newConf.CollisionMeshes, logger)
+	mf, err := newGripperKinematics(config.Model.Name, mesh, newConf.MeshDecimationRatio, func() ([]spatialmath.Geometry, error) {
 		return vacuumGripperGeometries(config.Model, newConf.VacuumLengthMM)
-	})
+	}, vacuumTube(newConf.VacuumLengthMM))
 	if err != nil {
 		return nil, fmt.Errorf("%s kinematics: %w", config.Model.Name, err)
 	}
 
 	g := &myVacuumGripper{
-		name:     config.ResourceName(),
-		conf:     newConf,
-		logger:   logger,
-		model:    config.Model,
-		mf:       mf,
-		useURDFs: newConf.UseURDFs,
+		name:   config.ResourceName(),
+		conf:   newConf,
+		logger: logger,
+		model:  config.Model,
+		mf:     mf,
+		mesh:   mesh,
 	}
 
 	g.arm, err = arm.FromProvider(deps, newConf.Arm)
@@ -122,11 +123,12 @@ func newVacuumGripper(ctx context.Context, deps resource.Dependencies, config re
 type myVacuumGripper struct {
 	resource.AlwaysRebuild
 
-	name     resource.Name
-	conf     *GripperConfig
-	model    resource.Model
-	mf       referenceframe.Model
-	useURDFs bool
+	name  resource.Name
+	conf  *GripperConfig
+	model resource.Model
+	mf    referenceframe.Model
+	// mesh is set when the model carries the shipped collision mesh rather than the boxes
+	mesh bool
 
 	arm arm.Arm
 
@@ -230,27 +232,14 @@ func (g *myVacuumGripper) Stop(context.Context, map[string]any) error {
 }
 
 func (g *myVacuumGripper) Geometries(ctx context.Context, _ map[string]any) ([]spatialmath.Geometry, error) {
-	if g.useURDFs {
+	if g.mesh {
+		// the model carries the suction tube, so what the gripper reports and what the frame
+		// system plans with are the same geometries
 		gif, err := g.mf.Geometries(make([]referenceframe.Input, len(g.mf.DoF())))
 		if err != nil {
 			return nil, err
 		}
-		geoms := gif.Geometries()
-
-		// The vacuum suction tube length is configurable per deployment; reflect
-		// it as an additional thin collision body extending past the model's TCP.
-		if g.conf.VacuumLengthMM > 0 {
-			tube, err := spatialmath.NewBox(
-				spatialmath.NewPoseFromPoint(r3.Vector{X: 0, Y: 0, Z: g.conf.VacuumLengthMM / 2}),
-				r3.Vector{X: 5, Y: 5, Z: g.conf.VacuumLengthMM},
-				"vacuum-gripper-tube")
-			if err != nil {
-				return nil, err
-			}
-			geoms = append(geoms, tube)
-		}
-
-		return geoms, nil
+		return gif.Geometries(), nil
 	}
 	return vacuumGripperGeometries(g.model, g.conf.VacuumLengthMM)
 }
@@ -262,7 +251,7 @@ var (
 )
 
 // vacuumGripperGeometries returns hand-authored housing + suction-tube
-// boxes for the vacuum gripper family. Used when use_urdfs is false.
+// boxes for the vacuum gripper family. Used unless collision_meshes is set.
 func vacuumGripperGeometries(model resource.Model, vacuumLengthMM float64) ([]spatialmath.Geometry, error) {
 	var caseSize r3.Vector
 	switch model {
